@@ -45,7 +45,7 @@ handle_marking_text = ""
 if handle_marking:
     handle_marking_text = st.text_input(
         "Handle Marking Text",
-        placeholder="e.g. Line 4 – 6 in – 304 SS",
+        placeholder="e.g. UPSTREAM BORE XXX BETA XXX",
         help="Enter the exact text to be marked on the handle"
     )
 
@@ -131,3 +131,4 @@ try:
 except Exception as e:
     st.warning("Fix the inputs to see pricing.")
     st.exception(e)
+
