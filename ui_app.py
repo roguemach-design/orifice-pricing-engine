@@ -111,6 +111,8 @@ ships_in_days = st.selectbox(
     options=ships_options,
     index=ships_options.index(21) if 21 in ships_options else 0
 )
+if bore_error or handle_error:
+    st.info("Fix the highlighted fields above to see pricing.")
 
 st.divider()
 st.subheader("Quote Summary")
@@ -153,4 +155,5 @@ result = calculate_quote(inputs)
 c1, c2 = st.columns(2)
 c1.metric("Unit Price", f"${result['unit_price']:,.2f}")
 c2.metric("Total Price", f"${result['total_price']:,.2f}")
+
 
