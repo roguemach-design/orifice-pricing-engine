@@ -6,14 +6,14 @@ import pricing_config as cfg
 st.set_page_config(page_title="Orifice Plate Instant Quote", layout="centered")
 st.title("Orifice Plate Instant Quote")
 
+with st.form("quote_form"):
+    # 1) Qty
+    quantity = st.number_input("Qty", min_value=1, value=1, step=1)
 
     # 2) Material Type
-    material = st.selectbox(
-        "Material Type",
-        options=list(cfg.PRICE_PER_SQ_IN.keys())
-    )
+    material = st.selectbox("Material Type", options=list(cfg.PRICE_PER_SQ_IN.keys()))
 
-    # 3) Plate Thickness
+    # 3) Plate thickness
     thickness = st.selectbox(
         "Plate Thickness (in)",
         options=sorted(cfg.PRICE_PER_SQ_IN[material].keys())
@@ -29,7 +29,7 @@ st.title("Orifice Plate Instant Quote")
 
     # 5) Handle Length (From Bore)
     handle_length = st.number_input(
-        "Handle Length from Bore Center (in)",
+        "Handle Length (From Bore) (in)",
         min_value=0.0,
         value=9.0,
         step=0.01
@@ -58,19 +58,16 @@ st.title("Orifice Plate Instant Quote")
         step=0.01
     )
 
-    # 9) Bore Tolerance
+    # 9) Bore tolerance
     bore_tolerance = st.selectbox(
         "Bore Tolerance (± in)",
         options=sorted(cfg.INSPECTION_MINS_BY_TOL.keys())
     )
 
     # 10) Chamfer
-    chamfer = st.checkbox(
-        "Chamfer",
-        value=True
-    )
+    chamfer = st.checkbox("Chamfer", value=True)
 
-    # 11) Chamfer Width (conditional display)
+    # 11) Chamfer width
     chamfer_width = 0.0
     if chamfer:
         chamfer_width = st.number_input(
@@ -80,7 +77,7 @@ st.title("Orifice Plate Instant Quote")
             step=0.01
         )
 
-    # 12) Ships In (days)
+    # 12) Ships in (days)
     ships_in_days = st.selectbox(
         "Ships in (days)",
         options=sorted(cfg.LEAD_TIME_MULTIPLIER.keys())
@@ -88,3 +85,29 @@ st.title("Orifice Plate Instant Quote")
 
     submitted = st.form_submit_button("Get Instant Quote")
 
+if submitted:
+    inputs = QuoteInputs(
+        quantity=int(quantity),
+        material=str(material),
+        thickness=float(thickness),
+        handle_width=float(handle_width),
+        handle_length_from_bore=float(handle_length),
+        paddle_dia=float(paddle_dia),
+        bore_dia=float(bore_dia),
+        bore_tolerance=float(bore_tolerance),
+        chamfer=bool(chamfer),
+        ships_in_days=int(ships_in_days),
+    )
+
+    result = calculate_quote(inputs)
+
+    st.success("Quote calculated")
+    st.metric("Unit Price", f"${result['unit_price']:,.2f}")
+    st.metric("Total Price", f"${result['total_price']:,.2f}")
+
+    with st.expander("Detailed Cost Breakdown"):
+        st.json(result)
+
+    # Keep captured fields visible for now (not yet priced)
+    with st.expander("Selections (not yet priced)"):
+        st.write({"handle_labeling": handle_labeling, "chamfer_width": chamfer_width})
