@@ -35,11 +35,19 @@ with st.form("quote_form"):
         step=0.01
     )
 
-    # 6) Handle Labeling
-    handle_labeling = st.checkbox(
-        "Handle Labeling",
-        value=False,
-        help="Include permanent handle marking or engraving"
+# 6) Handle Marking
+handle_labeling = st.checkbox(
+    "Handle Marking",
+    value=False,
+    help="Include permanent handle marking or engraving"
+)
+
+handle_marking_text = ""
+if handle_labeling:
+    handle_marking_text = st.text_input(
+        "Handle Marking Text",
+        placeholder="e.g. Line 4 – 6 in – 304 SS",
+        help="Enter the exact text to be marked on the handle"
     )
 
     # 7) Paddle Diameter
@@ -59,9 +67,13 @@ with st.form("quote_form"):
     )
 
     # 9) Bore tolerance
-    bore_tolerance = st.selectbox(
-        "Bore Tolerance (± in)",
-        options=sorted(cfg.INSPECTION_MINS_BY_TOL.keys())
+    tol_options = sorted(cfg.INSPECTION_MINS_BY_TOL.keys())
+bore_tolerance = st.selectbox(
+    "Bore Tolerance (± in)",
+    options=tol_options,
+    index=tol_options.index(0.005) if 0.005 in tol_options else 0
+)
+
     )
 
     # 10) Chamfer
@@ -78,9 +90,13 @@ with st.form("quote_form"):
         )
 
     # 12) Ships in (days)
-    ships_in_days = st.selectbox(
-        "Ships in (days)",
-        options=sorted(cfg.LEAD_TIME_MULTIPLIER.keys())
+    ships_options = sorted(cfg.LEAD_TIME_MULTIPLIER.keys())
+ships_in_days = st.selectbox(
+    "Ships in (days)",
+    options=ships_options,
+    index=ships_options.index(21) if 21 in ships_options else 0
+)
+
     )
 
     submitted = st.form_submit_button("Get Instant Quote")
@@ -111,3 +127,4 @@ if submitted:
     # Keep captured fields visible for now (not yet priced)
     with st.expander("Selections (not yet priced)"):
         st.write({"handle_labeling": handle_labeling, "chamfer_width": chamfer_width})
+
