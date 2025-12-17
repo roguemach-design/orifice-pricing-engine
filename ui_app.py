@@ -154,11 +154,3 @@ c1, c2 = st.columns(2)
 c1.metric("Unit Price", f"${result['unit_price']:,.2f}")
 c2.metric("Total Price", f"${result['total_price']:,.2f}")
 
-with st.expander("Selections"):
-    st.write({
-        "handle_marking": handle_marking,
-        "handle_marking_text": handle_marking_text,
-        "chamfer_width": chamfer_width
-    })
-
-st.caption("Prices shown are estimates for instant quoting. Final pricing may be confirmed on formal quote.")
