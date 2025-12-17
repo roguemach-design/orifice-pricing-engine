@@ -117,18 +117,10 @@ try:
     c1, c2 = st.columns(2)
     c1.metric("Unit Price", f"${result['unit_price']:,.2f}")
     c2.metric("Total Price", f"${result['total_price']:,.2f}")
-
-    with st.expander("Detailed Cost Breakdown"):
-        st.json(result)
-
-    with st.expander("Selections (not yet priced)"):
-        st.write({
-            "handle_marking": handle_marking,
-            "handle_marking_text": handle_marking_text,
-            "chamfer_width": chamfer_width
-        })
+     })
 
 except Exception as e:
     st.warning("Fix the inputs to see pricing.")
     st.exception(e)
+
 
