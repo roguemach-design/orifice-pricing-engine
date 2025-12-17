@@ -72,8 +72,6 @@ bore_tolerance = st.selectbox(
     "Bore Tolerance (± in)",
     options=tol_options,
     index=tol_options.index(0.005) if 0.005 in tol_options else 0
-)
-
     )
 
     # 10) Chamfer
@@ -127,4 +125,5 @@ if submitted:
     # Keep captured fields visible for now (not yet priced)
     with st.expander("Selections (not yet priced)"):
         st.write({"handle_labeling": handle_labeling, "chamfer_width": chamfer_width})
+
 
