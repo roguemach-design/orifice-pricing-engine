@@ -4,6 +4,22 @@ from pricing_engine import QuoteInputs, calculate_quote
 import pricing_config as cfg
 
 st.set_page_config(page_title="Orifice Plate Instant Quote", layout="centered")
+
+# Heading font/style
+st.markdown(
+    """
+    <style>
+    h1 {
+      font-family: Arial, sans-serif;
+      font-weight: 800;
+      letter-spacing: 0.2px;
+      margin-bottom: 0.25rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 st.title("Orifice Plate Instant Quote")
 
 # 1) Qty
@@ -49,10 +65,11 @@ if handle_marking:
         help="Enter the exact text to be marked on the handle"
     )
 
-# 7) Paddle Diameter
+# 7) Paddle Diameter (max 48")
 paddle_dia = st.number_input(
     "Paddle Diameter (in)",
     min_value=0.01,
+    max_value=48.0,
     value=3.0,
     step=0.01
 )
@@ -65,12 +82,13 @@ bore_dia = st.number_input(
     step=0.01
 )
 
-# 9) Bore tolerance (default 0.005)
+# 9) Bore tolerance (default 0.005, dropdown only)
 tol_options = sorted(cfg.INSPECTION_MINS_BY_TOL.keys())
 bore_tolerance = st.selectbox(
     "Bore Tolerance (± in)",
     options=tol_options,
-    index=tol_options.index(0.005) if 0.005 in tol_options else 0
+    index=tol_options.index(0.005) if 0.005 in tol_options else 0,
+    help="Tighter tolerances require additional inspection time."
 )
 
 # 10) Chamfer
@@ -94,33 +112,53 @@ ships_in_days = st.selectbox(
     index=ships_options.index(21) if 21 in ships_options else 0
 )
 
-# --- Live calculation (no button) ---
 st.divider()
 st.subheader("Quote Summary")
 
-try:
-    inputs = QuoteInputs(
-        quantity=int(quantity),
-        material=str(material),
-        thickness=float(thickness),
-        handle_width=float(handle_width),
-        handle_length_from_bore=float(handle_length),
-        paddle_dia=float(paddle_dia),
-        bore_dia=float(bore_dia),
-        bore_tolerance=float(bore_tolerance),
-        chamfer=bool(chamfer),
-        ships_in_days=int(ships_in_days),
-    )
+# --- Customer-friendly validation ---
+errors = []
 
-    result = calculate_quote(inputs)
+if bore_dia >= paddle_dia:
+    errors.append("Bore Diameter must be smaller than Paddle Diameter.")
 
-    c1, c2 = st.columns(2)
-    c1.metric("Unit Price", f"${result['unit_price']:,.2f}")
-    c2.metric("Total Price", f"${result['total_price']:,.2f}")
-     })
+paddle_radius = paddle_dia / 2
+if handle_length <= paddle_radius:
+    errors.append("Handle Length (From Bore) must be longer than the Paddle Radius.")
 
-except Exception as e:
-    st.warning("Fix the inputs to see pricing.")
-    st.exception(e)
+if paddle_dia > 48.0:
+    errors.append("Paddle Diameter cannot exceed 48 inches.")
 
+if errors:
+    for msg in errors:
+        st.error(msg)
+    st.info("Adjust the inputs above to see pricing.")
+    st.stop()
 
+# --- Live calculation ---
+inputs = QuoteInputs(
+    quantity=int(quantity),
+    material=str(material),
+    thickness=float(thickness),
+    handle_width=float(handle_width),
+    handle_length_from_bore=float(handle_length),
+    paddle_dia=float(paddle_dia),
+    bore_dia=float(bore_dia),
+    bore_tolerance=float(bore_tolerance),
+    chamfer=bool(chamfer),
+    ships_in_days=int(ships_in_days),
+)
+
+result = calculate_quote(inputs)
+
+c1, c2 = st.columns(2)
+c1.metric("Unit Price", f"${result['unit_price']:,.2f}")
+c2.metric("Total Price", f"${result['total_price']:,.2f}")
+
+with st.expander("Selections"):
+    st.write({
+        "handle_marking": handle_marking,
+        "handle_marking_text": handle_marking_text,
+        "chamfer_width": chamfer_width
+    })
+
+st.caption("Prices shown are estimates for instant quoting. Final pricing may be confirmed on formal quote.")
