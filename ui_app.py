@@ -1,12 +1,11 @@
-with st.form("quote_form"):
+import streamlit as st
 
-    # 1) Quantity
-    quantity = st.number_input(
-        "Quantity",
-        min_value=1,
-        value=1,
-        step=1
-    )
+from pricing_engine import QuoteInputs, calculate_quote
+import pricing_config as cfg
+
+st.set_page_config(page_title="Orifice Plate Instant Quote", layout="centered")
+st.title("Orifice Plate Instant Quote")
+
 
     # 2) Material Type
     material = st.selectbox(
@@ -88,3 +87,4 @@ with st.form("quote_form"):
     )
 
     submitted = st.form_submit_button("Get Instant Quote")
+
