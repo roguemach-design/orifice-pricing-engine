@@ -9,4 +9,7 @@ except Exception as e:
     st.error("Import failed:")
     st.exception(e)
     st.stop()
+st.title("Orifice Plate Instant Quote")
+st.write("If you can see this title, the UI is rendering.")
+
 
