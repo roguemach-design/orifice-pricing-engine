@@ -10,7 +10,7 @@ st.markdown(
     """
     <style>
     h1 {
-      font-family: Arial, sans-serif;
+      font-family: Spy Agency;
       font-weight: 800;
       letter-spacing: 0.2px;
       margin-bottom: 0.25rem;
@@ -163,6 +163,7 @@ result = calculate_quote(inputs)
 c1, c2 = st.columns(2)
 c1.metric("Unit Price", f"${result['unit_price']:,.2f}")
 c2.metric("Total Price", f"${result['total_price']:,.2f}")
+
 
 
 
