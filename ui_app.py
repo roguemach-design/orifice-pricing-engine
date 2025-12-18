@@ -111,8 +111,16 @@ ships_in_days = st.selectbox(
     options=ships_options,
     index=ships_options.index(21) if 21 in ships_options else 0
 )
-if bore_error or handle_error:
-    st.info("Fix the highlighted fields above to see pricing.")
+# --- Validation flags ---
+bore_error = bore_dia >= paddle_dia
+handle_error = handle_length <= (paddle_dia / 2)
+
+# Inline-style errors (appear right after inputs)
+if bore_error:
+    st.error("Bore Diameter must be smaller than Paddle Diameter.")
+
+if handle_error:
+    st.error("Handle Length (From Bore) must be longer than the Paddle Radius.")
 
 st.divider()
 st.subheader("Quote Summary")
@@ -155,5 +163,6 @@ result = calculate_quote(inputs)
 c1, c2 = st.columns(2)
 c1.metric("Unit Price", f"${result['unit_price']:,.2f}")
 c2.metric("Total Price", f"${result['total_price']:,.2f}")
+
 
 
