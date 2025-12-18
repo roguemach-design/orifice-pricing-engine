@@ -8,6 +8,15 @@ PRICE_PER_SQ_IN = {
     "Hastelloy": {0.125: 3.580, 0.25: 7.540, 0.375: 14.020},
 }
 
+DENSITY_LB_PER_IN3 = {
+    "304": 0.289,
+    "316": 0.289,
+    "Carbon Steel": 0.283,
+    "Monel": 0.319,
+    "Hastelloy": 0.322,
+}
+
+
 LASER_PER_LINEAR_IN = 0.826
 
 MILL_LABOR_PER_HR = 150
@@ -29,3 +38,4 @@ QTY_DISCOUNT_TIERS = [
     {"min_qty": 25,  "multiplier": 0.92},  # 8% off
     {"min_qty": 50,  "multiplier": 0.90},  # 10% off
 ]
+
