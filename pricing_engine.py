@@ -1,6 +1,7 @@
 # pricing_engine.py
 from dataclasses import dataclass
 from typing import Dict, Any
+import math
 
 import pricing_config as cfg
 
@@ -37,8 +38,42 @@ def _qty_multiplier(qty: int) -> float:
     return multiplier
 
 
+def _ups_rule_shipping_cents(
+    weight_lb: float,
+    length_in: float,
+    width_in: float,
+    height_in: float,
+) -> Dict[str, int]:
+    """
+    Rule-based UPS-style shipping estimator.
+    Uses your existing package + weight outputs.
+    Tunable constants below.
+    """
+
+    # UPS-style dimensional weight (inches / lb)
+    DIM_DIVISOR = 139.0
+    dim_weight = (length_in * width_in * height_in) / DIM_DIVISOR
+
+    # Billable weight: round up to next whole lb
+    billable_weight = math.ceil(max(weight_lb, dim_weight, 1.0))
+
+    # Base pricing model (tune these freely)
+    ground_base = 12.00
+    ground_per_lb = 0.95
+
+    ground = ground_base + (ground_per_lb * billable_weight)
+    two_day = ground * 1.85
+    next_day = ground * 2.85
+
+    return {
+        "ups_ground_cents": int(round(ground * 100)),
+        "ups_2day_cents": int(round(two_day * 100)),
+        "ups_nextday_cents": int(round(next_day * 100)),
+    }
+
+
 def calculate_quote(x: QuoteInputs) -> Dict[str, Any]:
-    # ---- Basic validation ----
+    # ---- Validation ----
     _require(x.quantity >= 1, "quantity must be >= 1")
     _require(x.material in cfg.PRICE_PER_SQ_IN, f"unknown material: {x.material}")
     _require(
@@ -54,18 +89,17 @@ def calculate_quote(x: QuoteInputs) -> Dict[str, Any]:
         f"unsupported ships_in_days: {x.ships_in_days}",
     )
 
-    # ---- Geometry (matches your Excel logic) ----
+    # ---- Geometry ----
     paddle_radius = x.paddle_dia / 2
     area_sq_in = x.paddle_dia * (x.handle_length_from_bore + paddle_radius)
 
-    # Linear inches (Excel used 3.14)
     linear_inches = (
         x.handle_width
         + (x.handle_length_from_bore * 2)
         + (paddle_radius * 3.14)
     )
 
-    # ---- Costs (pre-multiplier) ----
+    # ---- Costs ----
     material_cost = area_sq_in * cfg.PRICE_PER_SQ_IN[x.material][x.thickness]
     laser_cost = linear_inches * cfg.LASER_PER_LINEAR_IN
 
@@ -99,27 +133,30 @@ def calculate_quote(x: QuoteInputs) -> Dict[str, Any]:
     total_price = unit_price_discounted * x.quantity
 
     # =========================
-    # Shipping estimates
+    # Shipping (your rules)
     # =========================
-
-    # Product footprint
     product_len_in = x.handle_length_from_bore + paddle_radius
     product_w_in = x.paddle_dia
 
-    # Packaging rules (+4" L/W)
     pkg_len_in = product_len_in + 4.0
     pkg_w_in = product_w_in + 4.0
-
-    # Height rule:
-    # 1" base for qty=1, then + thickness for each additional piece
     pkg_h_in = 1.0 + (max(x.quantity - 1, 0) * x.thickness)
 
-    # Weight
     density = cfg.DENSITY_LB_PER_IN3[x.material]
     unit_weight_lb = area_sq_in * x.thickness * density
     total_weight_lb = unit_weight_lb * x.quantity
 
-    breakdown = {
+    shipping_rates = _ups_rule_shipping_cents(
+        weight_lb=total_weight_lb,
+        length_in=pkg_len_in,
+        width_in=pkg_w_in,
+        height_in=pkg_h_in,
+    )
+
+    # =========================
+    # Final result
+    # =========================
+    return {
         "area_sq_in": round(area_sq_in, 4),
         "linear_inches": round(linear_inches, 4),
         "material_cost": round(material_cost, 2),
@@ -136,7 +173,7 @@ def calculate_quote(x: QuoteInputs) -> Dict[str, Any]:
         "quantity": x.quantity,
         "total_price": round(total_price, 2),
 
-        # --- Shipping outputs (Shopify-ready) ---
+        # --- Shipping outputs ---
         "estimated_unit_weight_lb": round(unit_weight_lb, 2),
         "estimated_total_weight_lb": round(total_weight_lb, 2),
         "estimated_package_in": {
@@ -144,27 +181,6 @@ def calculate_quote(x: QuoteInputs) -> Dict[str, Any]:
             "width": round(pkg_w_in, 2),
             "height": round(pkg_h_in, 2),
         },
+        "shipping": shipping_rates,
     }
 
-    return breakdown
-
-
-if __name__ == "__main__":
-    inputs = QuoteInputs(
-        quantity=1,
-        material="304",
-        thickness=0.25,
-        handle_width=2,
-        handle_length_from_bore=18,
-        paddle_dia=6,
-        bore_dia=2,
-        bore_tolerance=0.005,
-        chamfer=True,
-        ships_in_days=21,
-    )
-
-    result = calculate_quote(inputs)
-    print("UNIT:", result["unit_price"])
-    print("TOTAL:", result["total_price"])
-    print("WEIGHT:", result["estimated_total_weight_lb"])
-    print("PKG:", result["estimated_package_in"])
