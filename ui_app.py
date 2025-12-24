@@ -123,7 +123,7 @@ c1, c2 = st.columns(2)
 c1.metric("Unit Price", f"${result['unit_price']:,.2f}")
 c2.metric("Total Price", f"${result['total_price']:,.2f}")
 
-# ✅ Checkout button (should now show reliably)
+# ✅ Checkout button
 if st.button("Place Order & Pay"):
     payload = {
         "inputs": {
@@ -140,25 +140,24 @@ if st.button("Place Order & Pay"):
         }
     }
 
-try:
-    r = requests.post(f"{API_BASE}/checkout/create", json=payload, timeout=30)
+    try:
+        r = requests.post(f"{API_BASE}/checkout/create", json=payload, timeout=30)
 
-    if r.status_code != 200:
-        st.error(f"Checkout API error: {r.status_code}")
-        st.code(r.text)
-        st.stop()
+        if r.status_code != 200:
+            st.error(f"Checkout API error: {r.status_code}")
+            st.code(r.text)
+            st.stop()
 
-    checkout_url = r.json()["checkout_url"]
+        checkout_url = r.json()["checkout_url"]
 
-    st.markdown(
-        f"<meta http-equiv='refresh' content='0; url={checkout_url}'>",
-        unsafe_allow_html=True
-    )
-    st.write("Redirecting to secure checkout…")
+        st.markdown(
+            f"<meta http-equiv='refresh' content='0; url={checkout_url}'>",
+            unsafe_allow_html=True
+        )
+        st.write("Redirecting to secure checkout…")
 
-except Exception as e:
-    st.error(f"Checkout failed: {e}")
-
+    except Exception as e:
+        st.error(f"Checkout failed: {e}")
 
 # Shipping estimates
 area_sq_in = float(result.get("area_sq_in", _estimate_area_sq_in(paddle_dia, handle_length)))
@@ -175,5 +174,6 @@ st.caption("Shipping estimates")
 s1, s2 = st.columns(2)
 s1.metric("Estimated Total Weight", f"{float(weight_lb):.2f} lb")
 s2.metric("Estimated Package Size", f"{pkg['length']} x {pkg['width']} x {pkg['height']} in")
+
 
 
