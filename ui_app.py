@@ -142,8 +142,13 @@ if st.button("Place Order & Pay"):
 
     try:
         r = requests.post(f"{API_BASE}/checkout/create", json=payload, timeout=30)
-        r.raise_for_status()
-        checkout_url = r.json()["checkout_url"]
+        if r.status_code != 200:
+    st.error(f"Checkout API error: {r.status_code}")
+    st.code(r.text)
+    st.stop()
+
+checkout_url = r.json()["checkout_url"]
+
 
         st.markdown(
             f"<meta http-equiv='refresh' content='0; url={checkout_url}'>",
@@ -170,3 +175,4 @@ st.caption("Shipping estimates")
 s1, s2 = st.columns(2)
 s1.metric("Estimated Total Weight", f"{float(weight_lb):.2f} lb")
 s2.metric("Estimated Package Size", f"{pkg['length']} x {pkg['width']} x {pkg['height']} in")
+
