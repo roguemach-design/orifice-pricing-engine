@@ -140,25 +140,25 @@ if st.button("Place Order & Pay"):
         }
     }
 
-    try:
-        r = requests.post(f"{API_BASE}/checkout/create", json=payload, timeout=30)
-        if r.status_code != 200:
-    st.error(f"Checkout API error: {r.status_code}")
-    st.code(r.text)
-    st.stop()
+try:
+    r = requests.post(f"{API_BASE}/checkout/create", json=payload, timeout=30)
 
-checkout_url = r.json()["checkout_url"]
+    if r.status_code != 200:
+        st.error(f"Checkout API error: {r.status_code}")
+        st.code(r.text)
+        st.stop()
 
+    checkout_url = r.json()["checkout_url"]
 
-        st.markdown(
-            f"<meta http-equiv='refresh' content='0; url={checkout_url}'>",
-            unsafe_allow_html=True
-        )
-        st.write("Redirecting to secure checkout…")
-    except Exception as e:
-        st.error(f"Checkout failed: {e}")
-        if "r" in locals():
-            st.code(r.text)
+    st.markdown(
+        f"<meta http-equiv='refresh' content='0; url={checkout_url}'>",
+        unsafe_allow_html=True
+    )
+    st.write("Redirecting to secure checkout…")
+
+except Exception as e:
+    st.error(f"Checkout failed: {e}")
+
 
 # Shipping estimates
 area_sq_in = float(result.get("area_sq_in", _estimate_area_sq_in(paddle_dia, handle_length)))
@@ -175,4 +175,5 @@ st.caption("Shipping estimates")
 s1, s2 = st.columns(2)
 s1.metric("Estimated Total Weight", f"{float(weight_lb):.2f} lb")
 s2.metric("Estimated Package Size", f"{pkg['length']} x {pkg['width']} x {pkg['height']} in")
+
 
