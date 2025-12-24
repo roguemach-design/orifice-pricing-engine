@@ -166,6 +166,39 @@ c1, c2 = st.columns(2)
 c1.metric("Unit Price", f"${result['unit_price']:,.2f}")
 c2.metric("Total Price", f"${result['total_price']:,.2f}")
 
+import requests
+import streamlit as st
+
+API_BASE = "https://orifice-pricing-api.onrender.com"
+
+if st.button("Place Order & Pay"):
+    payload = {
+        "inputs": {
+            "quantity": int(quantity),
+            "material": str(material),
+            "thickness": float(thickness),
+            "handle_width": float(handle_width),
+            "handle_length_from_bore": float(handle_length),
+            "paddle_dia": float(paddle_dia),
+            "bore_dia": float(bore_dia),
+            "bore_tolerance": float(bore_tolerance),
+            "chamfer": bool(chamfer),
+            "ships_in_days": int(ships_in_days),
+        }
+    }
+
+    r = requests.post(f"{API_BASE}/checkout/create", json=payload, timeout=30)
+    r.raise_for_status()
+    checkout_url = r.json()["checkout_url"]
+
+    # Redirect to Stripe Checkout
+    st.markdown(
+        f"<meta http-equiv='refresh' content='0; url={checkout_url}'>",
+        unsafe_allow_html=True
+    )
+    st.write("Redirecting to secure checkout…")
+
+
 # --- Weight + package (use engine outputs if present; else compute here) ---
 area_sq_in = float(result.get("area_sq_in", _estimate_area_sq_in(paddle_dia, handle_length)))
 
@@ -181,3 +214,4 @@ st.caption("Shipping estimates")
 s1, s2 = st.columns(2)
 s1.metric("Estimated Total Weight", f"{float(weight_lb):.2f} lb")
 s2.metric("Estimated Package Size", f"{pkg['length']} x {pkg['width']} x {pkg['height']} in")
+
