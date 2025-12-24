@@ -1,44 +1,29 @@
 import streamlit as st
+import requests
 
 from pricing_engine import QuoteInputs, calculate_quote
 import pricing_config as cfg
 
 
 def _estimate_area_sq_in(paddle_dia: float, handle_length_from_bore: float) -> float:
-    # same as pricing_engine: paddle_dia * (handle_length_from_bore + paddle_radius)
     return paddle_dia * (handle_length_from_bore + (paddle_dia / 2.0))
 
 
 def _estimate_package_in(paddle_dia: float, handle_length_from_bore: float, thickness: float, qty: int) -> dict:
-    # Product envelope
     paddle_radius = paddle_dia / 2.0
     product_length = handle_length_from_bore + paddle_radius
     product_width = paddle_dia
 
-    # Packaging rule from our chat
     length = product_length + 4.0
     width = product_width + 4.0
+    height = 1.0 + (thickness if qty <= 1 else thickness * qty)
 
-    if qty <= 1:
-        height = 1.0 + thickness
-    else:
-        height = 1.0 + (thickness * qty)
-
-    # nice rounded display
-    return {
-        "length": round(length, 2),
-        "width": round(width, 2),
-        "height": round(height, 2),
-    }
+    return {"length": round(length, 2), "width": round(width, 2), "height": round(height, 2)}
 
 
 def _density_lb_per_in3(material: str) -> float:
-    """
-    Add/adjust densities here if they differ from your cfg.
-    If you already have densities in pricing_config, replace this with cfg lookup.
-    """
     densities = {
-        "304": 0.289,          # stainless ~0.289 lb/in^3
+        "304": 0.289,
         "316": 0.289,
         "Carbon Steel": 0.283,
         "Monel": 0.319,
@@ -52,6 +37,8 @@ def _estimate_total_weight_lb(material: str, area_sq_in: float, thickness: float
     wt_each = vol_in3_each * _density_lb_per_in3(material)
     return round(wt_each * qty, 2)
 
+
+API_BASE = "https://orifice-pricing-api.onrender.com"
 
 st.set_page_config(page_title="Orifice Plate Instant Quote", layout="centered")
 
@@ -71,41 +58,20 @@ st.markdown(
 
 st.title("Orifice Plate Instant Quote")
 
-# 1) Qty
 quantity = st.number_input("Qty", min_value=1, value=1, step=1)
-
-# 2) Material Type
 material = st.selectbox("Material Type", options=list(cfg.PRICE_PER_SQ_IN.keys()))
-
-# 3) Plate thickness
-thickness = st.selectbox(
-    "Plate Thickness (in)",
-    options=sorted(cfg.PRICE_PER_SQ_IN[material].keys())
-)
-
-# 4) Handle Width
+thickness = st.selectbox("Plate Thickness (in)", options=sorted(cfg.PRICE_PER_SQ_IN[material].keys()))
 handle_width = st.number_input("Handle Width (in)", min_value=0.0, value=1.5, step=0.01)
-
-# 5) Handle Length (From Bore)
 handle_length = st.number_input("Handle Length from Bore (in)", min_value=0.0, value=9.0, step=0.01)
 
-# 6) Handle Marking
 handle_marking = st.checkbox("Handle Marking", value=False, help="Include permanent handle marking or engraving")
 handle_marking_text = ""
 if handle_marking:
-    handle_marking_text = st.text_input(
-        "Handle Marking Text",
-        placeholder="e.g. UPSTREAM BORE XXX BETA XXX",
-        help="Enter the exact text to be marked on the handle"
-    )
+    handle_marking_text = st.text_input("Handle Marking Text", placeholder="e.g. UPSTREAM BORE XXX BETA XXX")
 
-# 7) Paddle Diameter (max 48")
 paddle_dia = st.number_input("Paddle Diameter (in)", min_value=0.01, max_value=48.0, value=3.0, step=0.01)
-
-# 8) Bore Diameter
 bore_dia = st.number_input("Bore Diameter (in)", min_value=0.01, value=1.0, step=0.01)
 
-# 9) Bore tolerance
 tol_options = sorted(cfg.INSPECTION_MINS_BY_TOL.keys())
 bore_tolerance = st.selectbox(
     "Bore Tolerance (± in)",
@@ -113,26 +79,18 @@ bore_tolerance = st.selectbox(
     index=tol_options.index(0.005) if 0.005 in tol_options else 0
 )
 
-# 10) Chamfer
 chamfer = st.checkbox("Chamfer", value=True)
-
-# 11) Chamfer width
 chamfer_width = 0.0
 if chamfer:
     chamfer_width = st.number_input("Chamfer Width (in)", min_value=0.0, value=0.06, step=0.01)
 
-# 12) Ships in (days)
 ships_options = sorted(cfg.LEAD_TIME_MULTIPLIER.keys())
-ships_in_days = st.selectbox(
-    "Ships in (days)",
-    options=ships_options,
-    index=ships_options.index(21) if 21 in ships_options else 0
-)
+ships_in_days = st.selectbox("Ships in (days)", options=ships_options,
+                             index=ships_options.index(21) if 21 in ships_options else 0)
 
 st.divider()
 st.subheader("Quote Summary")
 
-# --- Validation ---
 errors = []
 if bore_dia >= paddle_dia:
     errors.append("Bore Diameter must be smaller than Paddle Diameter.")
@@ -146,7 +104,6 @@ if errors:
     st.info("Fix the highlighted fields above to see pricing.")
     st.stop()
 
-# --- Calculation ---
 inputs = QuoteInputs(
     quantity=int(quantity),
     material=str(material),
@@ -166,11 +123,7 @@ c1, c2 = st.columns(2)
 c1.metric("Unit Price", f"${result['unit_price']:,.2f}")
 c2.metric("Total Price", f"${result['total_price']:,.2f}")
 
-import requests
-import streamlit as st
-
-API_BASE = "https://orifice-pricing-api.onrender.com"
-
+# ✅ Checkout button (should now show reliably)
 if st.button("Place Order & Pay"):
     payload = {
         "inputs": {
@@ -187,19 +140,22 @@ if st.button("Place Order & Pay"):
         }
     }
 
-    r = requests.post(f"{API_BASE}/checkout/create", json=payload, timeout=30)
-    r.raise_for_status()
-    checkout_url = r.json()["checkout_url"]
+    try:
+        r = requests.post(f"{API_BASE}/checkout/create", json=payload, timeout=30)
+        r.raise_for_status()
+        checkout_url = r.json()["checkout_url"]
 
-    # Redirect to Stripe Checkout
-    st.markdown(
-        f"<meta http-equiv='refresh' content='0; url={checkout_url}'>",
-        unsafe_allow_html=True
-    )
-    st.write("Redirecting to secure checkout…")
+        st.markdown(
+            f"<meta http-equiv='refresh' content='0; url={checkout_url}'>",
+            unsafe_allow_html=True
+        )
+        st.write("Redirecting to secure checkout…")
+    except Exception as e:
+        st.error(f"Checkout failed: {e}")
+        if "r" in locals():
+            st.code(r.text)
 
-
-# --- Weight + package (use engine outputs if present; else compute here) ---
+# Shipping estimates
 area_sq_in = float(result.get("area_sq_in", _estimate_area_sq_in(paddle_dia, handle_length)))
 
 weight_lb = result.get("estimated_total_weight_lb")
@@ -214,4 +170,3 @@ st.caption("Shipping estimates")
 s1, s2 = st.columns(2)
 s1.metric("Estimated Total Weight", f"{float(weight_lb):.2f} lb")
 s2.metric("Estimated Package Size", f"{pkg['length']} x {pkg['width']} x {pkg['height']} in")
-
