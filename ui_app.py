@@ -58,6 +58,46 @@ st.markdown(
 
 st.title("Orifice Plate Instant Quote")
 
+from urllib.parse import parse_qs
+import requests
+import streamlit as st
+
+API_BASE = "https://orifice-pricing-api.onrender.com"
+
+def _get_path_and_query():
+    # Streamlit gives a full URL in query params; easiest is using built-ins:
+    qp = st.query_params
+    # Path is not always directly exposed depending on Streamlit hosting.
+    # We'll treat "success" as presence of session_id param.
+    return qp
+
+qp = _get_path_and_query()
+
+# --- SUCCESS PAGE ---
+if "session_id" in qp:
+    session_id = qp["session_id"]
+    st.title("Payment received ✅")
+    st.write("Thanks — we received your payment. We’re preparing your order now.")
+
+    # Fetch stored order details from API (we'll add this endpoint below)
+    try:
+        r = requests.get(f"{API_BASE}/orders/by-session/{session_id}", timeout=30)
+        if r.status_code == 200:
+            order = r.json()
+            st.subheader("Order summary")
+            st.write(f"Order ID: **{order['id']}**")
+            st.write(f"Email: **{order['customer_email']}**")
+            st.write(f"Total paid: **${order['amount_total_usd']:.2f}**")
+            st.write(f"Shipping: **{order['shipping_service']}**")
+            st.write("We’ll email your confirmation and approval drawing next.")
+        else:
+            st.info("Payment confirmed. Finalizing your order details… (refresh in a moment)")
+    except Exception:
+        st.info("Payment confirmed. Finalizing your order details… (refresh in a moment)")
+
+    st.stop()
+
+
 # -----------------------------
 # Inputs
 # -----------------------------
@@ -177,3 +217,4 @@ st.caption("Shipping estimates")
 s1, s2 = st.columns(2)
 s1.metric("Estimated Total Weight", f"{weight_lb:.2f} lb")
 s2.metric("Estimated Package Size", f"{pkg['length']} x {pkg['width']} x {pkg['height']} in")
+
