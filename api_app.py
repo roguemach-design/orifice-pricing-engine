@@ -105,7 +105,6 @@ def _require_api_key(x_api_key: Optional[str]) -> None:
             raise HTTPException(status_code=401, detail="Unauthorized")
 
 
-
 def _send_email(to_email: str, subject: str, html: str) -> None:
     # Allow running without email configured
     if not SENDGRID_API_KEY:
@@ -221,8 +220,8 @@ def checkout_create(req: CheckoutCreateRequest, x_api_key: Optional[str] = Heade
                 "shipping_rate_data": {
                     "type": "fixed_amount",
                     "fixed_amount": {"amount": int(shipping["ups_nextday_cents"]), "currency": "usd"},
-                    "display_name": "UPS Next Day Air",
-                    "metadata": {"service": "ups_nextday"},
+                    "display_name": "UPS 2nd Day Air",
+                    "metadata": {"service": "ups_2day"},
                 }
             },
         ],
@@ -271,6 +270,35 @@ def get_order_by_session(session_id: str):
             "amount_shipping_usd": (o.amount_shipping_cents or 0) / 100.0,
             "shipping_service": o.shipping_service,
             "created_at": o.created_at.isoformat() if o.created_at else None,
+        }
+    finally:
+        db.close()
+
+
+# ----------------------------
+# Debug endpoint (inserted here)
+# ----------------------------
+@app.get("/debug/order/{order_id}")
+def debug_order(order_id: str):
+    _db_required()
+    db = SessionLocal()
+    try:
+        o = db.query(Order).filter(Order.id == order_id).first()
+        if not o:
+            return {"error": "not found"}
+
+        return {
+            "id": o.id,
+            "created_at": o.created_at,
+            "customer_email": o.customer_email,
+            "amount_total_cents": o.amount_total_cents,
+            "amount_shipping_cents": o.amount_shipping_cents,
+            "shipping_service": o.shipping_service,
+            "shipping_name": o.shipping_name,
+            "shipping_address": o.shipping_address,
+            "quote_payload": o.quote_payload,
+            "stripe_session_id": o.stripe_session_id,
+            "stripe_payment_intent": o.stripe_payment_intent,
         }
     finally:
         db.close()
