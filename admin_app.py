@@ -114,6 +114,18 @@ if refresh or True:
 
             data = r.json()
 
+                # Support either:
+                # 1) API returns {"orders": [...]} (dict)
+                # 2) API returns [...] (list)
+            if isinstance(data, dict):
+                orders = data.get("orders", [])
+            elif isinstance(data, list):
+                orders = data
+                else:
+                st.error(f"Unexpected API response type: {type(data)}")
+                st.stop()
+
+
         except Exception as e:
             st.error(f"Failed to load orders: {e}")
             st.stop()
@@ -146,4 +158,3 @@ st.subheader(f"Orders ({len(rows)})")
 st.dataframe(rows, use_container_width=True, hide_index=True)
 
 st.caption("Tip: If you see 404 above, your API endpoint name probably differs. Tell me what route you created and I’ll align this file.")
-
