@@ -4,8 +4,7 @@ from datetime import datetime
 
 import requests
 import streamlit as st
-st.write("✅ ADMIN APP LOADED — build marker: v1-debug")
-st.stop()
+st.write("✅ ADMIN APP LOADED — build marker: v2-orders-debug")
 
 
 st.set_page_config(page_title="O-Plates Admin", layout="wide")
