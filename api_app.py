@@ -1,7 +1,7 @@
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Optional, Any, Dict
+from typing import Optional
 
 import stripe
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from pricing_engine import QuoteInputs, calculate_quote
 
 # DB (Postgres via Render)
-from sqlalchemy import create_engine, Column, String, Integer, DateTime, JSON
+from sqlalchemy import create_engine, Column, String, Integer, DateTime, JSON, or_
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 # Email (SendGrid)
@@ -92,6 +92,7 @@ init_db()
 # Helpers
 # ----------------------------
 def _require_api_key(x_api_key: Optional[str]) -> None:
+    # If API_KEY is blank, auth is effectively off.
     if API_KEY:
         if not x_api_key or x_api_key != API_KEY:
             raise HTTPException(status_code=401, detail="Unauthorized")
@@ -232,7 +233,6 @@ def checkout_create(req: CheckoutCreateRequest, x_api_key: Optional[str] = Heade
                     id=str(uuid.uuid4()),
                     stripe_session_id=session.id,
                     quote_payload=req.inputs.model_dump(),
-                    # amounts will be updated from webhook after payment
                 )
                 db.add(o)
                 db.commit()
@@ -268,6 +268,91 @@ def get_order_by_session(session_id: str):
         db.close()
 
 
+# ----------------------------
+# Admin endpoints (Option 2)
+# ----------------------------
+@app.get("/admin/orders")
+def admin_list_orders(
+    q: Optional[str] = None,
+    limit: int = 50,
+    x_api_key: Optional[str] = Header(default=None),
+):
+    """
+    Admin list endpoint.
+    - Protected by API_KEY (x-api-key header).
+    - Optional q: search by order id, email, or Stripe session id.
+    - Optional limit: 1..200 (default 50)
+    """
+    _require_api_key(x_api_key)
+    _db_required()
+
+    limit = max(1, min(int(limit), 200))
+
+    db = SessionLocal()
+    try:
+        query = db.query(Order).order_by(Order.created_at.desc())
+
+        if q and q.strip():
+            qq = q.strip()
+            query = query.filter(
+                or_(
+                    Order.id.ilike(f"%{qq}%"),
+                    Order.customer_email.ilike(f"%{qq}%"),
+                    Order.stripe_session_id.ilike(f"%{qq}%"),
+                )
+            )
+
+        orders = query.limit(limit).all()
+
+        return [
+            {
+                "id": o.id,
+                "created_at": o.created_at.isoformat() if o.created_at else None,
+                "customer_email": o.customer_email,
+                "amount_total_usd": (o.amount_total_cents or 0) / 100.0,
+                "amount_shipping_usd": (o.amount_shipping_cents or 0) / 100.0,
+                "shipping_service": o.shipping_service,
+                "stripe_session_id": o.stripe_session_id,
+            }
+            for o in orders
+        ]
+    finally:
+        db.close()
+
+
+@app.get("/admin/orders/{order_id}")
+def admin_get_order(order_id: str, x_api_key: Optional[str] = Header(default=None)):
+    """
+    Admin detail endpoint.
+    - Protected by API_KEY (x-api-key header).
+    """
+    _require_api_key(x_api_key)
+    _db_required()
+
+    db = SessionLocal()
+    try:
+        o = db.query(Order).filter(Order.id == order_id).first()
+        if not o:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        return {
+            "id": o.id,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+            "stripe_session_id": o.stripe_session_id,
+            "stripe_payment_intent": o.stripe_payment_intent,
+            "customer_email": o.customer_email,
+            "amount_subtotal_usd": (o.amount_subtotal_cents or 0) / 100.0,
+            "amount_shipping_usd": (o.amount_shipping_cents or 0) / 100.0,
+            "amount_total_usd": (o.amount_total_cents or 0) / 100.0,
+            "shipping_service": o.shipping_service,
+            "shipping_name": o.shipping_name,
+            "shipping_address": o.shipping_address,
+            "quote_payload": o.quote_payload,
+        }
+    finally:
+        db.close()
+
+
 @app.post("/stripe/webhook")
 async def stripe_webhook(request: Request):
     """
@@ -293,17 +378,15 @@ async def stripe_webhook(request: Request):
         payment_intent = session.get("payment_intent")
 
         customer_email = (session.get("customer_details") or {}).get("email")
-        amount_total = session.get("amount_total")          # cents
-        amount_subtotal = session.get("amount_subtotal")    # cents
+        amount_total = session.get("amount_total")  # cents
+        amount_subtotal = session.get("amount_subtotal")  # cents
         amount_shipping = ((session.get("shipping_cost") or {}).get("amount_total"))  # cents
 
         shipping_details = session.get("shipping_details") or {}
         shipping_name = shipping_details.get("name")
         shipping_address = shipping_details.get("address")
 
-        # Note: identifying which shipping option was chosen is easiest if you
-        # store it server-side or retrieve the shipping_rate object. For v1, we
-        # leave it blank unless you want to add retrieval.
+        # Still blank for now (we can fill this in next by retrieving selected shipping_rate)
         shipping_service = None
 
         print("✅ PAYMENT CONFIRMED:", stripe_session_id)
@@ -314,7 +397,6 @@ async def stripe_webhook(request: Request):
             try:
                 o = db.query(Order).filter(Order.stripe_session_id == stripe_session_id).first()
                 if not o:
-                    # If not created earlier, create it now
                     o = Order(
                         id=str(uuid.uuid4()),
                         stripe_session_id=stripe_session_id,
