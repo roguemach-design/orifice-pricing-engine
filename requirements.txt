@@ -6,3 +6,5 @@ stripe
 sqlalchemy
 psycopg2-binary
 sendgrid
+requests
+pandas
