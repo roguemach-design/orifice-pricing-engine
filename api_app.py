@@ -41,6 +41,8 @@ app.add_middleware(
 # Optional API key protection (for your own endpoints, not Stripe webhooks)
 API_KEY = os.environ.get("API_KEY", "")
 
+print("DEBUG API_KEY loaded length =", len(API_KEY))
+
 # Stripe config (set in Render -> orifice-pricing-api -> Environment)
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
