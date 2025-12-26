@@ -119,6 +119,12 @@ if refresh or True:
                 st.error("API did not return JSON.")
                 st.code(r.text)
                 st.stop()
+                
+            # --- TEMP DEBUG: show what the API returns ---
+                st.subheader("DEBUG: First order JSON")
+                st.json(orders[0] if orders else {})
+                st.stop()
+
 
             # Support either:
             # 1) API returns {"orders": [...]} (dict)
