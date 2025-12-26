@@ -2,10 +2,13 @@
 import os
 from datetime import datetime
 
+import pandas as pd
 import requests
 import streamlit as st
 
+# IMPORTANT: set_page_config must be the first Streamlit call
 st.set_page_config(page_title="O-Plates Admin", layout="wide")
+
 st.write("✅ ADMIN APP LOADED — build marker: v2-orders-debug")
 
 st.title("O-Plates Admin Dashboard")
@@ -45,28 +48,35 @@ with st.sidebar:
 # ----------------------------
 # Helpers
 # ----------------------------
-def _fmt_usd(cents: int | None) -> str:
-    if cents is None:
-        return ""
-    return f"${(cents / 100.0):,.2f}"
+def api_get(path: str, *, params: dict | None = None) -> requests.Response:
+    headers: dict[str, str] = {}
+    if admin_key:
+        headers["x-api-key"] = admin_key
+    return requests.get(f"{API_BASE}{path}", headers=headers, params=params, timeout=30)
 
 
-def _fmt_dt(x) -> str:
+def _short(x: str, n: int = 10) -> str:
     if not x:
         return ""
+    return x if len(x) <= n else f"{x[:n]}…"
+
+
+def _usd(x) -> str:
     try:
-        if isinstance(x, str):
-            return datetime.fromisoformat(x.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M")
-        return str(x)
+        if x is None:
+            return ""
+        return f"${float(x):,.2f}"
     except Exception:
         return str(x)
 
 
-def api_get(path: str, *, params: dict | None = None) -> requests.Response:
-    headers = {}
-    if admin_key:
-        headers["x-api-key"] = admin_key
-    return requests.get(f"{API_BASE}{path}", headers=headers, params=params, timeout=30)
+def _dt(x: str) -> str:
+    try:
+        if not x:
+            return ""
+        return datetime.fromisoformat(x.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return str(x)
 
 
 # ----------------------------
@@ -82,7 +92,7 @@ if ping:
 st.divider()
 
 # ----------------------------
-# Guardrails so it never renders blank
+# Guardrails
 # ----------------------------
 if not admin_key:
     st.info("Enter your **Admin API Key** in the sidebar to load orders.")
@@ -134,7 +144,7 @@ if refresh or True:
                 st.stop()
 
             # ----------------------------
-            # DEBUG OUTPUT
+            # DEBUG OUTPUT (temporary)
             # ----------------------------
             st.subheader("DEBUG: API response type")
             st.write(type(data))
@@ -149,30 +159,60 @@ if refresh or True:
             st.stop()
 
 # ----------------------------
-# Render table
+# Render table + detail view
 # ----------------------------
 if not orders:
     st.warning("No orders returned.")
     st.stop()
 
+# Normalize rows from your API's summary fields
 rows = []
 for o in orders:
     rows.append(
         {
-            "Order ID": o.get("id") or "",
-            "Created": _fmt_dt(o.get("created_at")),
-            "Email": o.get("customer_email") or "",
-            "Total": _fmt_usd(o.get("amount_total_cents")),
-            "Subtotal": _fmt_usd(o.get("amount_subtotal_cents")),
-            "Shipping": _fmt_usd(o.get("amount_shipping_cents")),
+            "Order ID": o.get("id", ""),
+            "Created": _dt(o.get("created_at", "")),
+            "Email": o.get("customer_email", ""),
+            "Total": _usd(o.get("amount_total_usd")),
+            "Shipping": _usd(o.get("amount_shipping_usd")),
             "Ship Service": o.get("shipping_service") or "",
-            "Stripe Session": o.get("stripe_session_id") or "",
-            "Payment Intent": o.get("stripe_payment_intent") or "",
+            "Stripe Session": _short(o.get("stripe_session_id", ""), 18),
+            "_stripe_session_full": o.get("stripe_session_id", ""),
         }
     )
 
-st.subheader(f"Orders ({len(rows)})")
-st.dataframe(rows, use_container_width=True, hide_index=True)
+df = pd.DataFrame(rows)
+
+st.subheader(f"Orders ({len(df)})")
+st.dataframe(
+    df.drop(columns=["_stripe_session_full"]),
+    use_container_width=True,
+    hide_index=True,
+)
+
+st.divider()
+st.subheader("Order details")
+
+order_ids = df["Order ID"].tolist()
+selected_id = st.selectbox("Select an order", order_ids)
+
+# Try to fetch full detail (recommended endpoint)
+detail = None
+try:
+    r2 = api_get(f"/admin/orders/{selected_id}")
+    if r2.status_code == 200:
+        detail = r2.json()
+    else:
+        st.info("Details endpoint not available yet (or not returning 200). Showing summary only.")
+        detail = next((o for o in orders if o.get("id") == selected_id), None)
+except Exception as e:
+    st.warning(f"Could not load details: {e}")
+    detail = next((o for o in orders if o.get("id") == selected_id), None)
+
+if detail:
+    st.json(detail)
+else:
+    st.warning("No detail found for selected order.")
 
 st.caption(
     "Tip: If you see 404 above, your API endpoint name probably differs. Tell me what route you created and I’ll align this file."
