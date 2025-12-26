@@ -96,10 +96,14 @@ init_db()
 # Helpers
 # ----------------------------
 def _require_api_key(x_api_key: Optional[str]) -> None:
-    # If API_KEY is blank, auth is effectively off.
-    if API_KEY:
-        if not x_api_key or x_api_key != API_KEY:
+    # Normalize to avoid trailing spaces/newlines in Render env vars or headers
+    expected = (API_KEY or "").strip()
+    provided = (x_api_key or "").strip()
+
+    if expected:
+        if not provided or provided != expected:
             raise HTTPException(status_code=401, detail="Unauthorized")
+
 
 
 def _send_email(to_email: str, subject: str, html: str) -> None:
