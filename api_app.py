@@ -27,7 +27,9 @@ app = FastAPI(title="Orifice Pricing API", version="1.0.0")
 ALLOWED_ORIGINS = [
     "https://quote.o-plates.com",
     "https://orifice-pricing-ui.onrender.com",
+    "https://orifice-admin-ui.onrender.com",
 ]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
