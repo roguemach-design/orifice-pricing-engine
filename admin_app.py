@@ -28,8 +28,8 @@ with st.sidebar:
         "Admin API Key",
         type="password",
         value=os.environ.get("ADMIN_API_KEY", ""),  # Render env var can prefill
-        help="This is the same value as API_KEY on the API service."
-    )
+        help="This is the same value as API_KEY on the API service.",
+    ).strip()
 
     st.divider()
     st.subheader("Filters")
@@ -49,23 +49,24 @@ def _fmt_usd(cents: int | None) -> str:
         return ""
     return f"${(cents / 100.0):,.2f}"
 
+
 def _fmt_dt(x) -> str:
     if not x:
         return ""
     try:
-        # if API returns ISO string
         if isinstance(x, str):
             return datetime.fromisoformat(x.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M")
-        # if API returns datetime-ish
         return str(x)
     except Exception:
         return str(x)
+
 
 def api_get(path: str, *, params: dict | None = None) -> requests.Response:
     headers = {}
     if admin_key:
         headers["x-api-key"] = admin_key
     return requests.get(f"{API_BASE}{path}", headers=headers, params=params, timeout=30)
+
 
 # ----------------------------
 # Top actions
@@ -90,10 +91,10 @@ if not admin_key:
 # Load orders
 # ----------------------------
 # Fetch when page loads, and when user clicks refresh
+orders = []
 if refresh or True:
     with st.spinner("Loading orders..."):
         try:
-            # Expecting your API to implement GET /admin/orders
             r = api_get("/admin/orders", params={"limit": int(limit)})
 
             if r.status_code == 401:
@@ -112,19 +113,23 @@ if refresh or True:
                 st.code(r.text)
                 st.stop()
 
-            data = r.json()
+            try:
+                data = r.json()
+            except Exception:
+                st.error("API did not return JSON.")
+                st.code(r.text)
+                st.stop()
 
-                # Support either:
-                # 1) API returns {"orders": [...]} (dict)
-                # 2) API returns [...] (list)
+            # Support either:
+            # 1) API returns {"orders": [...]} (dict)
+            # 2) API returns [...] (list)
             if isinstance(data, dict):
                 orders = data.get("orders", [])
             elif isinstance(data, list):
                 orders = data
-                else:
+            else:
                 st.error(f"Unexpected API response type: {type(data)}")
                 st.stop()
-
 
         except Exception as e:
             st.error(f"Failed to load orders: {e}")
@@ -133,28 +138,29 @@ if refresh or True:
 # ----------------------------
 # Render table
 # ----------------------------
-orders = data.get("orders", data)  # support either {"orders":[...]} or raw list
-
 if not orders:
     st.warning("No orders returned.")
     st.stop()
 
-# Normalize into rows with friendly columns
 rows = []
 for o in orders:
-    rows.append({
-        "Order ID": o.get("id") or "",
-        "Created": _fmt_dt(o.get("created_at")),
-        "Email": o.get("customer_email") or "",
-        "Total": _fmt_usd(o.get("amount_total_cents")),
-        "Subtotal": _fmt_usd(o.get("amount_subtotal_cents")),
-        "Shipping": _fmt_usd(o.get("amount_shipping_cents")),
-        "Ship Service": o.get("shipping_service") or "",
-        "Stripe Session": o.get("stripe_session_id") or "",
-        "Payment Intent": o.get("stripe_payment_intent") or "",
-    })
+    rows.append(
+        {
+            "Order ID": o.get("id") or "",
+            "Created": _fmt_dt(o.get("created_at")),
+            "Email": o.get("customer_email") or "",
+            "Total": _fmt_usd(o.get("amount_total_cents")),
+            "Subtotal": _fmt_usd(o.get("amount_subtotal_cents")),
+            "Shipping": _fmt_usd(o.get("amount_shipping_cents")),
+            "Ship Service": o.get("shipping_service") or "",
+            "Stripe Session": o.get("stripe_session_id") or "",
+            "Payment Intent": o.get("stripe_payment_intent") or "",
+        }
+    )
 
 st.subheader(f"Orders ({len(rows)})")
 st.dataframe(rows, use_container_width=True, hide_index=True)
 
-st.caption("Tip: If you see 404 above, your API endpoint name probably differs. Tell me what route you created and I’ll align this file.")
+st.caption(
+    "Tip: If you see 404 above, your API endpoint name probably differs. Tell me what route you created and I’ll align this file."
+)
