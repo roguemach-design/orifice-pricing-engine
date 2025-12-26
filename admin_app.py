@@ -4,10 +4,9 @@ from datetime import datetime
 
 import requests
 import streamlit as st
-st.write("✅ ADMIN APP LOADED — build marker: v2-orders-debug")
-
 
 st.set_page_config(page_title="O-Plates Admin", layout="wide")
+st.write("✅ ADMIN APP LOADED — build marker: v2-orders-debug")
 
 st.title("O-Plates Admin Dashboard")
 st.caption("View recent orders stored in Postgres via the Orifice Pricing API.")
@@ -92,8 +91,9 @@ if not admin_key:
 # ----------------------------
 # Load orders
 # ----------------------------
+orders: list[dict] = []
+
 # Fetch when page loads, and when user clicks refresh
-orders = []
 if refresh or True:
     with st.spinner("Loading orders..."):
         try:
@@ -121,12 +121,6 @@ if refresh or True:
                 st.error("API did not return JSON.")
                 st.code(r.text)
                 st.stop()
-                
-            # --- TEMP DEBUG: show what the API returns ---
-                st.subheader("DEBUG: First order JSON")
-                st.json(orders[0] if orders else {})
-                st.stop()
-
 
             # Support either:
             # 1) API returns {"orders": [...]} (dict)
@@ -138,6 +132,17 @@ if refresh or True:
             else:
                 st.error(f"Unexpected API response type: {type(data)}")
                 st.stop()
+
+            # ----------------------------
+            # DEBUG OUTPUT
+            # ----------------------------
+            st.subheader("DEBUG: API response type")
+            st.write(type(data))
+
+            st.subheader("DEBUG: First order JSON")
+            st.json(orders[0] if orders else {"note": "No orders returned"})
+
+            st.stop()
 
         except Exception as e:
             st.error(f"Failed to load orders: {e}")
