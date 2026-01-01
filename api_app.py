@@ -1,4 +1,4 @@
-# api_app
+# api_app.py
 import os
 import uuid
 from datetime import datetime, timezone
@@ -7,12 +7,13 @@ from typing import Optional
 import stripe
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from pricing_engine import QuoteInputs, calculate_quote
 
 # DB (Postgres via Render)
-from sqlalchemy import Column, DateTime, Integer, JSON, String, create_engine, or_
+from sqlalchemy import Column, DateTime, Integer, JSON, String, create_engine, or_, text, func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 # Email (SendGrid)
@@ -40,10 +41,10 @@ app.add_middleware(
 )
 
 # API keys
-API_KEY = os.environ.get("API_KEY", "").strip()
-ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "").strip()  # optional separate admin auth
+API_KEY = (os.environ.get("API_KEY") or "").strip()
+ADMIN_API_KEY = (os.environ.get("ADMIN_API_KEY") or "").strip()  # optional, separate admin auth
 
-# Stripe config (set in Render -> orifice-pricing-api -> Environment)
+# Stripe config
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 APP_BASE_URL = os.environ.get("APP_BASE_URL", "https://quote.o-plates.com")
@@ -68,6 +69,9 @@ class Order(Base):
     id = Column(String, primary_key=True)  # uuid4
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+    # Human-friendly order number (1, 2, 3...) -> display as OP-0001, etc.
+    order_number = Column(Integer, unique=True, index=True, nullable=True)
+
     stripe_session_id = Column(String, unique=True, index=True)
     stripe_payment_intent = Column(String, nullable=True)
 
@@ -85,8 +89,17 @@ class Order(Base):
 
 
 def init_db() -> None:
-    if engine:
-        Base.metadata.create_all(bind=engine)
+    if not engine:
+        return
+
+    # Create base tables if missing
+    Base.metadata.create_all(bind=engine)
+
+    # Lightweight “auto-migration” for order_number (best-effort)
+    # NOTE: This won’t handle every schema change—just this one.
+    with engine.begin() as conn:
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_number INTEGER"))
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_orders_order_number ON orders(order_number)"))
 
 
 init_db()
@@ -113,16 +126,9 @@ def _require_admin_key(x_api_key: Optional[str] = Header(default=None, alias="x-
 
 
 def _send_email(to_email: str, subject: str, html: str) -> None:
-    # Allow running without email configured
     if not SENDGRID_API_KEY:
         return
-
-    msg = Mail(
-        from_email=FROM_EMAIL,
-        to_emails=to_email,
-        subject=subject,
-        html_content=html,
-    )
+    msg = Mail(from_email=FROM_EMAIL, to_emails=to_email, subject=subject, html_content=html)
     SendGridAPIClient(SENDGRID_API_KEY).send(msg)
 
 
@@ -131,22 +137,32 @@ def _db_required() -> None:
         raise HTTPException(status_code=500, detail="DB not configured (missing DATABASE_URL).")
 
 
-def _normalize_quote_payload(payload: dict) -> dict:
-    """
-    Apply defaults/normalization so QuoteInputs always receives clean fields.
-    """
-    # Handle labeling default
-    payload["handle_label"] = (payload.get("handle_label") or "").strip() or "No label"
+def _format_order_number(n: Optional[int]) -> Optional[str]:
+    if not n:
+        return None
+    return f"OP-{n:04d}"
 
-    # Chamfer width logic
-    if not payload.get("chamfer"):
-        payload["chamfer_width"] = None
-    else:
-        # If chamfer is true but width not provided, default it
-        if payload.get("chamfer_width") is None:
-            payload["chamfer_width"] = 0.062
 
-    return payload
+def _assign_order_number(db, o: Order) -> None:
+    """
+    Assigns the next available order_number (1, 2, 3...) if missing.
+    Uses a retry loop to handle rare race conditions.
+    """
+    if o.order_number:
+        return
+
+    for _ in range(6):
+        next_num = (db.query(func.max(Order.order_number)).scalar() or 0) + 1
+        o.order_number = int(next_num)
+        try:
+            db.commit()
+            db.refresh(o)
+            return
+        except IntegrityError:
+            db.rollback()
+            o.order_number = None
+
+    raise HTTPException(status_code=500, detail="Could not assign order number (please retry).")
 
 
 # ----------------------------
@@ -164,9 +180,9 @@ class QuoteRequest(BaseModel):
     chamfer: bool
     ships_in_days: int
 
-    # Added fields (optional)
-    handle_label: Optional[str] = None
-    chamfer_width: Optional[float] = None
+    # Optional fields (keep defaults here so UI can omit safely)
+    handle_label: str = Field(default="No label")
+    chamfer_width: Optional[float] = Field(default=0.062)  # inches
 
 
 class CheckoutCreateRequest(BaseModel):
@@ -184,7 +200,17 @@ def health():
 @app.post("/quote", dependencies=[Depends(_require_api_key)])
 async def quote(request: Request):
     payload = await request.json()
-    payload = _normalize_quote_payload(payload)
+
+    # Normalize optional fields
+    payload["handle_label"] = (payload.get("handle_label") or "").strip() or "No label"
+
+    # Default chamfer_width if chamfer True and missing/blank
+    if payload.get("chamfer"):
+        cw = payload.get("chamfer_width")
+        if cw is None or cw == "":
+            payload["chamfer_width"] = 0.062
+    else:
+        payload["chamfer_width"] = None
 
     inputs = QuoteInputs(**payload)
     return calculate_quote(inputs)
@@ -200,9 +226,8 @@ def checkout_create(req: CheckoutCreateRequest):
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Stripe is not configured (missing STRIPE_SECRET_KEY).")
 
-    # Recompute quote on server
-    payload = _normalize_quote_payload(req.inputs.model_dump())
-    inputs = QuoteInputs(**payload)
+    # Recompute quote on server (req includes defaults for handle_label/chamfer_width)
+    inputs = QuoteInputs(**req.inputs.model_dump())
     result = calculate_quote(inputs)
 
     total_cents = int(result.get("total_price_cents") or round(float(result["total_price"]) * 100))
@@ -212,7 +237,6 @@ def checkout_create(req: CheckoutCreateRequest):
     if missing:
         raise HTTPException(status_code=500, detail=f"Missing shipping fields from pricing engine: {', '.join(missing)}")
 
-    # Create Stripe Checkout session
     session = stripe.checkout.Session.create(
         mode="payment",
         success_url=f"{APP_BASE_URL}/success?session_id={{CHECKOUT_SESSION_ID}}",
@@ -266,7 +290,7 @@ def checkout_create(req: CheckoutCreateRequest):
                 o = Order(
                     id=str(uuid.uuid4()),
                     stripe_session_id=session.id,
-                    quote_payload=payload,  # save normalized payload
+                    quote_payload=req.inputs.model_dump(),
                 )
                 db.add(o)
                 db.commit()
@@ -291,6 +315,8 @@ def get_order_by_session(session_id: str):
 
         return {
             "id": o.id,
+            "order_number": o.order_number,
+            "order_number_display": _format_order_number(o.order_number),
             "customer_email": o.customer_email,
             "amount_total_usd": (o.amount_total_cents or 0) / 100.0,
             "amount_subtotal_usd": (o.amount_subtotal_cents or 0) / 100.0,
@@ -308,7 +334,6 @@ def get_order_by_session(session_id: str):
 @app.get("/admin/orders", dependencies=[Depends(_require_admin_key)])
 def admin_list_orders(q: Optional[str] = None, limit: int = 50):
     _db_required()
-
     limit = max(1, min(int(limit), 200))
 
     db = SessionLocal()
@@ -330,11 +355,15 @@ def admin_list_orders(q: Optional[str] = None, limit: int = 50):
         return [
             {
                 "id": o.id,
+                "order_number": o.order_number,
+                "order_number_display": _format_order_number(o.order_number),
                 "created_at": o.created_at.isoformat() if o.created_at else None,
                 "customer_email": o.customer_email,
                 "amount_total_usd": (o.amount_total_cents or 0) / 100.0,
                 "amount_shipping_usd": (o.amount_shipping_cents or 0) / 100.0,
                 "shipping_service": o.shipping_service,
+                # Keep stripe_session_id available for debugging if needed by admin UI,
+                # but your admin page can simply stop displaying it.
                 "stripe_session_id": o.stripe_session_id,
             }
             for o in orders
@@ -355,6 +384,8 @@ def admin_get_order(order_id: str):
 
         return {
             "id": o.id,
+            "order_number": o.order_number,
+            "order_number_display": _format_order_number(o.order_number),
             "created_at": o.created_at.isoformat() if o.created_at else None,
             "stripe_session_id": o.stripe_session_id,
             "stripe_payment_intent": o.stripe_payment_intent,
@@ -404,7 +435,7 @@ async def stripe_webhook(request: Request):
         shipping_name = shipping_details.get("name")
         shipping_address = shipping_details.get("address")
 
-        # Still blank for now (we can fill this in next by retrieving selected shipping_rate)
+        # (Optional) Later: resolve selected shipping service from Stripe
         shipping_service = None
 
         # Save/update order in DB
@@ -413,11 +444,10 @@ async def stripe_webhook(request: Request):
             try:
                 o = db.query(Order).filter(Order.stripe_session_id == stripe_session_id).first()
                 if not o:
-                    o = Order(
-                        id=str(uuid.uuid4()),
-                        stripe_session_id=stripe_session_id,
-                    )
+                    o = Order(id=str(uuid.uuid4()), stripe_session_id=stripe_session_id)
                     db.add(o)
+                    db.commit()
+                    db.refresh(o)
 
                 o.stripe_payment_intent = payment_intent
                 o.customer_email = customer_email
@@ -429,21 +459,28 @@ async def stripe_webhook(request: Request):
                 o.shipping_service = shipping_service
 
                 db.commit()
+                db.refresh(o)
+
+                # Assign human-friendly order number now that it's paid
+                _assign_order_number(db, o)
 
                 order_id = o.id
+                order_display = _format_order_number(o.order_number) or "OP-????"
             finally:
                 db.close()
         else:
             order_id = "N/A"
+            order_display = "OP-????"
 
         # Email confirmation
         if customer_email:
             _send_email(
                 to_email=customer_email,
-                subject="O-Plates order received",
+                subject=f"O-Plates order received ({order_display})",
                 html=f"""
                 <p>Thanks — we received your order.</p>
-                <p><b>Order ID:</b> {order_id}</p>
+                <p><b>Order #:</b> {order_display}</p>
+                <p><b>Internal ID:</b> {order_id}</p>
                 <p><b>Total Paid:</b> ${((amount_total or 0) / 100):.2f}</p>
                 <p>We’ll email your approval drawing next.</p>
                 """,
