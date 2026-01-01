@@ -110,6 +110,17 @@ def _require_api_key(x_api_key: Optional[str] = Header(default=None, alias="x-ap
     print("DEBUG auth expected:", _mask(expected))
     print("DEBUG auth provided:", _mask(provided))
 
+    # 🔎 DEFINITIVE DEBUG (TEMPORARY)
+    print(
+        "DEBUG expected sha256:",
+        hashlib.sha256(expected.encode()).hexdigest(),
+    )
+    print(
+        "DEBUG provided sha256:",
+        hashlib.sha256(provided.encode()).hexdigest(),
+    )
+
+
     if expected and (not provided or provided != expected):
         raise HTTPException(status_code=401, detail="401 from _require_api_key")
 
