@@ -435,8 +435,16 @@ async def stripe_webhook(request: Request):
         shipping_name = shipping_details.get("name")
         shipping_address = shipping_details.get("address")
 
-        # (Optional) Later: resolve selected shipping service from Stripe
+        # Determine selected shipping option
         shipping_service = None
+        try:
+            shipping_cost = session.get("shipping_cost") or {}
+            shipping_rate_id = shipping_cost.get("shipping_rate")
+            if shipping_rate_id:
+                sr = stripe.ShippingRate.retrieve(shipping_rate_id)
+                shipping_service = (sr.get("metadata") or {}).get("service") or sr.get("display_name")
+        except Exception:
+            shipping_service = None
 
         # Save/update order in DB
         if SessionLocal:
