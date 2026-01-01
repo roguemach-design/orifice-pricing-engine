@@ -154,9 +154,19 @@ def health():
 
 
 @app.post("/quote")
-def quote(req: QuoteRequest, x_api_key: Optional[str] = Header(default=None)):
+async def quote(request: Request, x_api_key: Optional[str] = Header(default=None)):
     _require_api_key(x_api_key)
-    inputs = QuoteInputs(**req.model_dump())
+
+    payload = await request.json()
+
+    # ---- Normalize optional fields ----
+    payload["handle_label"] = (payload.get("handle_label") or "").strip() or "No label"
+
+    # If chamfer is false/unchecked, chamfer_width should be None
+    if not payload.get("chamfer"):
+        payload["chamfer_width"] = None
+
+    inputs = QuoteInputs(**payload)
     return calculate_quote(inputs)
 
 
@@ -216,7 +226,7 @@ def checkout_create(req: CheckoutCreateRequest, x_api_key: Optional[str] = Heade
                     "metadata": {"service": "ups_2day"},
                 }
             },
-            # FIXED: this is now correctly UPS Next Day Air
+            # FIXED: UPS Next Day Air
             {
                 "shipping_rate_data": {
                     "type": "fixed_amount",
@@ -276,9 +286,6 @@ def get_order_by_session(session_id: str):
         db.close()
 
 
-# ----------------------------
-# Debug endpoint (inserted here)
-# ----------------------------
 @app.get("/debug/order/{order_id}")
 def debug_order(order_id: str):
     _db_required()
@@ -314,12 +321,6 @@ def admin_list_orders(
     limit: int = 50,
     x_api_key: Optional[str] = Header(default=None),
 ):
-    """
-    Admin list endpoint.
-    - Protected by API_KEY (x-api-key header).
-    - Optional q: search by order id, email, or Stripe session id.
-    - Optional limit: 1..200 (default 50)
-    """
     _require_api_key(x_api_key)
     _db_required()
 
@@ -359,10 +360,6 @@ def admin_list_orders(
 
 @app.get("/admin/orders/{order_id}")
 def admin_get_order(order_id: str, x_api_key: Optional[str] = Header(default=None)):
-    """
-    Admin detail endpoint.
-    - Protected by API_KEY (x-api-key header).
-    """
     _require_api_key(x_api_key)
     _db_required()
 
