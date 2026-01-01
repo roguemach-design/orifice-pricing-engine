@@ -1,3 +1,4 @@
+import os
 
 import streamlit as st
 import requests
@@ -220,4 +221,5 @@ st.caption("Shipping estimates")
 s1, s2 = st.columns(2)
 s1.metric("Estimated Total Weight", f"{weight_lb:.2f} lb")
 s2.metric("Estimated Package Size", f"{pkg['length']} x {pkg['width']} x {pkg['height']} in")
+
 
