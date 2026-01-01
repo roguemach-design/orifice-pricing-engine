@@ -1,3 +1,4 @@
+# ui_app.py
 import streamlit as st
 import requests
 
@@ -14,7 +15,9 @@ def _estimate_area_sq_in(paddle_dia: float, handle_length_from_bore: float) -> f
     return paddle_dia * (handle_length_from_bore + (paddle_dia / 2.0))
 
 
-def _estimate_package_in(paddle_dia: float, handle_length_from_bore: float, thickness: float, qty: int) -> dict:
+def _estimate_package_in(
+    paddle_dia: float, handle_length_from_bore: float, thickness: float, qty: int
+) -> dict:
     paddle_radius = paddle_dia / 2.0
     product_length = handle_length_from_bore + paddle_radius
     product_width = paddle_dia
@@ -37,6 +40,23 @@ def _estimate_total_weight_lb(material: str, area_sq_in: float, thickness: float
     return round(area_sq_in * thickness * density * qty, 2)
 
 
+def _quoteinputs_accepts(field_name: str) -> bool:
+    """
+    Compatibility helper so this UI works whether QuoteInputs is a dataclass or Pydantic model,
+    and whether it has (handle_label, chamfer_width) yet or not.
+    """
+    # dataclass
+    if hasattr(QuoteInputs, "__dataclass_fields__"):
+        return field_name in getattr(QuoteInputs, "__dataclass_fields__", {})
+    # pydantic v2
+    if hasattr(QuoteInputs, "model_fields"):
+        return field_name in getattr(QuoteInputs, "model_fields", {})
+    # pydantic v1
+    if hasattr(QuoteInputs, "__fields__"):
+        return field_name in getattr(QuoteInputs, "__fields__", {})
+    return False
+
+
 # -----------------------------
 # Page setup
 # -----------------------------
@@ -56,30 +76,17 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("Orifice Plate Instant Quote")
+# -----------------------------
+# Success page handling (session_id in query params)
+# -----------------------------
+qp = st.query_params
 
-from urllib.parse import parse_qs
-import requests
-import streamlit as st
-
-API_BASE = "https://orifice-pricing-api.onrender.com"
-
-def _get_path_and_query():
-    # Streamlit gives a full URL in query params; easiest is using built-ins:
-    qp = st.query_params
-    # Path is not always directly exposed depending on Streamlit hosting.
-    # We'll treat "success" as presence of session_id param.
-    return qp
-
-qp = _get_path_and_query()
-
-# --- SUCCESS PAGE ---
 if "session_id" in qp:
     session_id = qp["session_id"]
     st.title("Payment received ✅")
     st.write("Thanks — we received your payment. We’re preparing your order now.")
 
-    # Fetch stored order details from API (we'll add this endpoint below)
+    # Fetch stored order details from API
     try:
         r = requests.get(f"{API_BASE}/orders/by-session/{session_id}", timeout=30)
         if r.status_code == 200:
@@ -88,7 +95,7 @@ if "session_id" in qp:
             st.write(f"Order ID: **{order['id']}**")
             st.write(f"Email: **{order['customer_email']}**")
             st.write(f"Total paid: **${order['amount_total_usd']:.2f}**")
-            st.write(f"Shipping: **{order['shipping_service']}**")
+            st.write(f"Shipping: **{order.get('shipping_service')}**")
             st.write("We’ll email your confirmation and approval drawing next.")
         else:
             st.info("Payment confirmed. Finalizing your order details… (refresh in a moment)")
@@ -97,13 +104,22 @@ if "session_id" in qp:
 
     st.stop()
 
+# -----------------------------
+# Main page title
+# -----------------------------
+st.title("Orifice Plate Instant Quote")
 
 # -----------------------------
 # Inputs
 # -----------------------------
 quantity = st.number_input("Qty", min_value=1, value=1, step=1)
+
 material = st.selectbox("Material Type", options=list(cfg.PRICE_PER_SQ_IN.keys()))
-thickness = st.selectbox("Plate Thickness (in)", options=sorted(cfg.PRICE_PER_SQ_IN[material].keys()))
+thickness = st.selectbox(
+    "Plate Thickness (in)",
+    options=sorted(cfg.PRICE_PER_SQ_IN[material].keys()),
+)
+
 handle_width = st.number_input("Handle Width (in)", min_value=0.0, value=1.5, step=0.01)
 handle_length = st.number_input("Handle Length from Bore (in)", min_value=0.0, value=9.0, step=0.01)
 paddle_dia = st.number_input("Paddle Diameter (in)", min_value=0.01, max_value=48.0, value=3.0, step=0.01)
@@ -117,6 +133,23 @@ bore_tolerance = st.selectbox(
 )
 
 chamfer = st.checkbox("Chamfer", value=True)
+
+# ✅ NEW: Handle label + Chamfer width inputs (before payload build)
+handle_label = st.text_input(
+    "Handle label (optional)",
+    value="",
+    help="If left blank, we’ll store 'No label'.",
+).strip()
+
+chamfer_width = None
+if chamfer:
+    chamfer_width = st.number_input(
+        "Chamfer width (inches)",
+        min_value=0.0,
+        value=0.03,  # default
+        step=0.005,
+        format="%.3f",
+    )
 
 ships_options = sorted(cfg.LEAD_TIME_MULTIPLIER.keys())
 ships_in_days = st.selectbox(
@@ -145,7 +178,7 @@ if errors:
 # -----------------------------
 # Pricing
 # -----------------------------
-inputs = QuoteInputs(
+inputs_kwargs = dict(
     quantity=int(quantity),
     material=str(material),
     thickness=float(thickness),
@@ -158,6 +191,13 @@ inputs = QuoteInputs(
     ships_in_days=int(ships_in_days),
 )
 
+# Only pass these into QuoteInputs if your QuoteInputs supports them
+if _quoteinputs_accepts("handle_label"):
+    inputs_kwargs["handle_label"] = handle_label or "No label"
+if _quoteinputs_accepts("chamfer_width"):
+    inputs_kwargs["chamfer_width"] = chamfer_width
+
+inputs = QuoteInputs(**inputs_kwargs)
 result = calculate_quote(inputs)
 
 c1, c2 = st.columns(2)
@@ -168,6 +208,7 @@ c2.metric("Total Price", f"${result['total_price']:,.2f}")
 # Checkout (SAFE FUNCTION)
 # -----------------------------
 def start_checkout():
+    # quote_payload / inputs payload sent to API
     payload = {
         "inputs": {
             "quantity": int(quantity),
@@ -178,8 +219,12 @@ def start_checkout():
             "paddle_dia": float(paddle_dia),
             "bore_dia": float(bore_dia),
             "bore_tolerance": float(bore_tolerance),
-            "chamfer": bool(chamfer),
             "ships_in_days": int(ships_in_days),
+
+            # ✅ NEW fields
+            "handle_label": handle_label or "No label",
+            "chamfer": bool(chamfer),
+            "chamfer_width": chamfer_width,  # will be None if chamfer unchecked
         }
     }
 
@@ -206,15 +251,14 @@ if st.button("Place Order & Pay"):
 area_sq_in = result.get("area_sq_in", _estimate_area_sq_in(paddle_dia, handle_length))
 weight_lb = result.get(
     "estimated_total_weight_lb",
-    _estimate_total_weight_lb(material, area_sq_in, thickness, quantity),
+    _estimate_total_weight_lb(material, area_sq_in, float(thickness), int(quantity)),
 )
 pkg = result.get(
     "estimated_package_in",
-    _estimate_package_in(paddle_dia, handle_length, thickness, quantity),
+    _estimate_package_in(paddle_dia, handle_length, float(thickness), int(quantity)),
 )
 
 st.caption("Shipping estimates")
 s1, s2 = st.columns(2)
 s1.metric("Estimated Total Weight", f"{weight_lb:.2f} lb")
 s2.metric("Estimated Package Size", f"{pkg['length']} x {pkg['width']} x {pkg['height']} in")
-
