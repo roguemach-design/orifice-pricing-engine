@@ -31,8 +31,8 @@ with st.sidebar:
         st.text_input(
             "Admin API Key",
             type="password",
-            value=os.environ.get("ADMIN_API_KEY", ""),  # Render env var can prefill
-            help="This should match ADMIN_API_KEY on the API service (or API_KEY if admin falls back).",
+            value=os.environ.get("ADMIN_API_KEY", ""),
+            help="Must match ADMIN_API_KEY on the API service (or API_KEY if admin falls back).",
         )
         .strip()
     )
@@ -57,12 +57,6 @@ def api_get(path: str, *, params: dict | None = None) -> requests.Response:
     return requests.get(f"{API_BASE}{path}", headers=headers, params=params, timeout=30)
 
 
-def _short(x: str, n: int = 18) -> str:
-    if not x:
-        return ""
-    return x if len(x) <= n else f"{x[:n]}…"
-
-
 def _usd(x) -> str:
     try:
         if x is None:
@@ -81,24 +75,25 @@ def _dt(x: str) -> str:
         return str(x)
 
 
-def _safe_get_quote_payload(detail: Dict[str, Any]) -> Dict[str, Any]:
-    qp = detail.get("quote_payload")
-    return qp if isinstance(qp, dict) else {}
+def _safe_dict(x) -> Dict[str, Any]:
+    return x if isinstance(x, dict) else {}
 
 
-def _display_payload_fields(qp: Dict[str, Any]) -> None:
-    # Highlight the fields you asked about, plus a few helpful neighbors.
-    handle_label = qp.get("handle_label", "No label")
-    chamfer = qp.get("chamfer")
-    chamfer_width = qp.get("chamfer_width")
+def _kv_table(d: Dict[str, Any], order: Optional[list[str]] = None) -> pd.DataFrame:
+    """
+    Render dict as a clean 2-col dataframe (Field / Value) in a stable order.
+    """
+    if order:
+        rows = [(k, d.get(k, "")) for k in order if k in d]
+        # Add any remaining keys not specified
+        for k in d.keys():
+            if k not in set(order):
+                rows.append((k, d.get(k, "")))
+    else:
+        rows = [(k, v) for k, v in d.items()]
 
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Handle Label", str(handle_label) if handle_label else "No label")
-    c2.metric("Chamfer", "Yes" if chamfer else "No")
-    c3.metric("Chamfer Width (in)", "" if chamfer_width is None else f"{float(chamfer_width):.3f}")
+    return pd.DataFrame(rows, columns=["Field", "Value"])
 
-    with st.expander("Show full quote_payload"):
-        st.json(qp)
 
 # ----------------------------
 # Top actions
@@ -124,7 +119,6 @@ if not admin_key:
 # ----------------------------
 orders: list[dict] = []
 
-# Fetch when page loads, and when user clicks refresh
 if refresh or True:
     with st.spinner("Loading orders..."):
         try:
@@ -137,7 +131,6 @@ if refresh or True:
 
             if r.status_code == 404:
                 st.error("404 Not Found. Your API does not have /admin/orders yet (or the route path differs).")
-                st.write("Fix: add an admin endpoint in api_app.py, or change this app to call the correct route.")
                 st.code(r.text)
                 st.stop()
 
@@ -146,12 +139,7 @@ if refresh or True:
                 st.code(r.text)
                 st.stop()
 
-            try:
-                data = r.json()
-            except Exception:
-                st.error("API did not return JSON.")
-                st.code(r.text)
-                st.stop()
+            data = r.json()
 
             # Support either:
             # 1) API returns {"orders": [...]} (dict)
@@ -169,7 +157,7 @@ if refresh or True:
             st.stop()
 
 # ----------------------------
-# Render table + detail view
+# Orders table
 # ----------------------------
 if not orders:
     st.warning("No orders returned.")
@@ -185,27 +173,24 @@ for o in orders:
             "Total": _usd(o.get("amount_total_usd")),
             "Shipping": _usd(o.get("amount_shipping_usd")),
             "Ship Service": o.get("shipping_service") or "",
-            "Stripe Session": _short(o.get("stripe_session_id", ""), 18),
-            "_stripe_session_full": o.get("stripe_session_id", ""),
         }
     )
 
 df = pd.DataFrame(rows)
 
 st.subheader(f"Orders ({len(df)})")
-st.dataframe(
-    df.drop(columns=["_stripe_session_full"]),
-    use_container_width=True,
-    hide_index=True,
-)
+st.dataframe(df, use_container_width=True, hide_index=True)
 
 st.divider()
+
+# ----------------------------
+# Order details (clean table view)
+# ----------------------------
 st.subheader("Order details")
 
 order_ids = df["Order ID"].tolist()
 selected_id = st.selectbox("Select an order", order_ids)
 
-# Fetch full detail
 detail: Optional[Dict[str, Any]] = None
 try:
     r2 = api_get(f"/admin/orders/{selected_id}")
@@ -216,26 +201,89 @@ try:
         st.code(r2.text)
         st.stop()
     else:
-        st.info("Details endpoint not available yet (or not returning 200). Showing summary only.")
-        detail = next((o for o in orders if o.get("id") == selected_id), None)
+        st.error(f"Could not load details: {r2.status_code}")
+        st.code(r2.text)
+        st.stop()
 except Exception as e:
-    st.warning(f"Could not load details: {e}")
-    detail = next((o for o in orders if o.get("id") == selected_id), None)
+    st.error(f"Could not load details: {e}")
+    st.stop()
 
 if not detail:
     st.warning("No detail found for selected order.")
     st.stop()
 
-# Display focused manufacturing inputs if present
-qp = _safe_get_quote_payload(detail)
-if qp:
-    st.subheader("Configured inputs")
-    _display_payload_fields(qp)
+# --- Order Summary table ---
+order_summary = {
+    "Order ID": detail.get("id", ""),
+    "Created": _dt(detail.get("created_at", "")),
+    "Customer Email": detail.get("customer_email", ""),
+    "Subtotal": _usd(detail.get("amount_subtotal_usd")),
+    "Shipping": _usd(detail.get("amount_shipping_usd")),
+    "Total": _usd(detail.get("amount_total_usd")),
+    "Shipping Service": detail.get("shipping_service", ""),
+    "Ship To Name": detail.get("shipping_name", ""),
+}
 
-# Always show full order JSON for completeness
-st.subheader("Full order JSON")
-st.json(detail)
-
-st.caption(
-    "Tip: If you see 404 above, your API endpoint name probably differs. Tell me what route you created and I’ll align this file."
+st.subheader("Order summary")
+st.dataframe(
+    _kv_table(
+        order_summary,
+        order=[
+            "Order ID",
+            "Created",
+            "Customer Email",
+            "Subtotal",
+            "Shipping",
+            "Total",
+            "Shipping Service",
+            "Ship To Name",
+        ],
+    ),
+    use_container_width=True,
+    hide_index=True,
 )
+
+# --- Configured Inputs table (quote_payload) ---
+qp = _safe_dict(detail.get("quote_payload"))
+if qp:
+    # normalize display defaults for requested fields
+    qp_display = dict(qp)
+    qp_display["handle_label"] = (qp_display.get("handle_label") or "").strip() or "No label"
+    if not qp_display.get("chamfer"):
+        qp_display["chamfer_width"] = None
+    elif qp_display.get("chamfer_width") is None:
+        qp_display["chamfer_width"] = 0.062
+
+    # pretty formatting
+    if qp_display.get("chamfer_width") is not None:
+        try:
+            qp_display["chamfer_width"] = f'{float(qp_display["chamfer_width"]):.3f}'
+        except Exception:
+            pass
+
+    st.subheader("Configured inputs")
+    st.dataframe(
+        _kv_table(
+            qp_display,
+            order=[
+                "quantity",
+                "material",
+                "thickness",
+                "handle_width",
+                "handle_length_from_bore",
+                "paddle_dia",
+                "bore_dia",
+                "bore_tolerance",
+                "chamfer",
+                "chamfer_width",
+                "handle_label",
+                "ships_in_days",
+            ],
+        ),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+# Optional: keep JSON available but not in the way
+with st.expander("Show full order JSON"):
+    st.json(detail)
