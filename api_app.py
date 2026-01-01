@@ -216,12 +216,13 @@ def checkout_create(req: CheckoutCreateRequest, x_api_key: Optional[str] = Heade
                     "metadata": {"service": "ups_2day"},
                 }
             },
+            # FIXED: this is now correctly UPS Next Day Air
             {
                 "shipping_rate_data": {
                     "type": "fixed_amount",
                     "fixed_amount": {"amount": int(shipping["ups_nextday_cents"]), "currency": "usd"},
-                    "display_name": "UPS 2nd Day Air",
-                    "metadata": {"service": "ups_2day"},
+                    "display_name": "UPS Next Day Air",
+                    "metadata": {"service": "ups_nextday"},
                 }
             },
         ],
