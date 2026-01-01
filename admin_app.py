@@ -1,6 +1,7 @@
 # admin_app.py
 import os
 from datetime import datetime
+from typing import Any, Dict, Optional
 
 import pandas as pd
 import requests
@@ -8,8 +9,6 @@ import streamlit as st
 
 # IMPORTANT: set_page_config must be the first Streamlit call
 st.set_page_config(page_title="O-Plates Admin", layout="wide")
-
-st.write("✅ ADMIN APP LOADED — build marker: v2-orders-debug")
 
 st.title("O-Plates Admin Dashboard")
 st.caption("View recent orders stored in Postgres via the Orifice Pricing API.")
@@ -28,12 +27,15 @@ with st.sidebar:
     st.write("API Base:")
     st.code(API_BASE)
 
-    admin_key = st.text_input(
-        "Admin API Key",
-        type="password",
-        value=os.environ.get("ADMIN_API_KEY", ""),  # Render env var can prefill
-        help="This is the same value as API_KEY on the API service.",
-    ).strip()
+    admin_key = (
+        st.text_input(
+            "Admin API Key",
+            type="password",
+            value=os.environ.get("ADMIN_API_KEY", ""),  # Render env var can prefill
+            help="This should match ADMIN_API_KEY on the API service (or API_KEY if admin falls back).",
+        )
+        .strip()
+    )
 
     st.divider()
     st.subheader("Filters")
@@ -45,13 +47,6 @@ with st.sidebar:
     with col2:
         ping = st.button("🩺 Ping API")
 
-    st.divider()
-
-    # ----------------------------
-    # DEBUG OUTPUT (optional)
-    # ----------------------------
-    debug = st.toggle("Debug mode", value=False)
-
 # ----------------------------
 # Helpers
 # ----------------------------
@@ -62,7 +57,7 @@ def api_get(path: str, *, params: dict | None = None) -> requests.Response:
     return requests.get(f"{API_BASE}{path}", headers=headers, params=params, timeout=30)
 
 
-def _short(x: str, n: int = 10) -> str:
+def _short(x: str, n: int = 18) -> str:
     if not x:
         return ""
     return x if len(x) <= n else f"{x[:n]}…"
@@ -85,6 +80,25 @@ def _dt(x: str) -> str:
     except Exception:
         return str(x)
 
+
+def _safe_get_quote_payload(detail: Dict[str, Any]) -> Dict[str, Any]:
+    qp = detail.get("quote_payload")
+    return qp if isinstance(qp, dict) else {}
+
+
+def _display_payload_fields(qp: Dict[str, Any]) -> None:
+    # Highlight the fields you asked about, plus a few helpful neighbors.
+    handle_label = qp.get("handle_label", "No label")
+    chamfer = qp.get("chamfer")
+    chamfer_width = qp.get("chamfer_width")
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Handle Label", str(handle_label) if handle_label else "No label")
+    c2.metric("Chamfer", "Yes" if chamfer else "No")
+    c3.metric("Chamfer Width (in)", "" if chamfer_width is None else f"{float(chamfer_width):.3f}")
+
+    with st.expander("Show full quote_payload"):
+        st.json(qp)
 
 # ----------------------------
 # Top actions
@@ -150,18 +164,6 @@ if refresh or True:
                 st.error(f"Unexpected API response type: {type(data)}")
                 st.stop()
 
-            # ----------------------------
-            # DEBUG OUTPUT (optional)
-            # ----------------------------
-            if debug:
-                st.subheader("DEBUG: API response type")
-                st.write(type(data))
-
-                st.subheader("DEBUG: First order JSON")
-                st.json(orders[0] if orders else {"note": "No orders returned"})
-
-                st.stop()
-
         except Exception as e:
             st.error(f"Failed to load orders: {e}")
             st.stop()
@@ -173,7 +175,6 @@ if not orders:
     st.warning("No orders returned.")
     st.stop()
 
-# Normalize rows from your API's summary fields
 rows = []
 for o in orders:
     rows.append(
@@ -204,12 +205,16 @@ st.subheader("Order details")
 order_ids = df["Order ID"].tolist()
 selected_id = st.selectbox("Select an order", order_ids)
 
-# Try to fetch full detail (recommended endpoint)
-detail = None
+# Fetch full detail
+detail: Optional[Dict[str, Any]] = None
 try:
     r2 = api_get(f"/admin/orders/{selected_id}")
     if r2.status_code == 200:
         detail = r2.json()
+    elif r2.status_code == 401:
+        st.error("Unauthorized (401) when loading order details. Check your Admin API Key.")
+        st.code(r2.text)
+        st.stop()
     else:
         st.info("Details endpoint not available yet (or not returning 200). Showing summary only.")
         detail = next((o for o in orders if o.get("id") == selected_id), None)
@@ -217,10 +222,19 @@ except Exception as e:
     st.warning(f"Could not load details: {e}")
     detail = next((o for o in orders if o.get("id") == selected_id), None)
 
-if detail:
-    st.json(detail)
-else:
+if not detail:
     st.warning("No detail found for selected order.")
+    st.stop()
+
+# Display focused manufacturing inputs if present
+qp = _safe_get_quote_payload(detail)
+if qp:
+    st.subheader("Configured inputs")
+    _display_payload_fields(qp)
+
+# Always show full order JSON for completeness
+st.subheader("Full order JSON")
+st.json(detail)
 
 st.caption(
     "Tip: If you see 404 above, your API endpoint name probably differs. Tell me what route you created and I’ll align this file."
