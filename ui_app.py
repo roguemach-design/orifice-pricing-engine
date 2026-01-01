@@ -7,6 +7,8 @@ import pricing_config as cfg
 
 API_BASE = "https://orifice-pricing-api.onrender.com"
 
+st.sidebar.write("DEBUG UI has API_KEY?", bool(os.environ.get("API_KEY")))
+
 
 # -----------------------------
 # Helpers (safe to keep)
@@ -218,3 +220,4 @@ st.caption("Shipping estimates")
 s1, s2 = st.columns(2)
 s1.metric("Estimated Total Weight", f"{weight_lb:.2f} lb")
 s2.metric("Estimated Package Size", f"{pkg['length']} x {pkg['width']} x {pkg['height']} in")
+
