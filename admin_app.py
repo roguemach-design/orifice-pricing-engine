@@ -45,6 +45,13 @@ with st.sidebar:
     with col2:
         ping = st.button("🩺 Ping API")
 
+    st.divider()
+
+    # ----------------------------
+    # DEBUG OUTPUT (optional)
+    # ----------------------------
+    debug = st.toggle("Debug mode", value=False)
+
 # ----------------------------
 # Helpers
 # ----------------------------
@@ -144,15 +151,16 @@ if refresh or True:
                 st.stop()
 
             # ----------------------------
-            # DEBUG OUTPUT (temporary)
+            # DEBUG OUTPUT (optional)
             # ----------------------------
-            st.subheader("DEBUG: API response type")
-            st.write(type(data))
+            if debug:
+                st.subheader("DEBUG: API response type")
+                st.write(type(data))
 
-            st.subheader("DEBUG: First order JSON")
-            st.json(orders[0] if orders else {"note": "No orders returned"})
+                st.subheader("DEBUG: First order JSON")
+                st.json(orders[0] if orders else {"note": "No orders returned"})
 
-            st.stop()
+                st.stop()
 
         except Exception as e:
             st.error(f"Failed to load orders: {e}")
