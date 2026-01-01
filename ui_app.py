@@ -1,4 +1,5 @@
 # ui_app.py
+import os
 import streamlit as st
 import requests
 
@@ -41,19 +42,12 @@ def _estimate_total_weight_lb(material: str, area_sq_in: float, thickness: float
 
 
 def _quoteinputs_accepts(field_name: str) -> bool:
-    """
-    Compatibility helper so this UI works whether QuoteInputs is a dataclass or Pydantic model,
-    and whether it has (handle_label, chamfer_width) yet or not.
-    """
-    # dataclass
     if hasattr(QuoteInputs, "__dataclass_fields__"):
-        return field_name in getattr(QuoteInputs, "__dataclass_fields__", {})
-    # pydantic v2
+        return field_name in QuoteInputs.__dataclass_fields__
     if hasattr(QuoteInputs, "model_fields"):
-        return field_name in getattr(QuoteInputs, "model_fields", {})
-    # pydantic v1
+        return field_name in QuoteInputs.model_fields
     if hasattr(QuoteInputs, "__fields__"):
-        return field_name in getattr(QuoteInputs, "__fields__", {})
+        return field_name in QuoteInputs.__fields__
     return False
 
 
@@ -61,53 +55,8 @@ def _quoteinputs_accepts(field_name: str) -> bool:
 # Page setup
 # -----------------------------
 st.set_page_config(page_title="Orifice Plate Instant Quote", layout="centered")
-
-st.markdown(
-    """
-    <style>
-    h1 {
-      font-family: Arial, sans-serif;
-      font-weight: 800;
-      letter-spacing: 0.2px;
-      margin-bottom: 0.25rem;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
-# -----------------------------
-# Success page handling (session_id in query params)
-# -----------------------------
-qp = st.query_params
-
-if "session_id" in qp:
-    session_id = qp["session_id"]
-    st.title("Payment received ✅")
-    st.write("Thanks — we received your payment. We’re preparing your order now.")
-
-    # Fetch stored order details from API
-    try:
-        r = requests.get(f"{API_BASE}/orders/by-session/{session_id}", timeout=30)
-        if r.status_code == 200:
-            order = r.json()
-            st.subheader("Order summary")
-            st.write(f"Order ID: **{order['id']}**")
-            st.write(f"Email: **{order['customer_email']}**")
-            st.write(f"Total paid: **${order['amount_total_usd']:.2f}**")
-            st.write(f"Shipping: **{order.get('shipping_service')}**")
-            st.write("We’ll email your confirmation and approval drawing next.")
-        else:
-            st.info("Payment confirmed. Finalizing your order details… (refresh in a moment)")
-    except Exception:
-        st.info("Payment confirmed. Finalizing your order details… (refresh in a moment)")
-
-    st.stop()
-
-# -----------------------------
-# Main page title
-# -----------------------------
 st.title("Orifice Plate Instant Quote")
+
 
 # -----------------------------
 # Inputs
@@ -122,7 +71,7 @@ thickness = st.selectbox(
 
 handle_width = st.number_input("Handle Width (in)", min_value=0.0, value=1.5, step=0.01)
 handle_length = st.number_input("Handle Length from Bore (in)", min_value=0.0, value=9.0, step=0.01)
-paddle_dia = st.number_input("Paddle Diameter (in)", min_value=0.01, max_value=48.0, value=3.0, step=0.01)
+paddle_dia = st.number_input("Paddle Diameter (in)", min_value=0.01, value=3.0, step=0.01)
 bore_dia = st.number_input("Bore Diameter (in)", min_value=0.01, value=1.0, step=0.01)
 
 tol_options = sorted(cfg.INSPECTION_MINS_BY_TOL.keys())
@@ -134,7 +83,6 @@ bore_tolerance = st.selectbox(
 
 chamfer = st.checkbox("Chamfer", value=True)
 
-# ✅ NEW: Handle label + Chamfer width inputs (before payload build)
 handle_label = st.text_input(
     "Handle label (optional)",
     value="",
@@ -146,7 +94,7 @@ if chamfer:
     chamfer_width = st.number_input(
         "Chamfer width (inches)",
         min_value=0.0,
-        value=0.03,  # default
+        value=0.03,
         step=0.005,
         format="%.3f",
     )
@@ -161,6 +109,7 @@ ships_in_days = st.selectbox(
 st.divider()
 st.subheader("Quote Summary")
 
+
 # -----------------------------
 # Validation
 # -----------------------------
@@ -168,12 +117,13 @@ errors = []
 if bore_dia >= paddle_dia:
     errors.append("Bore Diameter must be smaller than Paddle Diameter.")
 if handle_length <= (paddle_dia / 2):
-    errors.append("Handle Length (From Bore) must be longer than the Paddle Radius.")
+    errors.append("Handle Length must exceed paddle radius.")
 
 if errors:
     for e in errors:
         st.error(e)
     st.stop()
+
 
 # -----------------------------
 # Pricing
@@ -191,7 +141,6 @@ inputs_kwargs = dict(
     ships_in_days=int(ships_in_days),
 )
 
-# Only pass these into QuoteInputs if your QuoteInputs supports them
 if _quoteinputs_accepts("handle_label"):
     inputs_kwargs["handle_label"] = handle_label or "No label"
 if _quoteinputs_accepts("chamfer_width"):
@@ -204,11 +153,11 @@ c1, c2 = st.columns(2)
 c1.metric("Unit Price", f"${result['unit_price']:,.2f}")
 c2.metric("Total Price", f"${result['total_price']:,.2f}")
 
+
 # -----------------------------
-# Checkout (SAFE FUNCTION)
+# Checkout
 # -----------------------------
 def start_checkout():
-    # quote_payload / inputs payload sent to API
     payload = {
         "inputs": {
             "quantity": int(quantity),
@@ -220,15 +169,23 @@ def start_checkout():
             "bore_dia": float(bore_dia),
             "bore_tolerance": float(bore_tolerance),
             "ships_in_days": int(ships_in_days),
-
-            # ✅ NEW fields
             "handle_label": handle_label or "No label",
             "chamfer": bool(chamfer),
-            "chamfer_width": chamfer_width,  # will be None if chamfer unchecked
+            "chamfer_width": chamfer_width,
         }
     }
 
-    r = requests.post(f"{API_BASE}/checkout/create", json=payload, timeout=30)
+    API_KEY = os.environ.get("API_KEY", "")
+    headers = {}
+    if API_KEY:
+        headers["x-api-key"] = API_KEY
+
+    r = requests.post(
+        f"{API_BASE}/checkout",
+        json=payload,
+        headers=headers,
+        timeout=30,
+    )
 
     if r.status_code != 200:
         st.error(f"Checkout API error: {r.status_code}")
@@ -245,8 +202,9 @@ def start_checkout():
 if st.button("Place Order & Pay"):
     start_checkout()
 
+
 # -----------------------------
-# Shipping display
+# Shipping estimates
 # -----------------------------
 area_sq_in = result.get("area_sq_in", _estimate_area_sq_in(paddle_dia, handle_length))
 weight_lb = result.get(
@@ -261,4 +219,4 @@ pkg = result.get(
 st.caption("Shipping estimates")
 s1, s2 = st.columns(2)
 s1.metric("Estimated Total Weight", f"{weight_lb:.2f} lb")
-s2.metric("Estimated Package Size", f"{pkg['length']} x {pkg['width']} x {pkg['height']} in")
+s2.metric("Estimated Package Size", f"{pkg['length']} × {pkg['width']} × {pkg['height']} in")
