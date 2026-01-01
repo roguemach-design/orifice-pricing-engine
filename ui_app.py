@@ -1,7 +1,6 @@
 # ui_app.py
 import os
-from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 import requests
 import streamlit as st
@@ -39,52 +38,7 @@ API_BASE = os.environ.get("API_BASE", "https://orifice-pricing-api.onrender.com"
 API_KEY = (os.environ.get("API_KEY") or "").strip()
 
 
-# -----------------------------
-# Sidebar debug
-# -----------------------------
-with st.sidebar:
-    st.subheader("Diagnostics")
-    st.write("API_BASE:", API_BASE)
-    st.write("DEBUG UI has API_KEY?", bool(API_KEY))
-    st.write("DEBUG API_KEY length:", len(API_KEY))
-    debug_mode = st.toggle("Debug mode", value=False)
-
-
-# -----------------------------
-# Helpers (safe to keep)
-# -----------------------------
-def _estimate_area_sq_in(paddle_dia: float, handle_length_from_bore: float) -> float:
-    return paddle_dia * (handle_length_from_bore + (paddle_dia / 2.0))
-
-
-def _estimate_package_in(paddle_dia: float, handle_length_from_bore: float, thickness: float, qty: int) -> dict:
-    paddle_radius = paddle_dia / 2.0
-    product_length = handle_length_from_bore + paddle_radius
-    product_width = paddle_dia
-    return {
-        "length": round(product_length + 4.0, 2),
-        "width": round(product_width + 4.0, 2),
-        "height": round(1.0 + (thickness if qty <= 1 else thickness * qty), 2),
-    }
-
-
-def _estimate_total_weight_lb(material: str, area_sq_in: float, thickness: float, qty: int) -> float:
-    densities = {
-        "304": 0.289,
-        "316": 0.289,
-        "Carbon Steel": 0.283,
-        "Monel": 0.319,
-        "Hastelloy": 0.321,
-    }
-    density = densities.get(material, 0.289)
-    return round(area_sq_in * thickness * density * qty, 2)
-
-
 def _qp_get(name: str) -> Optional[str]:
-    """
-    Streamlit query params can be str or list[str] depending on version.
-    Return a single string if present.
-    """
     qp = st.query_params
     if name not in qp:
         return None
@@ -118,24 +72,47 @@ if session_id:
             st.write("We’ll email your confirmation and approval drawing next.")
         else:
             st.info("Payment confirmed. Finalizing your order details… (refresh in a moment)")
-            if debug_mode:
-                st.write("orders/by-session status:", r.status_code)
-                st.code(r.text)
-    except Exception as e:
+    except Exception:
         st.info("Payment confirmed. Finalizing your order details… (refresh in a moment)")
-        if debug_mode:
-            st.write("Exception:", str(e))
 
     st.stop()
+
+
+# -----------------------------
+# Helpers (shipping estimates)
+# -----------------------------
+def _estimate_area_sq_in(paddle_dia: float, handle_length_from_bore: float) -> float:
+    return paddle_dia * (handle_length_from_bore + (paddle_dia / 2.0))
+
+
+def _estimate_package_in(paddle_dia: float, handle_length_from_bore: float, thickness: float, qty: int) -> dict:
+    paddle_radius = paddle_dia / 2.0
+    product_length = handle_length_from_bore + paddle_radius
+    product_width = paddle_dia
+    return {
+        "length": round(product_length + 4.0, 2),
+        "width": round(product_width + 4.0, 2),
+        "height": round(1.0 + (thickness if qty <= 1 else thickness * qty), 2),
+    }
+
+
+def _estimate_total_weight_lb(material: str, area_sq_in: float, thickness: float, qty: int) -> float:
+    densities = {
+        "304": 0.289,
+        "316": 0.289,
+        "Carbon Steel": 0.283,
+        "Monel": 0.319,
+        "Hastelloy": 0.321,
+    }
+    density = densities.get(material, 0.289)
+    return round(area_sq_in * thickness * density * qty, 2)
 
 
 # -----------------------------
 # Inputs
 # -----------------------------
 quantity = st.number_input("Qty", min_value=1, value=1, step=1)
-
 material = st.selectbox("Material Type", options=list(cfg.PRICE_PER_SQ_IN.keys()))
-
 thickness = st.selectbox(
     "Plate Thickness (in)",
     options=sorted(cfg.PRICE_PER_SQ_IN[material].keys()),
@@ -153,7 +130,21 @@ bore_tolerance = st.selectbox(
     index=tol_options.index(0.005) if 0.005 in tol_options else 0,
 )
 
+# New: handle labeling
+handle_label = st.text_input("Handle Label (optional)", value="")
+
 chamfer = st.checkbox("Chamfer", value=True)
+
+# New: chamfer width only if chamfer checked
+chamfer_width: Optional[float] = None
+if chamfer:
+    chamfer_width = st.number_input(
+        "Chamfer Width (in)",
+        min_value=0.0,
+        value=0.062,
+        step=0.001,
+        format="%.3f",
+    )
 
 ships_options = sorted(cfg.LEAD_TIME_MULTIPLIER.keys())
 ships_in_days = st.selectbox(
@@ -194,6 +185,8 @@ inputs = QuoteInputs(
     bore_dia=float(bore_dia),
     bore_tolerance=float(bore_tolerance),
     chamfer=bool(chamfer),
+    chamfer_width=float(chamfer_width) if chamfer and chamfer_width is not None else None,
+    handle_label=(handle_label or "").strip() or "No label",
     ships_in_days=int(ships_in_days),
 )
 
@@ -208,7 +201,6 @@ c2.metric("Total Price", f"${result['total_price']:,.2f}")
 # Checkout
 # -----------------------------
 def start_checkout() -> None:
-    # IMPORTANT: API expects {"inputs": QuoteRequest} per /openapi.json
     body = {
         "inputs": {
             "quantity": int(quantity),
@@ -220,6 +212,8 @@ def start_checkout() -> None:
             "bore_dia": float(bore_dia),
             "bore_tolerance": float(bore_tolerance),
             "chamfer": bool(chamfer),
+            "chamfer_width": float(chamfer_width) if chamfer and chamfer_width is not None else None,
+            "handle_label": (handle_label or "").strip() or "No label",
             "ships_in_days": int(ships_in_days),
         }
     }
@@ -227,12 +221,6 @@ def start_checkout() -> None:
     headers: Dict[str, str] = {}
     if API_KEY:
         headers["x-api-key"] = API_KEY
-
-    if debug_mode:
-        st.sidebar.write("DEBUG sending x-api-key?", bool(headers.get("x-api-key")))
-        st.sidebar.write("DEBUG sending x-api-key len:", len(headers.get("x-api-key") or ""))
-        st.sidebar.write("DEBUG checkout URL:", f"{API_BASE}/checkout/create")
-        st.sidebar.write("DEBUG request body keys:", list(body.get("inputs", {}).keys()))
 
     r = requests.post(f"{API_BASE}/checkout/create", json=body, headers=headers, timeout=30)
 
@@ -251,7 +239,6 @@ def start_checkout() -> None:
         st.json(resp)
         st.stop()
 
-    # Redirect to Stripe Checkout
     st.markdown(
         f"<meta http-equiv='refresh' content='0; url={checkout_url}'>",
         unsafe_allow_html=True,
@@ -269,7 +256,7 @@ if st.button("Place Order & Pay"):
 area_sq_in = result.get("area_sq_in", _estimate_area_sq_in(paddle_dia, handle_length))
 weight_lb = result.get(
     "estimated_total_weight_lb",
-    _estimate_total_weight_lb(material, area_sq_in, thickness, int(quantity)),
+    _estimate_total_weight_lb(material, area_sq_in, float(thickness), int(quantity)),
 )
 pkg = result.get(
     "estimated_package_in",
