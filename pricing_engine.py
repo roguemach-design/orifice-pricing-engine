@@ -1,13 +1,13 @@
 # pricing_engine.py
-from dataclasses import dataclass
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import math
+
+from pydantic import BaseModel, Field
 
 import pricing_config as cfg
 
 
-@dataclass(frozen=True)
-class QuoteInputs:
+class QuoteInputs(BaseModel):
     quantity: int
     material: str
     thickness: float
@@ -18,6 +18,10 @@ class QuoteInputs:
     bore_tolerance: float
     chamfer: bool
     ships_in_days: int
+
+    # --- New fields ---
+    handle_label: str = Field(default="No label")
+    chamfer_width: Optional[float] = None
 
 
 def _require(cond: bool, msg: str) -> None:
@@ -182,5 +186,8 @@ def calculate_quote(x: QuoteInputs) -> Dict[str, Any]:
             "height": round(pkg_h_in, 2),
         },
         "shipping": shipping_rates,
-    }
 
+        # --- New inputs echoed back (optional but helpful for debugging/UI) ---
+        "handle_label": x.handle_label,
+        "chamfer_width": x.chamfer_width,
+    }
