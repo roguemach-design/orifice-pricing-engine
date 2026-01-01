@@ -1,6 +1,6 @@
+# api_app
 import os
 import uuid
-import hashlib
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -41,9 +41,7 @@ app.add_middleware(
 
 # API keys
 API_KEY = os.environ.get("API_KEY", "").strip()
-ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "").strip()  # optional, if you want separate admin auth
-
-print("DEBUG API_KEY loaded length =", len(API_KEY))
+ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "").strip()  # optional separate admin auth
 
 # Stripe config (set in Render -> orifice-pricing-api -> Environment)
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
@@ -97,34 +95,11 @@ init_db()
 # ----------------------------
 # Helpers
 # ----------------------------
-
-def _mask(s: str) -> str:
-    s = (s or "").strip()
-    if len(s) <= 8:
-        return s
-    return f"{s[:4]}…{s[-4:]} (len={len(s)})"
-
 def _require_api_key(x_api_key: Optional[str] = Header(default=None, alias="x-api-key")) -> None:
     expected = (API_KEY or "").strip()
     provided = (x_api_key or "").strip()
-
-    print("DEBUG auth expected:", _mask(expected))
-    print("DEBUG auth provided:", _mask(provided))
-
-    # 🔎 DEFINITIVE DEBUG (TEMPORARY)
-    print(
-        "DEBUG expected sha256:",
-        hashlib.sha256(expected.encode()).hexdigest(),
-    )
-    print(
-        "DEBUG provided sha256:",
-        hashlib.sha256(provided.encode()).hexdigest(),
-    )
-
-
     if expected and (not provided or provided != expected):
-        raise HTTPException(status_code=401, detail="401 from _require_api_key")
-
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 def _require_admin_key(x_api_key: Optional[str] = Header(default=None, alias="x-api-key")) -> None:
@@ -133,15 +108,13 @@ def _require_admin_key(x_api_key: Optional[str] = Header(default=None, alias="x-
     """
     expected = (ADMIN_API_KEY or API_KEY or "").strip()
     provided = (x_api_key or "").strip()
-
     if expected and (not provided or provided != expected):
-        raise HTTPException(status_code=401, detail="401 from _require_admin_key")
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 def _send_email(to_email: str, subject: str, html: str) -> None:
     # Allow running without email configured
     if not SENDGRID_API_KEY:
-        print("ℹ️ SENDGRID_API_KEY not set; skipping email.")
         return
 
     msg = Mail(
@@ -156,6 +129,24 @@ def _send_email(to_email: str, subject: str, html: str) -> None:
 def _db_required() -> None:
     if not SessionLocal:
         raise HTTPException(status_code=500, detail="DB not configured (missing DATABASE_URL).")
+
+
+def _normalize_quote_payload(payload: dict) -> dict:
+    """
+    Apply defaults/normalization so QuoteInputs always receives clean fields.
+    """
+    # Handle labeling default
+    payload["handle_label"] = (payload.get("handle_label") or "").strip() or "No label"
+
+    # Chamfer width logic
+    if not payload.get("chamfer"):
+        payload["chamfer_width"] = None
+    else:
+        # If chamfer is true but width not provided, default it
+        if payload.get("chamfer_width") is None:
+            payload["chamfer_width"] = 0.062
+
+    return payload
 
 
 # ----------------------------
@@ -173,6 +164,10 @@ class QuoteRequest(BaseModel):
     chamfer: bool
     ships_in_days: int
 
+    # Added fields (optional)
+    handle_label: Optional[str] = None
+    chamfer_width: Optional[float] = None
+
 
 class CheckoutCreateRequest(BaseModel):
     inputs: QuoteRequest
@@ -189,13 +184,7 @@ def health():
 @app.post("/quote", dependencies=[Depends(_require_api_key)])
 async def quote(request: Request):
     payload = await request.json()
-
-    # ---- Normalize optional fields ----
-    payload["handle_label"] = (payload.get("handle_label") or "").strip() or "No label"
-
-    # If chamfer is false/unchecked, chamfer_width should be None
-    if not payload.get("chamfer"):
-        payload["chamfer_width"] = None
+    payload = _normalize_quote_payload(payload)
 
     inputs = QuoteInputs(**payload)
     return calculate_quote(inputs)
@@ -212,7 +201,8 @@ def checkout_create(req: CheckoutCreateRequest):
         raise HTTPException(status_code=500, detail="Stripe is not configured (missing STRIPE_SECRET_KEY).")
 
     # Recompute quote on server
-    inputs = QuoteInputs(**req.inputs.model_dump())
+    payload = _normalize_quote_payload(req.inputs.model_dump())
+    inputs = QuoteInputs(**payload)
     result = calculate_quote(inputs)
 
     total_cents = int(result.get("total_price_cents") or round(float(result["total_price"]) * 100))
@@ -264,12 +254,10 @@ def checkout_create(req: CheckoutCreateRequest):
                 }
             },
         ],
-        metadata={
-            "quote_id": str(result.get("quote_id", "")),
-        },
+        metadata={"quote_id": str(result.get("quote_id", ""))},
     )
 
-    # Save a "pending" order (optional but helpful)
+    # Save a "pending" order
     if SessionLocal:
         db = SessionLocal()
         try:
@@ -278,7 +266,7 @@ def checkout_create(req: CheckoutCreateRequest):
                 o = Order(
                     id=str(uuid.uuid4()),
                     stripe_session_id=session.id,
-                    quote_payload=req.inputs.model_dump(),
+                    quote_payload=payload,  # save normalized payload
                 )
                 db.add(o)
                 db.commit()
@@ -309,32 +297,6 @@ def get_order_by_session(session_id: str):
             "amount_shipping_usd": (o.amount_shipping_cents or 0) / 100.0,
             "shipping_service": o.shipping_service,
             "created_at": o.created_at.isoformat() if o.created_at else None,
-        }
-    finally:
-        db.close()
-
-
-@app.get("/debug/order/{order_id}")
-def debug_order(order_id: str):
-    _db_required()
-    db = SessionLocal()
-    try:
-        o = db.query(Order).filter(Order.id == order_id).first()
-        if not o:
-            return {"error": "not found"}
-
-        return {
-            "id": o.id,
-            "created_at": o.created_at,
-            "customer_email": o.customer_email,
-            "amount_total_cents": o.amount_total_cents,
-            "amount_shipping_cents": o.amount_shipping_cents,
-            "shipping_service": o.shipping_service,
-            "shipping_name": o.shipping_name,
-            "shipping_address": o.shipping_address,
-            "quote_payload": o.quote_payload,
-            "stripe_session_id": o.stripe_session_id,
-            "stripe_payment_intent": o.stripe_payment_intent,
         }
     finally:
         db.close()
@@ -445,8 +407,6 @@ async def stripe_webhook(request: Request):
         # Still blank for now (we can fill this in next by retrieving selected shipping_rate)
         shipping_service = None
 
-        print("✅ PAYMENT CONFIRMED:", stripe_session_id)
-
         # Save/update order in DB
         if SessionLocal:
             db = SessionLocal()
@@ -475,7 +435,6 @@ async def stripe_webhook(request: Request):
                 db.close()
         else:
             order_id = "N/A"
-            print("ℹ️ DATABASE_URL not set; skipping DB save.")
 
         # Email confirmation
         if customer_email:
