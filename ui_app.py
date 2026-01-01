@@ -70,10 +70,6 @@ def _pretty_shipping_service(code: str | None) -> str:
 
 
 def _format_order_number(order: dict) -> str:
-    """
-    Prefer API-provided order_number_display.
-    If missing, format order_number as OP-0001.
-    """
     disp = (order.get("order_number_display") or "").strip()
     if disp:
         return disp
@@ -88,6 +84,41 @@ def _format_order_number(order: dict) -> str:
     return "(finalizing...)"
 
 
+def _format_address(addr: object) -> str:
+    """
+    Stripe shipping address dict looks like:
+    {line1, line2, city, state, postal_code, country}
+    """
+    if not isinstance(addr, dict):
+        return ""
+
+    line1 = (addr.get("line1") or "").strip()
+    line2 = (addr.get("line2") or "").strip()
+    city = (addr.get("city") or "").strip()
+    state = (addr.get("state") or "").strip()
+    postal = (addr.get("postal_code") or "").strip()
+    country = (addr.get("country") or "").strip()
+
+    lines = []
+    if line1:
+        lines.append(line1)
+    if line2:
+        lines.append(line2)
+
+    city_state = ", ".join([p for p in [city, state] if p]).strip()
+    if city_state and postal:
+        lines.append(f"{city_state} {postal}".strip())
+    elif city_state:
+        lines.append(city_state)
+    elif postal:
+        lines.append(postal)
+
+    if country:
+        lines.append(country)
+
+    return "\n".join([ln for ln in lines if ln.strip()])
+
+
 # -----------------------------
 # Success page (session_id in query params)
 # -----------------------------
@@ -96,7 +127,6 @@ if session_id:
     st.title("Payment received ✅")
     st.write("Thanks — we received your payment. We’re preparing your order now.")
 
-    # Optional: allow user to refresh only this section
     refresh_status = st.button("🔄 Refresh order status")
 
     try:
@@ -117,21 +147,32 @@ if session_id:
             st.write(f"Shipping cost: **{_fmt_usd(ship)}**")
             st.write(f"Shipping option: **{_pretty_shipping_service(service)}**")
 
+            # ✅ NEW: show shipping name + address if present
+            ship_name = (order.get("shipping_name") or "").strip()
+            ship_addr = order.get("shipping_address")
+            addr_text = _format_address(ship_addr)
+
+            if ship_name or addr_text:
+                st.subheader("Ship to")
+                if ship_name:
+                    st.write(f"**{ship_name}**")
+                if addr_text:
+                    st.code(addr_text)
+                else:
+                    st.write("(Address not available yet)")
+
             st.write("We’ll email your confirmation and approval drawing next.")
 
-            # If still finalizing, tell user why
-            if _format_order_number(order) == "(finalizing...)" or not service:
+            if _format_order_number(order) == "(finalizing...)" or not service or (not ship_name and not addr_text):
                 st.info(
-                    "If this page shows “finalizing…”, it usually means Stripe’s webhook is still writing the final "
-                    "details to the database. Click **Refresh order status** in a moment."
+                    "If this page shows “finalizing…” or is missing address/shipping option, it usually means Stripe’s "
+                    "webhook is still writing the final details to the database. Click **Refresh order status** in a moment."
                 )
-
         else:
             st.info("Payment confirmed. Finalizing your order details… (refresh in a moment)")
     except Exception:
         st.info("Payment confirmed. Finalizing your order details… (refresh in a moment)")
 
-    # If they hit refresh, Streamlit reruns anyway — this line is just explicit.
     if refresh_status:
         st.rerun()
 
@@ -190,12 +231,10 @@ bore_tolerance = st.selectbox(
     index=tol_options.index(0.005) if 0.005 in tol_options else 0,
 )
 
-# Handle labeling
 handle_label = st.text_input("Handle Label (optional)", value="")
 
 chamfer = st.checkbox("Chamfer", value=True)
 
-# Chamfer width only if chamfer checked
 chamfer_width: Optional[float] = None
 if chamfer:
     chamfer_width = st.number_input(
