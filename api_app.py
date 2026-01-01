@@ -4,14 +4,14 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import stripe
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from pricing_engine import QuoteInputs, calculate_quote
 
 # DB (Postgres via Render)
-from sqlalchemy import create_engine, Column, String, Integer, DateTime, JSON, or_
+from sqlalchemy import Column, DateTime, Integer, JSON, String, create_engine, or_
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 # Email (SendGrid)
@@ -38,8 +38,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Optional API key protection (for your own endpoints, not Stripe webhooks)
-API_KEY = os.environ.get("API_KEY", "")
+# API keys
+API_KEY = os.environ.get("API_KEY", "").strip()
+ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "").strip()  # optional, if you want separate admin auth
 
 print("DEBUG API_KEY loaded length =", len(API_KEY))
 
@@ -95,14 +96,28 @@ init_db()
 # ----------------------------
 # Helpers
 # ----------------------------
-def _require_api_key(x_api_key: Optional[str]) -> None:
-    # Normalize to avoid trailing spaces/newlines in Render env vars or headers
+def _require_api_key(x_api_key: Optional[str] = Header(default=None, alias="x-api-key")) -> None:
+    """
+    Protects non-webhook endpoints with API_KEY.
+    IMPORTANT: Header alias must be 'x-api-key' so FastAPI actually reads the header.
+    """
     expected = (API_KEY or "").strip()
     provided = (x_api_key or "").strip()
 
-    if expected:
-        if not provided or provided != expected:
-            raise HTTPException(status_code=401, detail="Unauthorized")
+    # If API_KEY isn't set, do not enforce (useful for local/dev). If set, enforce strictly.
+    if expected and (not provided or provided != expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _require_admin_key(x_api_key: Optional[str] = Header(default=None, alias="x-api-key")) -> None:
+    """
+    Optional separate admin protection. If ADMIN_API_KEY is not set, falls back to API_KEY.
+    """
+    expected = (ADMIN_API_KEY or API_KEY or "").strip()
+    provided = (x_api_key or "").strip()
+
+    if expected and (not provided or provided != expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 def _send_email(to_email: str, subject: str, html: str) -> None:
@@ -153,10 +168,8 @@ def health():
     return {"ok": True}
 
 
-@app.post("/quote")
-async def quote(request: Request, x_api_key: Optional[str] = Header(default=None)):
-    _require_api_key(x_api_key)
-
+@app.post("/quote", dependencies=[Depends(_require_api_key)])
+async def quote(request: Request):
     payload = await request.json()
 
     # ---- Normalize optional fields ----
@@ -170,15 +183,13 @@ async def quote(request: Request, x_api_key: Optional[str] = Header(default=None
     return calculate_quote(inputs)
 
 
-@app.post("/checkout/create")
-def checkout_create(req: CheckoutCreateRequest, x_api_key: Optional[str] = Header(default=None)):
+@app.post("/checkout/create", dependencies=[Depends(_require_api_key)])
+def checkout_create(req: CheckoutCreateRequest):
     """
     Called by Streamlit to start Stripe Checkout.
     Server recomputes pricing + shipping options (do not trust client).
     Also saves a "pending" order record keyed to the Stripe session.
     """
-    _require_api_key(x_api_key)
-
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Stripe is not configured (missing STRIPE_SECRET_KEY).")
 
@@ -226,7 +237,6 @@ def checkout_create(req: CheckoutCreateRequest, x_api_key: Optional[str] = Heade
                     "metadata": {"service": "ups_2day"},
                 }
             },
-            # FIXED: UPS Next Day Air
             {
                 "shipping_rate_data": {
                     "type": "fixed_amount",
@@ -313,15 +323,10 @@ def debug_order(order_id: str):
 
 
 # ----------------------------
-# Admin endpoints (Option 2)
+# Admin endpoints
 # ----------------------------
-@app.get("/admin/orders")
-def admin_list_orders(
-    q: Optional[str] = None,
-    limit: int = 50,
-    x_api_key: Optional[str] = Header(default=None),
-):
-    _require_api_key(x_api_key)
+@app.get("/admin/orders", dependencies=[Depends(_require_admin_key)])
+def admin_list_orders(q: Optional[str] = None, limit: int = 50):
     _db_required()
 
     limit = max(1, min(int(limit), 200))
@@ -358,9 +363,8 @@ def admin_list_orders(
         db.close()
 
 
-@app.get("/admin/orders/{order_id}")
-def admin_get_order(order_id: str, x_api_key: Optional[str] = Header(default=None)):
-    _require_api_key(x_api_key)
+@app.get("/admin/orders/{order_id}", dependencies=[Depends(_require_admin_key)])
+def admin_get_order(order_id: str):
     _db_required()
 
     db = SessionLocal()
