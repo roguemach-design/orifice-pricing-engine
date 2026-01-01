@@ -1,5 +1,4 @@
-# ui_app.py
-import os
+
 import streamlit as st
 import requests
 
@@ -16,9 +15,7 @@ def _estimate_area_sq_in(paddle_dia: float, handle_length_from_bore: float) -> f
     return paddle_dia * (handle_length_from_bore + (paddle_dia / 2.0))
 
 
-def _estimate_package_in(
-    paddle_dia: float, handle_length_from_bore: float, thickness: float, qty: int
-) -> dict:
+def _estimate_package_in(paddle_dia: float, handle_length_from_bore: float, thickness: float, qty: int) -> dict:
     paddle_radius = paddle_dia / 2.0
     product_length = handle_length_from_bore + paddle_radius
     product_width = paddle_dia
@@ -41,37 +38,76 @@ def _estimate_total_weight_lb(material: str, area_sq_in: float, thickness: float
     return round(area_sq_in * thickness * density * qty, 2)
 
 
-def _quoteinputs_accepts(field_name: str) -> bool:
-    if hasattr(QuoteInputs, "__dataclass_fields__"):
-        return field_name in QuoteInputs.__dataclass_fields__
-    if hasattr(QuoteInputs, "model_fields"):
-        return field_name in QuoteInputs.model_fields
-    if hasattr(QuoteInputs, "__fields__"):
-        return field_name in QuoteInputs.__fields__
-    return False
-
-
 # -----------------------------
 # Page setup
 # -----------------------------
 st.set_page_config(page_title="Orifice Plate Instant Quote", layout="centered")
+
+st.markdown(
+    """
+    <style>
+    h1 {
+      font-family: Arial, sans-serif;
+      font-weight: 800;
+      letter-spacing: 0.2px;
+      margin-bottom: 0.25rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 st.title("Orifice Plate Instant Quote")
+
+from urllib.parse import parse_qs
+import requests
+import streamlit as st
+
+API_BASE = "https://orifice-pricing-api.onrender.com"
+
+def _get_path_and_query():
+    # Streamlit gives a full URL in query params; easiest is using built-ins:
+    qp = st.query_params
+    # Path is not always directly exposed depending on Streamlit hosting.
+    # We'll treat "success" as presence of session_id param.
+    return qp
+
+qp = _get_path_and_query()
+
+# --- SUCCESS PAGE ---
+if "session_id" in qp:
+    session_id = qp["session_id"]
+    st.title("Payment received ✅")
+    st.write("Thanks — we received your payment. We’re preparing your order now.")
+
+    # Fetch stored order details from API (we'll add this endpoint below)
+    try:
+        r = requests.get(f"{API_BASE}/orders/by-session/{session_id}", timeout=30)
+        if r.status_code == 200:
+            order = r.json()
+            st.subheader("Order summary")
+            st.write(f"Order ID: **{order['id']}**")
+            st.write(f"Email: **{order['customer_email']}**")
+            st.write(f"Total paid: **${order['amount_total_usd']:.2f}**")
+            st.write(f"Shipping: **{order['shipping_service']}**")
+            st.write("We’ll email your confirmation and approval drawing next.")
+        else:
+            st.info("Payment confirmed. Finalizing your order details… (refresh in a moment)")
+    except Exception:
+        st.info("Payment confirmed. Finalizing your order details… (refresh in a moment)")
+
+    st.stop()
 
 
 # -----------------------------
 # Inputs
 # -----------------------------
 quantity = st.number_input("Qty", min_value=1, value=1, step=1)
-
 material = st.selectbox("Material Type", options=list(cfg.PRICE_PER_SQ_IN.keys()))
-thickness = st.selectbox(
-    "Plate Thickness (in)",
-    options=sorted(cfg.PRICE_PER_SQ_IN[material].keys()),
-)
-
+thickness = st.selectbox("Plate Thickness (in)", options=sorted(cfg.PRICE_PER_SQ_IN[material].keys()))
 handle_width = st.number_input("Handle Width (in)", min_value=0.0, value=1.5, step=0.01)
 handle_length = st.number_input("Handle Length from Bore (in)", min_value=0.0, value=9.0, step=0.01)
-paddle_dia = st.number_input("Paddle Diameter (in)", min_value=0.01, value=3.0, step=0.01)
+paddle_dia = st.number_input("Paddle Diameter (in)", min_value=0.01, max_value=48.0, value=3.0, step=0.01)
 bore_dia = st.number_input("Bore Diameter (in)", min_value=0.01, value=1.0, step=0.01)
 
 tol_options = sorted(cfg.INSPECTION_MINS_BY_TOL.keys())
@@ -83,22 +119,6 @@ bore_tolerance = st.selectbox(
 
 chamfer = st.checkbox("Chamfer", value=True)
 
-handle_label = st.text_input(
-    "Handle label (optional)",
-    value="",
-    help="If left blank, we’ll store 'No label'.",
-).strip()
-
-chamfer_width = None
-if chamfer:
-    chamfer_width = st.number_input(
-        "Chamfer width (inches)",
-        min_value=0.0,
-        value=0.03,
-        step=0.005,
-        format="%.3f",
-    )
-
 ships_options = sorted(cfg.LEAD_TIME_MULTIPLIER.keys())
 ships_in_days = st.selectbox(
     "Ships in (days)",
@@ -109,7 +129,6 @@ ships_in_days = st.selectbox(
 st.divider()
 st.subheader("Quote Summary")
 
-
 # -----------------------------
 # Validation
 # -----------------------------
@@ -117,18 +136,17 @@ errors = []
 if bore_dia >= paddle_dia:
     errors.append("Bore Diameter must be smaller than Paddle Diameter.")
 if handle_length <= (paddle_dia / 2):
-    errors.append("Handle Length must exceed paddle radius.")
+    errors.append("Handle Length (From Bore) must be longer than the Paddle Radius.")
 
 if errors:
     for e in errors:
         st.error(e)
     st.stop()
 
-
 # -----------------------------
 # Pricing
 # -----------------------------
-inputs_kwargs = dict(
+inputs = QuoteInputs(
     quantity=int(quantity),
     material=str(material),
     thickness=float(thickness),
@@ -141,21 +159,14 @@ inputs_kwargs = dict(
     ships_in_days=int(ships_in_days),
 )
 
-if _quoteinputs_accepts("handle_label"):
-    inputs_kwargs["handle_label"] = handle_label or "No label"
-if _quoteinputs_accepts("chamfer_width"):
-    inputs_kwargs["chamfer_width"] = chamfer_width
-
-inputs = QuoteInputs(**inputs_kwargs)
 result = calculate_quote(inputs)
 
 c1, c2 = st.columns(2)
 c1.metric("Unit Price", f"${result['unit_price']:,.2f}")
 c2.metric("Total Price", f"${result['total_price']:,.2f}")
 
-
 # -----------------------------
-# Checkout
+# Checkout (SAFE FUNCTION)
 # -----------------------------
 def start_checkout():
     payload = {
@@ -168,24 +179,12 @@ def start_checkout():
             "paddle_dia": float(paddle_dia),
             "bore_dia": float(bore_dia),
             "bore_tolerance": float(bore_tolerance),
-            "ships_in_days": int(ships_in_days),
-            "handle_label": handle_label or "No label",
             "chamfer": bool(chamfer),
-            "chamfer_width": chamfer_width,
+            "ships_in_days": int(ships_in_days),
         }
     }
 
-    API_KEY = os.environ.get("API_KEY", "")
-    headers = {}
-    if API_KEY:
-        headers["x-api-key"] = API_KEY
-
-    r = requests.post(
-        f"{API_BASE}/checkout",
-        json=payload,
-        headers=headers,
-        timeout=30,
-    )
+    r = requests.post(f"{API_BASE}/checkout/create", json=payload, timeout=30)
 
     if r.status_code != 200:
         st.error(f"Checkout API error: {r.status_code}")
@@ -202,21 +201,20 @@ def start_checkout():
 if st.button("Place Order & Pay"):
     start_checkout()
 
-
 # -----------------------------
-# Shipping estimates
+# Shipping display
 # -----------------------------
 area_sq_in = result.get("area_sq_in", _estimate_area_sq_in(paddle_dia, handle_length))
 weight_lb = result.get(
     "estimated_total_weight_lb",
-    _estimate_total_weight_lb(material, area_sq_in, float(thickness), int(quantity)),
+    _estimate_total_weight_lb(material, area_sq_in, thickness, quantity),
 )
 pkg = result.get(
     "estimated_package_in",
-    _estimate_package_in(paddle_dia, handle_length, float(thickness), int(quantity)),
+    _estimate_package_in(paddle_dia, handle_length, thickness, quantity),
 )
 
 st.caption("Shipping estimates")
 s1, s2 = st.columns(2)
 s1.metric("Estimated Total Weight", f"{weight_lb:.2f} lb")
-s2.metric("Estimated Package Size", f"{pkg['length']} × {pkg['width']} × {pkg['height']} in")
+s2.metric("Estimated Package Size", f"{pkg['length']} x {pkg['width']} x {pkg['height']} in")
