@@ -96,17 +96,23 @@ init_db()
 # ----------------------------
 # Helpers
 # ----------------------------
+
+def _mask(s: str) -> str:
+    s = (s or "").strip()
+    if len(s) <= 8:
+        return s
+    return f"{s[:4]}…{s[-4:]} (len={len(s)})"
+
 def _require_api_key(x_api_key: Optional[str] = Header(default=None, alias="x-api-key")) -> None:
-    """
-    Protects non-webhook endpoints with API_KEY.
-    IMPORTANT: Header alias must be 'x-api-key' so FastAPI actually reads the header.
-    """
     expected = (API_KEY or "").strip()
     provided = (x_api_key or "").strip()
 
-    # If API_KEY isn't set, do not enforce (useful for local/dev). If set, enforce strictly.
+    print("DEBUG auth expected:", _mask(expected))
+    print("DEBUG auth provided:", _mask(provided))
+
     if expected and (not provided or provided != expected):
         raise HTTPException(status_code=401, detail="Unauthorized")
+
 
 
 def _require_admin_key(x_api_key: Optional[str] = Header(default=None, alias="x-api-key")) -> None:
