@@ -111,7 +111,7 @@ def _require_api_key(x_api_key: Optional[str] = Header(default=None, alias="x-ap
     print("DEBUG auth provided:", _mask(provided))
 
     if expected and (not provided or provided != expected):
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise HTTPException(status_code=401, detail="401 from _require_api_key")
 
 
 
@@ -123,7 +123,7 @@ def _require_admin_key(x_api_key: Optional[str] = Header(default=None, alias="x-
     provided = (x_api_key or "").strip()
 
     if expected and (not provided or provided != expected):
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise HTTPException(status_code=401, detail="401 from _require_admin_key")
 
 
 def _send_email(to_email: str, subject: str, html: str) -> None:
