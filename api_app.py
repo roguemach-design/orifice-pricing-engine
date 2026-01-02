@@ -42,7 +42,7 @@ app.add_middleware(
 
 # API keys
 API_KEY = (os.environ.get("API_KEY") or "").strip()
-ADMIN_API_KEY = (os.environ.get("ADMIN_API_KEY") or "").strip()
+ADMIN_API_KEY = (os.environ.get("ADMIN_API_KEY") or "").strip()  # optional, separate admin auth
 
 # Stripe config
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
@@ -92,8 +92,11 @@ def init_db() -> None:
     if not engine:
         return
 
+    # Create base tables if missing
     Base.metadata.create_all(bind=engine)
 
+    # Lightweight “auto-migration” for order_number (best-effort)
+    # NOTE: This won’t handle every schema change—just this one.
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_number INTEGER"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_orders_order_number ON orders(order_number)"))
@@ -113,6 +116,9 @@ def _require_api_key(x_api_key: Optional[str] = Header(default=None, alias="x-ap
 
 
 def _require_admin_key(x_api_key: Optional[str] = Header(default=None, alias="x-api-key")) -> None:
+    """
+    Optional separate admin protection. If ADMIN_API_KEY is not set, falls back to API_KEY.
+    """
     expected = (ADMIN_API_KEY or API_KEY or "").strip()
     provided = (x_api_key or "").strip()
     if expected and (not provided or provided != expected):
@@ -138,6 +144,10 @@ def _format_order_number(n: Optional[int]) -> Optional[str]:
 
 
 def _assign_order_number(db, o: Order) -> None:
+    """
+    Assigns the next available order_number (1, 2, 3...) if missing.
+    Uses a retry loop to handle rare race conditions.
+    """
     if o.order_number:
         return
 
@@ -170,6 +180,7 @@ class QuoteRequest(BaseModel):
     chamfer: bool
     ships_in_days: int
 
+    # Optional fields (keep defaults here so UI can omit safely)
     handle_label: str = Field(default="No label")
     chamfer_width: Optional[float] = Field(default=0.062)  # inches
 
@@ -190,8 +201,10 @@ def health():
 async def quote(request: Request):
     payload = await request.json()
 
+    # Normalize optional fields
     payload["handle_label"] = (payload.get("handle_label") or "").strip() or "No label"
 
+    # Default chamfer_width if chamfer True and missing/blank
     if payload.get("chamfer"):
         cw = payload.get("chamfer_width")
         if cw is None or cw == "":
@@ -205,9 +218,15 @@ async def quote(request: Request):
 
 @app.post("/checkout/create", dependencies=[Depends(_require_api_key)])
 def checkout_create(req: CheckoutCreateRequest):
+    """
+    Called by Streamlit to start Stripe Checkout.
+    Server recomputes pricing + shipping options (do not trust client).
+    Also saves a "pending" order record keyed to the Stripe session.
+    """
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Stripe is not configured (missing STRIPE_SECRET_KEY).")
 
+    # Recompute quote on server (req includes defaults for handle_label/chamfer_width)
     inputs = QuoteInputs(**req.inputs.model_dump())
     result = calculate_quote(inputs)
 
@@ -262,6 +281,7 @@ def checkout_create(req: CheckoutCreateRequest):
         metadata={"quote_id": str(result.get("quote_id", ""))},
     )
 
+    # Save a "pending" order
     if SessionLocal:
         db = SessionLocal()
         try:
@@ -293,7 +313,6 @@ def get_order_by_session(session_id: str):
         if not o:
             raise HTTPException(status_code=404, detail="Order not found yet")
 
-        # ✅ Added shipping_name + shipping_address for UI success page
         return {
             "id": o.id,
             "order_number": o.order_number,
@@ -303,8 +322,6 @@ def get_order_by_session(session_id: str):
             "amount_subtotal_usd": (o.amount_subtotal_cents or 0) / 100.0,
             "amount_shipping_usd": (o.amount_shipping_cents or 0) / 100.0,
             "shipping_service": o.shipping_service,
-            "shipping_name": o.shipping_name,
-            "shipping_address": o.shipping_address,
             "created_at": o.created_at.isoformat() if o.created_at else None,
         }
     finally:
@@ -345,6 +362,8 @@ def admin_list_orders(q: Optional[str] = None, limit: int = 50):
                 "amount_total_usd": (o.amount_total_cents or 0) / 100.0,
                 "amount_shipping_usd": (o.amount_shipping_cents or 0) / 100.0,
                 "shipping_service": o.shipping_service,
+                # Keep stripe_session_id available for debugging if needed by admin UI,
+                # but your admin page can simply stop displaying it.
                 "stripe_session_id": o.stripe_session_id,
             }
             for o in orders
@@ -416,17 +435,15 @@ async def stripe_webhook(request: Request):
         shipping_name = shipping_details.get("name")
         shipping_address = shipping_details.get("address")
 
-        # Determine selected shipping option
-        shipping_service = None
-        try:
-            shipping_cost = session.get("shipping_cost") or {}
-            shipping_rate_id = shipping_cost.get("shipping_rate")
-            if shipping_rate_id:
-                sr = stripe.ShippingRate.retrieve(shipping_rate_id)
-                shipping_service = (sr.get("metadata") or {}).get("service") or sr.get("display_name")
-        except Exception:
-            shipping_service = None
+        # --- Shipping name/address (Stripe can put these in different places) ---
+        shipping_details = session.get("shipping_details") or {}
+        customer_details = session.get("customer_details") or {}
 
+        shipping_name = (shipping_details.get("name") or customer_details.get("name"))
+        shipping_address = (shipping_details.get("address") or customer_details.get("address"))
+
+
+        # Save/update order in DB
         if SessionLocal:
             db = SessionLocal()
             try:
@@ -449,6 +466,7 @@ async def stripe_webhook(request: Request):
                 db.commit()
                 db.refresh(o)
 
+                # Assign human-friendly order number now that it's paid
                 _assign_order_number(db, o)
 
                 order_id = o.id
@@ -459,6 +477,7 @@ async def stripe_webhook(request: Request):
             order_id = "N/A"
             order_display = "OP-????"
 
+        # Email confirmation
         if customer_email:
             _send_email(
                 to_email=customer_email,
