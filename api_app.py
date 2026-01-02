@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from pricing_engine import QuoteInputs, calculate_quote
 
 # DB (Postgres via Render)
-from sqlalchemy import Column, DateTime, Integer, JSON, String, create_engine, or_, text, func
+from sqlalchemy import Column, DateTime, Integer, JSON, String, create_engine, func, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import declarative_base, sessionmaker
 
@@ -96,7 +96,6 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
 
     # Lightweight “auto-migration” for order_number (best-effort)
-    # NOTE: This won’t handle every schema change—just this one.
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_number INTEGER"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_orders_order_number ON orders(order_number)"))
@@ -322,6 +321,9 @@ def get_order_by_session(session_id: str):
             "amount_subtotal_usd": (o.amount_subtotal_cents or 0) / 100.0,
             "amount_shipping_usd": (o.amount_shipping_cents or 0) / 100.0,
             "shipping_service": o.shipping_service,
+            # ✅ include address fields for UI success page
+            "shipping_name": o.shipping_name,
+            "shipping_address": o.shipping_address,
             "created_at": o.created_at.isoformat() if o.created_at else None,
         }
     finally:
@@ -362,8 +364,7 @@ def admin_list_orders(q: Optional[str] = None, limit: int = 50):
                 "amount_total_usd": (o.amount_total_cents or 0) / 100.0,
                 "amount_shipping_usd": (o.amount_shipping_cents or 0) / 100.0,
                 "shipping_service": o.shipping_service,
-                # Keep stripe_session_id available for debugging if needed by admin UI,
-                # but your admin page can simply stop displaying it.
+                # keep available if needed, admin UI can hide it
                 "stripe_session_id": o.stripe_session_id,
             }
             for o in orders
@@ -421,27 +422,48 @@ async def stripe_webhook(request: Request):
         raise HTTPException(status_code=400, detail="Invalid Stripe signature")
 
     if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
+        session = event["data"]["object"] or {}
+
+        # ✅ Refresh session from Stripe to ensure we have full details
+        try:
+            session = stripe.checkout.Session.retrieve(
+                session.get("id"),
+                expand=["shipping_cost.shipping_rate", "customer_details", "shipping_details"],
+            )
+        except Exception:
+            # If refresh fails, fall back to the event payload
+            pass
 
         stripe_session_id = session.get("id")
         payment_intent = session.get("payment_intent")
 
-        customer_email = (session.get("customer_details") or {}).get("email")
+        customer_details = session.get("customer_details") or {}
+        customer_email = customer_details.get("email")
+
         amount_total = session.get("amount_total")  # cents
         amount_subtotal = session.get("amount_subtotal")  # cents
         amount_shipping = ((session.get("shipping_cost") or {}).get("amount_total"))  # cents
 
+        # ✅ Determine selected shipping option (prefer expanded shipping_rate)
+        shipping_service = None
+        try:
+            shipping_cost = session.get("shipping_cost") or {}
+            sr = shipping_cost.get("shipping_rate")  # expanded object if expand worked
+
+            if isinstance(sr, dict):
+                shipping_service = (sr.get("metadata") or {}).get("service") or sr.get("display_name")
+            else:
+                shipping_rate_id = shipping_cost.get("shipping_rate")
+                if shipping_rate_id:
+                    sr2 = stripe.ShippingRate.retrieve(shipping_rate_id)
+                    shipping_service = (sr2.get("metadata") or {}).get("service") or sr2.get("display_name")
+        except Exception:
+            shipping_service = None
+
+        # ✅ Shipping name/address with fallback to customer_details
         shipping_details = session.get("shipping_details") or {}
-        shipping_name = shipping_details.get("name")
-        shipping_address = shipping_details.get("address")
-
-        # --- Shipping name/address (Stripe can put these in different places) ---
-        shipping_details = session.get("shipping_details") or {}
-        customer_details = session.get("customer_details") or {}
-
-        shipping_name = (shipping_details.get("name") or customer_details.get("name"))
-        shipping_address = (shipping_details.get("address") or customer_details.get("address"))
-
+        shipping_name = shipping_details.get("name") or customer_details.get("name")
+        shipping_address = shipping_details.get("address") or customer_details.get("address")
 
         # Save/update order in DB
         if SessionLocal:
