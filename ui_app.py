@@ -23,7 +23,7 @@ st.markdown(
         max-width: 1500px;
         padding-left: 2.5rem;
         padding-right: 2.5rem;
-        margin-left: 40px;
+        margin-left: auto;
         margin-right: 10px;
     }
 
@@ -469,6 +469,7 @@ with right:
                     "ships_in_days": int(ships_in_days),
                 }
                 start_checkout(payload_inputs)
+
 
 
 
