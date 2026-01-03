@@ -24,7 +24,7 @@ st.markdown(
         padding-left: 2.5rem;
         padding-right: 2.5rem;
         margin-left: auto;
-        margin-right: 10px;
+        margin-right: auto;
     }
 
     /* Reduce overall vertical spacing */
@@ -318,7 +318,8 @@ with left:
 # RIGHT: inputs (narrowed) + Pay button bottom-center
 # -----------------------------
 with right:
-    form_col, _spacer = st.columns([RIGHT_FORM_WIDTH, 1 - RIGHT_FORM_WIDTH], gap="large")
+    _spacer, form_col = st.columns([1 - RIGHT_FORM_WIDTH, RIGHT_FORM_WIDTH], gap="large")
+    with form_col:
 
     with form_col:
         r1c1, r1c2 = st.columns([1, 2])
@@ -469,10 +470,6 @@ with right:
                     "ships_in_days": int(ships_in_days),
                 }
                 start_checkout(payload_inputs)
-
-
-
-
 
 
 
