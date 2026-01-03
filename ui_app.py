@@ -20,11 +20,11 @@ st.markdown(
     /* Remove extra top padding */
     .block-container {
         padding-top: 0.5rem !important;
-        max-width: 1400px;
+        max-width: 1500px;
         padding-left: 2.5rem;
-        padding-right: 1.5rem;
+        padding-right: 2.5rem;
         margin-left: auto;
-        margin-right: 10px;
+        margin-right: auto;
     }
 
     /* Reduce overall vertical spacing */
@@ -465,6 +465,7 @@ with right:
                     "ships_in_days": int(ships_in_days),
                 }
                 start_checkout(payload_inputs)
+
 
 
 
