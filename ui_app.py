@@ -319,7 +319,6 @@ with left:
 # -----------------------------
 with right:
     _spacer, form_col = st.columns([1 - RIGHT_FORM_WIDTH, RIGHT_FORM_WIDTH], gap="large")
-    with form_col:
 
     with form_col:
         r1c1, r1c2 = st.columns([1, 2])
@@ -335,15 +334,40 @@ with right:
 
         r2c1, r2c2 = st.columns(2)
         with r2c1:
-            handle_width = st.number_input("Handle Width (in)", min_value=0.0, value=1.5, step=0.001)
+            handle_width = st.number_input(
+                "Handle Width (in)",
+                min_value=0.0,
+                value=1.500,
+                step=0.001,
+                format="%.3f",
+            )
         with r2c2:
-            handle_length = st.number_input("Handle Length from Bore (in)", min_value=0.0, value=9.0, step=0.001)
+            handle_length = st.number_input(
+                "Handle Length from Bore (in)",
+                min_value=0.0,
+                value=9.000,
+                step=0.001,
+                format="%.3f",
+            )
 
         r3c1, r3c2 = st.columns(2)
         with r3c1:
-            paddle_dia = st.number_input("Paddle Diameter (in)", min_value=0.01, max_value=48.0, value=3.0, step=0.001)
+            paddle_dia = st.number_input(
+                "Paddle Diameter (in)",
+                min_value=0.01,
+                max_value=48.0,
+                value=3.000,
+                step=0.001,
+                format="%.3f",
+            )
         with r3c2:
-            bore_dia = st.number_input("Bore Diameter (in)", min_value=0.01, value=1.0, step=0.001)
+            bore_dia = st.number_input(
+                "Bore Diameter (in)",
+                min_value=0.01,
+                value=1.000,
+                step=0.001,
+                format="%.3f",
+            )
 
         tol_options = sorted(cfg.INSPECTION_MINS_BY_TOL.keys())
         bore_tolerance = st.selectbox(
@@ -355,7 +379,7 @@ with right:
         handle_label = st.text_input(
             "Handle Label (optional)",
             value="",
-            placeholder="UPSTREAM x.xxx BORE x.xxx BETA"
+            placeholder="UPSTREAM x.xxx BORE x.xxx BETA",
         )
 
         chamfer = st.checkbox("Chamfer", value=True)
@@ -376,6 +400,7 @@ with right:
             options=ships_options,
             index=ships_options.index(21) if 21 in ships_options else 0,
         )
+
 
 # -----------------------------
 # Validation
