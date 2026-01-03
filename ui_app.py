@@ -12,7 +12,7 @@ import pricing_config as cfg
 # -----------------------------
 # Page setup (MUST be first Streamlit call)
 # -----------------------------
-st.set_page_config(page_title="Orifice Plate Instant Quote", layout="wide")
+st.set_page_config(page_title="Orifice Plate Instant Quote", layout="centered")
 
 st.markdown(
     """
@@ -469,6 +469,7 @@ with right:
                     "ships_in_days": int(ships_in_days),
                 }
                 start_checkout(payload_inputs)
+
 
 
 
