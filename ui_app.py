@@ -12,7 +12,7 @@ import pricing_config as cfg
 # -----------------------------
 # Page setup (MUST be first Streamlit call)
 # -----------------------------
-st.set_page_config(page_title="Orifice Plate Instant Quote", layout="centered")
+st.set_page_config(page_title="Orifice Plate Instant Quote", layout="wide")
 
 st.markdown(
     """
@@ -36,6 +36,12 @@ st.title("Orifice Plate Instant Quote")
 # -----------------------------
 API_BASE = os.environ.get("API_BASE", "https://orifice-pricing-api.onrender.com").rstrip("/")
 API_KEY = (os.environ.get("API_KEY") or "").strip()
+
+# Image config:
+# 1) Prefer local file shipped with repo (recommended): ./oplatetemp.png
+# 2) Or set PRODUCT_IMAGE_URL in Render env vars to a public URL (GitHub raw, CDN, etc.)
+LOCAL_IMAGE_PATH = os.environ.get("PRODUCT_IMAGE_PATH", "oplatetemp.png")
+PRODUCT_IMAGE_URL = (os.environ.get("PRODUCT_IMAGE_URL") or "").strip()
 
 
 def _qp_get(name: str) -> Optional[str]:
@@ -86,7 +92,7 @@ def _format_order_number(order: dict) -> str:
 
 def _format_address(addr: object) -> str:
     """
-    Stripe shipping address dict looks like:
+    Stripe shipping address dict:
     {line1, line2, city, state, postal_code, country}
     """
     if not isinstance(addr, dict):
@@ -147,7 +153,6 @@ if session_id:
             st.write(f"Shipping cost: **{_fmt_usd(ship)}**")
             st.write(f"Shipping option: **{_pretty_shipping_service(service)}**")
 
-            # ✅ NEW: show shipping name + address if present
             ship_name = (order.get("shipping_name") or "").strip()
             ship_addr = order.get("shipping_address")
             addr_text = _format_address(ship_addr)
@@ -209,52 +214,76 @@ def _estimate_total_weight_lb(material: str, area_sq_in: float, thickness: float
     return round(area_sq_in * thickness * density * qty, 2)
 
 
+def _render_product_image() -> None:
+    # Prefer local file if it exists in the deployed repo
+    if os.path.exists(LOCAL_IMAGE_PATH):
+        st.image(LOCAL_IMAGE_PATH, use_container_width=True)
+        return
+
+    # Otherwise, fall back to URL env var
+    if PRODUCT_IMAGE_URL:
+        st.image(PRODUCT_IMAGE_URL, use_container_width=True)
+        return
+
+    # Last resort: placeholder
+    st.info("Add product image: include `oplatetemp.png` in the repo root or set PRODUCT_IMAGE_URL.")
+
+
 # -----------------------------
-# Inputs
+# Two-column layout
 # -----------------------------
-quantity = st.number_input("Qty", min_value=1, value=1, step=1)
-material = st.selectbox("Material Type", options=list(cfg.PRICE_PER_SQ_IN.keys()))
-thickness = st.selectbox(
-    "Plate Thickness (in)",
-    options=sorted(cfg.PRICE_PER_SQ_IN[material].keys()),
-)
+left, right = st.columns([1.0, 1.45], gap="large")
 
-handle_width = st.number_input("Handle Width (in)", min_value=0.0, value=1.5, step=0.01)
-handle_length = st.number_input("Handle Length from Bore (in)", min_value=0.0, value=9.0, step=0.01)
-paddle_dia = st.number_input("Paddle Diameter (in)", min_value=0.01, max_value=48.0, value=3.0, step=0.01)
-bore_dia = st.number_input("Bore Diameter (in)", min_value=0.01, value=1.0, step=0.01)
+with left:
+    _render_product_image()
+    st.caption("Custom Orifice Plate")
 
-tol_options = sorted(cfg.INSPECTION_MINS_BY_TOL.keys())
-bore_tolerance = st.selectbox(
-    "Bore Tolerance (± in)",
-    options=tol_options,
-    index=tol_options.index(0.005) if 0.005 in tol_options else 0,
-)
+# -----------------------------
+# Inputs (RIGHT column)
+# -----------------------------
+with right:
+    st.subheader("Configure your plate")
 
-handle_label = st.text_input("Handle Label (optional)", value="")
+    quantity = st.number_input("Qty", min_value=1, value=1, step=1)
 
-chamfer = st.checkbox("Chamfer", value=True)
-
-chamfer_width: Optional[float] = None
-if chamfer:
-    chamfer_width = st.number_input(
-        "Chamfer Width (in)",
-        min_value=0.0,
-        value=0.062,
-        step=0.001,
-        format="%.3f",
+    material = st.selectbox("Material Type", options=list(cfg.PRICE_PER_SQ_IN.keys()))
+    thickness = st.selectbox(
+        "Plate Thickness (in)",
+        options=sorted(cfg.PRICE_PER_SQ_IN[material].keys()),
     )
 
-ships_options = sorted(cfg.LEAD_TIME_MULTIPLIER.keys())
-ships_in_days = st.selectbox(
-    "Ships in (days)",
-    options=ships_options,
-    index=ships_options.index(21) if 21 in ships_options else 0,
-)
+    handle_width = st.number_input("Handle Width (in)", min_value=0.0, value=1.5, step=0.01)
+    handle_length = st.number_input("Handle Length from Bore (in)", min_value=0.0, value=9.0, step=0.01)
+    paddle_dia = st.number_input("Paddle Diameter (in)", min_value=0.01, max_value=48.0, value=3.0, step=0.01)
+    bore_dia = st.number_input("Bore Diameter (in)", min_value=0.01, value=1.0, step=0.01)
 
-st.divider()
-st.subheader("Quote Summary")
+    tol_options = sorted(cfg.INSPECTION_MINS_BY_TOL.keys())
+    bore_tolerance = st.selectbox(
+        "Bore Tolerance (± in)",
+        options=tol_options,
+        index=tol_options.index(0.005) if 0.005 in tol_options else 0,
+    )
 
+    handle_label = st.text_input("Handle Label (optional)", value="")
+
+    chamfer = st.checkbox("Chamfer", value=True)
+
+    chamfer_width: Optional[float] = None
+    if chamfer:
+        chamfer_width = st.number_input(
+            "Chamfer Width (in)",
+            min_value=0.0,
+            value=0.062,
+            step=0.001,
+            format="%.3f",
+        )
+
+    ships_options = sorted(cfg.LEAD_TIME_MULTIPLIER.keys())
+    ships_in_days = st.selectbox(
+        "Ships in (days)",
+        options=ships_options,
+        index=ships_options.index(21) if 21 in ships_options else 0,
+    )
 
 # -----------------------------
 # Validation
@@ -266,10 +295,11 @@ if handle_length <= (paddle_dia / 2):
     errors.append("Handle Length (From Bore) must be longer than the Paddle Radius.")
 
 if errors:
-    for e in errors:
-        st.error(e)
+    with right:
+        st.divider()
+        for e in errors:
+            st.error(e)
     st.stop()
-
 
 # -----------------------------
 # Pricing (local preview)
@@ -291,13 +321,38 @@ inputs = QuoteInputs(
 
 result = calculate_quote(inputs)
 
-c1, c2 = st.columns(2)
-c1.metric("Unit Price", f"${result['unit_price']:,.2f}")
-c2.metric("Total Price", f"${result['total_price']:,.2f}")
-
+# -----------------------------
+# Shipping display inputs (computed once)
+# -----------------------------
+area_sq_in = result.get("area_sq_in", _estimate_area_sq_in(paddle_dia, handle_length))
+weight_lb = result.get(
+    "estimated_total_weight_lb",
+    _estimate_total_weight_lb(material, area_sq_in, float(thickness), int(quantity)),
+)
+pkg = result.get(
+    "estimated_package_in",
+    _estimate_package_in(paddle_dia, handle_length, float(thickness), int(quantity)),
+)
 
 # -----------------------------
-# Checkout
+# Left column: Quote summary + shipping estimates
+# -----------------------------
+with left:
+    st.divider()
+    st.subheader("Quote Summary")
+
+    c1, c2 = st.columns(2)
+    c1.metric("Unit Price", f"${result['unit_price']:,.2f}")
+    c2.metric("Total Price", f"${result['total_price']:,.2f}")
+
+    st.divider()
+    st.caption("Shipping estimates")
+    s1, s2 = st.columns(2)
+    s1.metric("Estimated Total Weight", f"{weight_lb:.2f} lb")
+    s2.metric("Estimated Package Size", f"{pkg['length']} x {pkg['width']} x {pkg['height']} in")
+
+# -----------------------------
+# Checkout (RIGHT column)
 # -----------------------------
 def start_checkout() -> None:
     body = {
@@ -345,24 +400,7 @@ def start_checkout() -> None:
     st.link_button("Continue to Stripe Checkout", checkout_url)
 
 
-if st.button("Place Order & Pay"):
-    start_checkout()
-
-
-# -----------------------------
-# Shipping display
-# -----------------------------
-area_sq_in = result.get("area_sq_in", _estimate_area_sq_in(paddle_dia, handle_length))
-weight_lb = result.get(
-    "estimated_total_weight_lb",
-    _estimate_total_weight_lb(material, area_sq_in, float(thickness), int(quantity)),
-)
-pkg = result.get(
-    "estimated_package_in",
-    _estimate_package_in(paddle_dia, handle_length, float(thickness), int(quantity)),
-)
-
-st.caption("Shipping estimates")
-s1, s2 = st.columns(2)
-s1.metric("Estimated Total Weight", f"{weight_lb:.2f} lb")
-s2.metric("Estimated Package Size", f"{pkg['length']} x {pkg['width']} x {pkg['height']} in")
+with right:
+    st.divider()
+    if st.button("Place Order & Pay", use_container_width=True):
+        start_checkout()
