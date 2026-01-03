@@ -22,7 +22,7 @@ st.markdown(
         padding-top: 0.5rem !important;
         max-width: 1500px;
         padding-left: 2.5rem;
-        padding-right: 0.5rem;
+        padding-right: 2.5rem;
         margin-left: auto;
         margin-right: auto;
     }
@@ -351,7 +351,11 @@ with right:
             index=tol_options.index(0.005) if 0.005 in tol_options else 0,
         )
 
-        handle_label = st.text_input("Handle Label (optional)", value="")
+        handle_label = st.text_input(
+            "Handle Label (optional)",
+            value="",
+            placeholder="UPSTREAM x.xxx BORE x.xxx BETA"
+        )
 
         chamfer = st.checkbox("Chamfer", value=True)
 
@@ -465,6 +469,7 @@ with right:
                     "ships_in_days": int(ships_in_days),
                 }
                 start_checkout(payload_inputs)
+
 
 
 
