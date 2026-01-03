@@ -16,7 +16,7 @@ st.set_page_config(page_title="Orifice Plate Instant Quote", layout="wide")
 
 # ---- EASY TUNING KNOBS ----
 RIGHT_FORM_WIDTH = 0.72      # 0.55 - 0.85 (smaller = narrower input column)
-IMAGE_TOP_SPACER_PX = 90     # move image down more/less
+IMAGE_TOP_SPACER_PX = 10     # move image down more/less
 LEFT_TIGHTEN = True          # tighter left column spacing
 PAY_BUTTON_HEIGHT_PX = 56    # taller button
 PAY_BUTTON_FONT_PX = 18
@@ -443,3 +443,4 @@ with right:
                     "ships_in_days": int(ships_in_days),
                 }
                 start_checkout(payload_inputs)
+
