@@ -30,6 +30,16 @@ st.markdown(
 
 st.markdown("<h1 style='text-align:center;'>Orifice Plate Instant Quote</h1>", unsafe_allow_html=True)
 
+st.markdown(
+    """
+    <style>
+    div[data-testid="stVerticalBlock"] > div {
+        gap: 0.5rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # -----------------------------
 # Config
@@ -213,7 +223,7 @@ def _estimate_total_weight_lb(material: str, area_sq_in: float, thickness: float
     density = densities.get(material, 0.289)
     return round(area_sq_in * thickness * density * qty, 2)
 
-st.markdown("<div style='height:72px'></div>", unsafe_allow_html=True)
+st.markdown("<div style='height:120px'></div>", unsafe_allow_html=True)
 
 def _render_product_image() -> None:
     # Prefer local file if it exists in the deployed repo
@@ -402,6 +412,3 @@ def start_checkout() -> None:
         unsafe_allow_html=True,
     )
     st.link_button("Continue to Stripe Checkout", checkout_url)
-
-
-
