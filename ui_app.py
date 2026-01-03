@@ -14,6 +14,23 @@ import pricing_config as cfg
 # -----------------------------
 st.set_page_config(page_title="Orifice Plate Instant Quote", layout="wide")
 
+st.markdown(
+    """
+    <style>
+    /* Remove extra top padding */
+    .block-container {
+        padding-top: 1.2rem !important;
+    }
+
+    /* Reduce overall vertical spacing */
+    section[data-testid="stMain"] > div {
+        padding-top: 0.5rem;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # ---- EASY TUNING KNOBS ----
 RIGHT_FORM_WIDTH = 0.72      # 0.55 - 0.85 (smaller = narrower input column)
 IMAGE_TOP_SPACER_PX = 10     # move image down more/less
@@ -443,4 +460,5 @@ with right:
                     "ships_in_days": int(ships_in_days),
                 }
                 start_checkout(payload_inputs)
+
 
