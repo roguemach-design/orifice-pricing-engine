@@ -23,8 +23,8 @@ st.markdown(
         max-width: 1500px;
         padding-left: 2.5rem;
         padding-right: 2.5rem;
-        margin-left: auto;
-        margin-right: auto;
+        margin-left: 40px;
+        margin-right: 10px;
     }
 
     /* Reduce overall vertical spacing */
@@ -299,7 +299,7 @@ def start_checkout(payload_inputs: dict) -> None:
 # -----------------------------
 # Two-column layout
 # -----------------------------
-left, right = st.columns([1.22, 1.23], gap="large")
+left, right = st.columns([1.0, 1.45], gap="large")
 
 # -----------------------------
 # LEFT: image + summary (tight)
@@ -469,6 +469,7 @@ with right:
                     "ships_in_days": int(ships_in_days),
                 }
                 start_checkout(payload_inputs)
+
 
 
 
