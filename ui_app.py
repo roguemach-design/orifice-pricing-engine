@@ -318,7 +318,7 @@ with left:
 # RIGHT: inputs (narrowed) + Pay button bottom-center
 # -----------------------------
 with right:
-    _spacer, form_col = st.columns([1 - RIGHT_FORM_WIDTH, RIGHT_FORM_WIDTH], gap="large")
+    _spacer, form_col = st.columns([1 - RIGHT_FORM_WIDTH, RIGHT_FORM_WIDTH], gap="medium")
 
     with form_col:
         r1c1, r1c2 = st.columns([1, 2])
