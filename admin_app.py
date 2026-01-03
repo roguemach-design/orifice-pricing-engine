@@ -80,9 +80,7 @@ def _safe_dict(x) -> Dict[str, Any]:
 
 
 def _kv_table(d: Dict[str, Any], order: Optional[list[str]] = None) -> pd.DataFrame:
-    """
-    Render dict as a clean 2-col dataframe (Field / Value) in a stable order.
-    """
+    """Render dict as a clean 2-col dataframe (Field / Value) in a stable order."""
     rows: list[tuple[str, Any]] = []
     if order:
         for k in order:
@@ -98,14 +96,43 @@ def _kv_table(d: Dict[str, Any], order: Optional[list[str]] = None) -> pd.DataFr
 
 
 def _df_height_for_rows(n_rows: int) -> int:
-    """
-    Approximate a dataframe height so it doesn't scroll.
-    """
+    """Approximate a dataframe height so it doesn't scroll."""
     header = 38
     row_h = 34
     padding = 10
-    # cap to keep page usable; adjust if you want even taller
     return min(900, header + n_rows * row_h + padding)
+
+
+def _format_shipping_address(addr: Any) -> str:
+    """
+    Stripe-style address dict:
+    {line1,line2,city,state,postal_code,country}
+    """
+    a = _safe_dict(addr)
+    if not a:
+        return ""
+
+    parts = []
+    line1 = (a.get("line1") or "").strip()
+    line2 = (a.get("line2") or "").strip()
+    city = (a.get("city") or "").strip()
+    state = (a.get("state") or "").strip()
+    postal = (a.get("postal_code") or "").strip()
+    country = (a.get("country") or "").strip()
+
+    if line1:
+        parts.append(line1)
+    if line2:
+        parts.append(line2)
+
+    city_state_zip = " ".join([p for p in [city, state, postal] if p]).strip()
+    if city_state_zip:
+        parts.append(city_state_zip)
+
+    if country:
+        parts.append(country)
+
+    return "\n".join(parts)
 
 
 # ----------------------------
@@ -207,8 +234,8 @@ st.divider()
 # ----------------------------
 st.subheader("Order details")
 
-# Select by internal ID, but show a friendly label
 order_options = df["_order_id"].tolist()
+
 
 def _label_for_order_id(oid: str) -> str:
     row = df[df["_order_id"] == oid]
@@ -219,6 +246,7 @@ def _label_for_order_id(oid: str) -> str:
     created = r0.get("Created") or ""
     email = r0.get("Email") or ""
     return f"{order_num} — {email} — {created}"
+
 
 selected_id = st.selectbox("Select an order", order_options, format_func=_label_for_order_id)
 
@@ -243,6 +271,9 @@ if not detail:
     st.warning("No detail found for selected order.")
     st.stop()
 
+ship_to_name = detail.get("shipping_name", "") or ""
+ship_to_address = _format_shipping_address(detail.get("shipping_address"))
+
 # --- Order Summary table ---
 order_summary = {
     "Order #": detail.get("order_number_display") or "",
@@ -253,7 +284,8 @@ order_summary = {
     "Shipping": _usd(detail.get("amount_shipping_usd")),
     "Total": _usd(detail.get("amount_total_usd")),
     "Shipping Service": detail.get("shipping_service", ""),
-    "Ship To Name": detail.get("shipping_name", ""),
+    "Ship To Name": ship_to_name,
+    "Ship To Address": ship_to_address,
 }
 
 st.subheader("Order summary")
@@ -268,6 +300,7 @@ summary_df = _kv_table(
         "Total",
         "Shipping Service",
         "Ship To Name",
+        "Ship To Address",
         "Internal Order ID",
     ],
 )
@@ -277,6 +310,12 @@ st.dataframe(
     hide_index=True,
     height=_df_height_for_rows(len(summary_df)),
 )
+
+# Also show address in a readable multi-line box (nice UX)
+if ship_to_name or ship_to_address:
+    st.subheader("Shipping")
+    st.text_input("Ship to name", value=ship_to_name, disabled=True)
+    st.text_area("Ship to address", value=ship_to_address or "(no address captured)", height=110, disabled=True)
 
 # --- Configured Inputs table (quote_payload) ---
 qp = _safe_dict(detail.get("quote_payload"))
