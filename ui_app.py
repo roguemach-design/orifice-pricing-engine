@@ -14,15 +14,36 @@ import pricing_config as cfg
 # -----------------------------
 st.set_page_config(page_title="Orifice Plate Instant Quote", layout="wide")
 
+# ---- EASY TUNING KNOBS ----
+RIGHT_FORM_WIDTH = 0.72      # 0.55 - 0.85 (smaller = narrower input column)
+IMAGE_TOP_SPACER_PX = 150    # move image down more/less
+PAY_BUTTON_HEIGHT_PX = 56    # taller button
+PAY_BUTTON_FONT_PX = 18
+# ---------------------------
+
 st.markdown(
-    """
+    f"""
     <style>
-    h1 {
+    h1 {{
       font-family: Arial, sans-serif;
       font-weight: 800;
       letter-spacing: 0.2px;
       margin-bottom: 0.25rem;
-    }
+    }}
+
+    /* tighten vertical spacing between widgets */
+    div[data-testid="stVerticalBlock"] > div {{
+        gap: 0.5rem;
+    }}
+
+    /* Make all Streamlit buttons taller (including Pay button) */
+    div[data-testid="stButton"] > button {{
+        height: {PAY_BUTTON_HEIGHT_PX}px;
+        padding: 0.55rem 1.25rem;
+        font-size: {PAY_BUTTON_FONT_PX}px;
+        border-radius: 12px;
+        font-weight: 700;
+    }}
     </style>
     """,
     unsafe_allow_html=True,
@@ -30,16 +51,6 @@ st.markdown(
 
 st.markdown("<h1 style='text-align:center;'>Orifice Plate Instant Quote</h1>", unsafe_allow_html=True)
 
-st.markdown(
-    """
-    <style>
-    div[data-testid="stVerticalBlock"] > div {
-        gap: 0.5rem;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
 
 # -----------------------------
 # Config
@@ -47,9 +58,6 @@ st.markdown(
 API_BASE = os.environ.get("API_BASE", "https://orifice-pricing-api.onrender.com").rstrip("/")
 API_KEY = (os.environ.get("API_KEY") or "").strip()
 
-# Image config:
-# 1) Prefer local file shipped with repo (recommended): ./oplatetemp.png
-# 2) Or set PRODUCT_IMAGE_URL in Render env vars to a public URL (GitHub raw, CDN, etc.)
 LOCAL_IMAGE_PATH = os.environ.get("PRODUCT_IMAGE_PATH", "oplatetemp.png")
 PRODUCT_IMAGE_URL = (os.environ.get("PRODUCT_IMAGE_URL") or "").strip()
 
@@ -76,7 +84,6 @@ def _fmt_usd(x) -> str:
 def _pretty_shipping_service(code: str | None) -> str:
     if not code:
         return "(finalizing...)"
-
     mapping = {
         "ups_ground": "UPS Ground",
         "ups_2day": "UPS 2nd Day Air",
@@ -101,10 +108,6 @@ def _format_order_number(order: dict) -> str:
 
 
 def _format_address(addr: object) -> str:
-    """
-    Stripe shipping address dict:
-    {line1, line2, city, state, postal_code, country}
-    """
     if not isinstance(addr, dict):
         return ""
 
@@ -151,7 +154,6 @@ if session_id:
             order = r.json()
 
             st.subheader("Order summary")
-
             st.write(f"Order #: **{_format_order_number(order)}**")
             st.write(f"Email: **{order.get('customer_email','')}**")
 
@@ -223,7 +225,6 @@ def _estimate_total_weight_lb(material: str, area_sq_in: float, thickness: float
     density = densities.get(material, 0.289)
     return round(area_sq_in * thickness * density * qty, 2)
 
-st.markdown("<div style='height:120px'></div>", unsafe_allow_html=True)
 
 def _render_product_image() -> None:
     # Prefer local file if it exists in the deployed repo
@@ -236,8 +237,41 @@ def _render_product_image() -> None:
         st.image(PRODUCT_IMAGE_URL, use_container_width=True)
         return
 
-    # Last resort: placeholder
     st.info("Add product image: include `oplatetemp.png` in the repo root or set PRODUCT_IMAGE_URL.")
+
+
+# -----------------------------
+# Checkout
+# -----------------------------
+def start_checkout(payload_inputs: dict) -> None:
+    body = {"inputs": payload_inputs}
+
+    headers: Dict[str, str] = {}
+    if API_KEY:
+        headers["x-api-key"] = API_KEY
+
+    r = requests.post(f"{API_BASE}/checkout/create", json=body, headers=headers, timeout=30)
+
+    if r.status_code != 200:
+        st.error(f"Checkout API error: {r.status_code}")
+        try:
+            st.json(r.json())
+        except Exception:
+            st.code(r.text)
+        st.stop()
+
+    resp = r.json()
+    checkout_url = resp.get("checkout_url")
+    if not checkout_url:
+        st.error("Checkout API did not return checkout_url.")
+        st.json(resp)
+        st.stop()
+
+    st.markdown(
+        f"<meta http-equiv='refresh' content='0; url={checkout_url}'>",
+        unsafe_allow_html=True,
+    )
+    st.link_button("Continue to Stripe Checkout", checkout_url)
 
 
 # -----------------------------
@@ -246,53 +280,67 @@ def _render_product_image() -> None:
 left, right = st.columns([1.0, 1.45], gap="large")
 
 with left:
+    st.markdown(f"<div style='height:{IMAGE_TOP_SPACER_PX}px'></div>", unsafe_allow_html=True)
     _render_product_image()
 
 # -----------------------------
-# Inputs (RIGHT column)
+# Inputs (RIGHT column) - narrowed via inner columns
 # -----------------------------
 with right:
+    form_col, _spacer = st.columns([RIGHT_FORM_WIDTH, 1 - RIGHT_FORM_WIDTH], gap="large")
 
-    quantity = st.number_input("Qty", min_value=1, value=1, step=1)
+    with form_col:
+        # Group inputs to reduce width and improve flow
+        r1c1, r1c2 = st.columns([1, 2])
+        with r1c1:
+            quantity = st.number_input("Qty", min_value=1, value=1, step=1)
+        with r1c2:
+            material = st.selectbox("Material Type", options=list(cfg.PRICE_PER_SQ_IN.keys()))
 
-    material = st.selectbox("Material Type", options=list(cfg.PRICE_PER_SQ_IN.keys()))
-    thickness = st.selectbox(
-        "Plate Thickness (in)",
-        options=sorted(cfg.PRICE_PER_SQ_IN[material].keys()),
-    )
-
-    handle_width = st.number_input("Handle Width (in)", min_value=0.0, value=1.5, step=0.01)
-    handle_length = st.number_input("Handle Length from Bore (in)", min_value=0.0, value=9.0, step=0.01)
-    paddle_dia = st.number_input("Paddle Diameter (in)", min_value=0.01, max_value=48.0, value=3.0, step=0.01)
-    bore_dia = st.number_input("Bore Diameter (in)", min_value=0.01, value=1.0, step=0.01)
-
-    tol_options = sorted(cfg.INSPECTION_MINS_BY_TOL.keys())
-    bore_tolerance = st.selectbox(
-        "Bore Tolerance (± in)",
-        options=tol_options,
-        index=tol_options.index(0.005) if 0.005 in tol_options else 0,
-    )
-
-    handle_label = st.text_input("Handle Label (optional)", value="")
-
-    chamfer = st.checkbox("Chamfer", value=True)
-
-    chamfer_width: Optional[float] = None
-    if chamfer:
-        chamfer_width = st.number_input(
-            "Chamfer Width (in)",
-            min_value=0.0,
-            value=0.062,
-            step=0.001,
-            format="%.3f",
+        thickness = st.selectbox(
+            "Plate Thickness (in)",
+            options=sorted(cfg.PRICE_PER_SQ_IN[material].keys()),
         )
 
-    ships_options = sorted(cfg.LEAD_TIME_MULTIPLIER.keys())
-    ships_in_days = st.selectbox(
-        "Ships in (days)",
-        options=ships_options,
-        index=ships_options.index(21) if 21 in ships_options else 0,
-    )
+        r2c1, r2c2 = st.columns(2)
+        with r2c1:
+            handle_width = st.number_input("Handle Width (in)", min_value=0.0, value=1.5, step=0.01)
+        with r2c2:
+            handle_length = st.number_input("Handle Length from Bore (in)", min_value=0.0, value=9.0, step=0.01)
+
+        r3c1, r3c2 = st.columns(2)
+        with r3c1:
+            paddle_dia = st.number_input("Paddle Diameter (in)", min_value=0.01, max_value=48.0, value=3.0, step=0.01)
+        with r3c2:
+            bore_dia = st.number_input("Bore Diameter (in)", min_value=0.01, value=1.0, step=0.01)
+
+        tol_options = sorted(cfg.INSPECTION_MINS_BY_TOL.keys())
+        bore_tolerance = st.selectbox(
+            "Bore Tolerance (± in)",
+            options=tol_options,
+            index=tol_options.index(0.005) if 0.005 in tol_options else 0,
+        )
+
+        handle_label = st.text_input("Handle Label (optional)", value="")
+
+        chamfer = st.checkbox("Chamfer", value=True)
+
+        chamfer_width: Optional[float] = None
+        if chamfer:
+            chamfer_width = st.number_input(
+                "Chamfer Width (in)",
+                min_value=0.0,
+                value=0.062,
+                step=0.001,
+                format="%.3f",
+            )
+
+        ships_options = sorted(cfg.LEAD_TIME_MULTIPLIER.keys())
+        ships_in_days = st.selectbox(
+            "Ships in (days)",
+            options=ships_options,
+            index=ships_options.index(21) if 21 in ships_options else 0,
+        )
 
 # -----------------------------
 # Validation
@@ -330,9 +378,7 @@ inputs = QuoteInputs(
 
 result = calculate_quote(inputs)
 
-# -----------------------------
-# Shipping display inputs (computed once)
-# -----------------------------
+# Shipping estimates (computed once)
 area_sq_in = result.get("area_sq_in", _estimate_area_sq_in(paddle_dia, handle_length))
 weight_lb = result.get(
     "estimated_total_weight_lb",
@@ -344,7 +390,7 @@ pkg = result.get(
 )
 
 # -----------------------------
-# Left column: Quote summary + shipping estimates
+# Left column: Quote summary + shipping estimates + Pay button
 # -----------------------------
 with left:
     st.divider()
@@ -360,55 +406,23 @@ with left:
     s1.metric("Estimated Total Weight", f"{weight_lb:.2f} lb")
     s2.metric("Estimated Package Size", f"{pkg['length']} x {pkg['width']} x {pkg['height']} in")
 
+    # Centered, not full-width
     st.divider()
-if st.button("Place Order & Pay", use_container_width=True):
-    start_checkout()
-
-
-# -----------------------------
-# Checkout (RIGHT column)
-# -----------------------------
-def start_checkout() -> None:
-    body = {
-        "inputs": {
-            "quantity": int(quantity),
-            "material": str(material),
-            "thickness": float(thickness),
-            "handle_width": float(handle_width),
-            "handle_length_from_bore": float(handle_length),
-            "paddle_dia": float(paddle_dia),
-            "bore_dia": float(bore_dia),
-            "bore_tolerance": float(bore_tolerance),
-            "chamfer": bool(chamfer),
-            "chamfer_width": float(chamfer_width) if chamfer and chamfer_width is not None else None,
-            "handle_label": (handle_label or "").strip() or "No label",
-            "ships_in_days": int(ships_in_days),
-        }
-    }
-
-    headers: Dict[str, str] = {}
-    if API_KEY:
-        headers["x-api-key"] = API_KEY
-
-    r = requests.post(f"{API_BASE}/checkout/create", json=body, headers=headers, timeout=30)
-
-    if r.status_code != 200:
-        st.error(f"Checkout API error: {r.status_code}")
-        try:
-            st.json(r.json())
-        except Exception:
-            st.code(r.text)
-        st.stop()
-
-    resp = r.json()
-    checkout_url = resp.get("checkout_url")
-    if not checkout_url:
-        st.error("Checkout API did not return checkout_url.")
-        st.json(resp)
-        st.stop()
-
-    st.markdown(
-        f"<meta http-equiv='refresh' content='0; url={checkout_url}'>",
-        unsafe_allow_html=True,
-    )
-    st.link_button("Continue to Stripe Checkout", checkout_url)
+    b1, b2, b3 = st.columns([1, 2, 1])
+    with b2:
+        if st.button("Place Order & Pay"):
+            payload_inputs = {
+                "quantity": int(quantity),
+                "material": str(material),
+                "thickness": float(thickness),
+                "handle_width": float(handle_width),
+                "handle_length_from_bore": float(handle_length),
+                "paddle_dia": float(paddle_dia),
+                "bore_dia": float(bore_dia),
+                "bore_tolerance": float(bore_tolerance),
+                "chamfer": bool(chamfer),
+                "chamfer_width": float(chamfer_width) if chamfer and chamfer_width is not None else None,
+                "handle_label": (handle_label or "").strip() or "No label",
+                "ships_in_days": int(ships_in_days),
+            }
+            start_checkout(payload_inputs)
