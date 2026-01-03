@@ -28,7 +28,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("Orifice Plate Instant Quote")
+st.markdown("<h1 style='text-align:center;'>Orifice Plate Instant Quote</h1>", unsafe_allow_html=True)
 
 
 # -----------------------------
@@ -213,6 +213,7 @@ def _estimate_total_weight_lb(material: str, area_sq_in: float, thickness: float
     density = densities.get(material, 0.289)
     return round(area_sq_in * thickness * density * qty, 2)
 
+st.markdown("<div style='height:72px'></div>", unsafe_allow_html=True)
 
 def _render_product_image() -> None:
     # Prefer local file if it exists in the deployed repo
@@ -236,13 +237,11 @@ left, right = st.columns([1.0, 1.45], gap="large")
 
 with left:
     _render_product_image()
-    st.caption("Custom Orifice Plate")
 
 # -----------------------------
 # Inputs (RIGHT column)
 # -----------------------------
 with right:
-    st.subheader("Configure your plate")
 
     quantity = st.number_input("Qty", min_value=1, value=1, step=1)
 
@@ -351,6 +350,11 @@ with left:
     s1.metric("Estimated Total Weight", f"{weight_lb:.2f} lb")
     s2.metric("Estimated Package Size", f"{pkg['length']} x {pkg['width']} x {pkg['height']} in")
 
+    st.divider()
+if st.button("Place Order & Pay", use_container_width=True):
+    start_checkout()
+
+
 # -----------------------------
 # Checkout (RIGHT column)
 # -----------------------------
@@ -400,7 +404,4 @@ def start_checkout() -> None:
     st.link_button("Continue to Stripe Checkout", checkout_url)
 
 
-with right:
-    st.divider()
-    if st.button("Place Order & Pay", use_container_width=True):
-        start_checkout()
+
