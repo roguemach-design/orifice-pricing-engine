@@ -20,6 +20,11 @@ st.markdown(
     /* Remove extra top padding */
     .block-container {
         padding-top: 0.6rem !important;
+        max-width: 1400px;
+        padding-left: 2.5rem;
+        padding-right: 2.5rem;
+        margin-left: auto;
+        margin-right: auto;
     }
 
     /* Reduce overall vertical spacing */
@@ -28,22 +33,6 @@ st.markdown(
     }
     </style>
     """,
-st.markdown(
-    """
-    <style>
-    /* Center page content and even side gutters */
-    .block-container {
-        max-width: 1400px;
-        padding-left: 2.5rem;
-        padding-right: 2.5rem;
-        margin-left: auto;
-        margin-right: auto;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
     unsafe_allow_html=True,
 )
 
@@ -476,6 +465,7 @@ with right:
                     "ships_in_days": int(ships_in_days),
                 }
                 start_checkout(payload_inputs)
+
 
 
 
