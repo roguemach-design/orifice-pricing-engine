@@ -19,7 +19,7 @@ st.markdown(
     <style>
     /* Remove extra top padding */
     .block-container {
-        padding-top: 1.2rem !important;
+        padding-top: 0.6rem !important;
     }
 
     /* Reduce overall vertical spacing */
@@ -28,6 +28,22 @@ st.markdown(
     }
     </style>
     """,
+st.markdown(
+    """
+    <style>
+    /* Center page content and even side gutters */
+    .block-container {
+        max-width: 1400px;
+        padding-left: 2.5rem;
+        padding-right: 2.5rem;
+        margin-left: auto;
+        margin-right: auto;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
     unsafe_allow_html=True,
 )
 
@@ -329,15 +345,15 @@ with right:
 
         r2c1, r2c2 = st.columns(2)
         with r2c1:
-            handle_width = st.number_input("Handle Width (in)", min_value=0.0, value=1.5, step=0.01)
+            handle_width = st.number_input("Handle Width (in)", min_value=0.0, value=1.5, step=0.001)
         with r2c2:
-            handle_length = st.number_input("Handle Length from Bore (in)", min_value=0.0, value=9.0, step=0.01)
+            handle_length = st.number_input("Handle Length from Bore (in)", min_value=0.0, value=9.0, step=0.001)
 
         r3c1, r3c2 = st.columns(2)
         with r3c1:
-            paddle_dia = st.number_input("Paddle Diameter (in)", min_value=0.01, max_value=48.0, value=3.0, step=0.01)
+            paddle_dia = st.number_input("Paddle Diameter (in)", min_value=0.01, max_value=48.0, value=3.0, step=0.001)
         with r3c2:
-            bore_dia = st.number_input("Bore Diameter (in)", min_value=0.01, value=1.0, step=0.01)
+            bore_dia = st.number_input("Bore Diameter (in)", min_value=0.01, value=1.0, step=0.001)
 
         tol_options = sorted(cfg.INSPECTION_MINS_BY_TOL.keys())
         bore_tolerance = st.selectbox(
@@ -460,5 +476,6 @@ with right:
                     "ships_in_days": int(ships_in_days),
                 }
                 start_checkout(payload_inputs)
+
 
 
