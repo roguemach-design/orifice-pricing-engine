@@ -16,40 +16,44 @@ st.set_page_config(page_title="Orifice Plate Instant Quote", layout="wide")
 
 # ---- EASY TUNING KNOBS ----
 RIGHT_FORM_WIDTH = 0.72      # 0.55 - 0.85 (smaller = narrower input column)
-IMAGE_TOP_SPACER_PX = 150    # move image down more/less
+IMAGE_TOP_SPACER_PX = 90     # move image down more/less
+LEFT_TIGHTEN = True          # tighter left column spacing
 PAY_BUTTON_HEIGHT_PX = 56    # taller button
 PAY_BUTTON_FONT_PX = 18
+PAY_BUTTON_WIDTH_RATIO = 0.56  # how wide button is (0.40-0.80) of the input column
 # ---------------------------
 
 st.markdown(
     f"""
     <style>
+    /* Centered H1 */
     h1 {{
       font-family: Arial, sans-serif;
       font-weight: 800;
       letter-spacing: 0.2px;
       margin-bottom: 0.25rem;
+      text-align: center;
     }}
 
     /* tighten vertical spacing between widgets */
     div[data-testid="stVerticalBlock"] > div {{
-        gap: 0.5rem;
+        gap: 0.45rem;
     }}
 
-    /* Make all Streamlit buttons taller (including Pay button) */
+    /* Make Streamlit buttons taller */
     div[data-testid="stButton"] > button {{
         height: {PAY_BUTTON_HEIGHT_PX}px;
         padding: 0.55rem 1.25rem;
         font-size: {PAY_BUTTON_FONT_PX}px;
         border-radius: 12px;
-        font-weight: 700;
+        font-weight: 800;
     }}
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-st.markdown("<h1 style='text-align:center;'>Orifice Plate Instant Quote</h1>", unsafe_allow_html=True)
+st.markdown("<h1>Orifice Plate Instant Quote</h1>", unsafe_allow_html=True)
 
 
 # -----------------------------
@@ -182,8 +186,8 @@ if session_id:
 
             if _format_order_number(order) == "(finalizing...)" or not service or (not ship_name and not addr_text):
                 st.info(
-                    "If this page shows “finalizing…” or is missing address/shipping option, it usually means Stripe’s "
-                    "webhook is still writing the final details to the database. Click **Refresh order status** in a moment."
+                    "If this page shows “finalizing…” or is missing address/shipping option, "
+                    "Stripe’s webhook may still be saving details. Click **Refresh order status** in a moment."
                 )
         else:
             st.info("Payment confirmed. Finalizing your order details… (refresh in a moment)")
@@ -227,16 +231,12 @@ def _estimate_total_weight_lb(material: str, area_sq_in: float, thickness: float
 
 
 def _render_product_image() -> None:
-    # Prefer local file if it exists in the deployed repo
     if os.path.exists(LOCAL_IMAGE_PATH):
         st.image(LOCAL_IMAGE_PATH, use_container_width=True)
         return
-
-    # Otherwise, fall back to URL env var
     if PRODUCT_IMAGE_URL:
         st.image(PRODUCT_IMAGE_URL, use_container_width=True)
         return
-
     st.info("Add product image: include `oplatetemp.png` in the repo root or set PRODUCT_IMAGE_URL.")
 
 
@@ -279,18 +279,26 @@ def start_checkout(payload_inputs: dict) -> None:
 # -----------------------------
 left, right = st.columns([1.0, 1.45], gap="large")
 
+# -----------------------------
+# LEFT: image + summary (tight)
+# -----------------------------
 with left:
     st.markdown(f"<div style='height:{IMAGE_TOP_SPACER_PX}px'></div>", unsafe_allow_html=True)
     _render_product_image()
 
+    # Tight layout: fewer dividers
+    if not LEFT_TIGHTEN:
+        st.divider()
+
+    st.subheader("Quote Summary")
+
 # -----------------------------
-# Inputs (RIGHT column) - narrowed via inner columns
+# RIGHT: inputs (narrowed) + Pay button bottom-center
 # -----------------------------
 with right:
     form_col, _spacer = st.columns([RIGHT_FORM_WIDTH, 1 - RIGHT_FORM_WIDTH], gap="large")
 
     with form_col:
-        # Group inputs to reduce width and improve flow
         r1c1, r1c2 = st.columns([1, 2])
         with r1c1:
             quantity = st.number_input("Qty", min_value=1, value=1, step=1)
@@ -390,39 +398,48 @@ pkg = result.get(
 )
 
 # -----------------------------
-# Left column: Quote summary + shipping estimates + Pay button
+# LEFT: Quote summary + shipping estimates (tight)
 # -----------------------------
 with left:
-    st.divider()
-    st.subheader("Quote Summary")
-
     c1, c2 = st.columns(2)
     c1.metric("Unit Price", f"${result['unit_price']:,.2f}")
     c2.metric("Total Price", f"${result['total_price']:,.2f}")
 
-    st.divider()
+    if not LEFT_TIGHTEN:
+        st.divider()
+
     st.caption("Shipping estimates")
     s1, s2 = st.columns(2)
     s1.metric("Estimated Total Weight", f"{weight_lb:.2f} lb")
     s2.metric("Estimated Package Size", f"{pkg['length']} x {pkg['width']} x {pkg['height']} in")
 
-    # Centered, not full-width
-    st.divider()
-    b1, b2, b3 = st.columns([1, 2, 1])
-    with b2:
-        if st.button("Place Order & Pay"):
-            payload_inputs = {
-                "quantity": int(quantity),
-                "material": str(material),
-                "thickness": float(thickness),
-                "handle_width": float(handle_width),
-                "handle_length_from_bore": float(handle_length),
-                "paddle_dia": float(paddle_dia),
-                "bore_dia": float(bore_dia),
-                "bore_tolerance": float(bore_tolerance),
-                "chamfer": bool(chamfer),
-                "chamfer_width": float(chamfer_width) if chamfer and chamfer_width is not None else None,
-                "handle_label": (handle_label or "").strip() or "No label",
-                "ships_in_days": int(ships_in_days),
-            }
-            start_checkout(payload_inputs)
+# -----------------------------
+# RIGHT: Pay button (bottom-center, not full width)
+# -----------------------------
+with right:
+    # Small spacer so button feels like it's "at the bottom" of the right panel
+    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+
+    # Center within the same narrowed width area
+    form_col, _spacer = st.columns([RIGHT_FORM_WIDTH, 1 - RIGHT_FORM_WIDTH], gap="large")
+    with form_col:
+        # Centered button within form column
+        left_pad = max(0.0, (1.0 - PAY_BUTTON_WIDTH_RATIO) / 2.0)
+        btn_cols = st.columns([left_pad, PAY_BUTTON_WIDTH_RATIO, left_pad])
+        with btn_cols[1]:
+            if st.button("Place Order & Pay"):
+                payload_inputs = {
+                    "quantity": int(quantity),
+                    "material": str(material),
+                    "thickness": float(thickness),
+                    "handle_width": float(handle_width),
+                    "handle_length_from_bore": float(handle_length),
+                    "paddle_dia": float(paddle_dia),
+                    "bore_dia": float(bore_dia),
+                    "bore_tolerance": float(bore_tolerance),
+                    "chamfer": bool(chamfer),
+                    "chamfer_width": float(chamfer_width) if chamfer and chamfer_width is not None else None,
+                    "handle_label": (handle_label or "").strip() or "No label",
+                    "ships_in_days": int(ships_in_days),
+                }
+                start_checkout(payload_inputs)
