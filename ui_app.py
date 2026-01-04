@@ -472,12 +472,16 @@ with right:
     # Small spacer so button feels like it's "at the bottom" of the right panel
     st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
-    # Center within the same narrowed width area
-    form_col, _spacer = st.columns([RIGHT_FORM_WIDTH, 1 - RIGHT_FORM_WIDTH], gap="large")
+    # Keep the button aligned with the (right-shifted) input column width
+    _spacer, form_col = st.columns([1 - RIGHT_FORM_WIDTH, RIGHT_FORM_WIDTH], gap="large")
     with form_col:
-        # Centered button within form column
+        # Note for buyer
+        st.caption("Shipping option is selected during checkout.")
+
+        # Centered button within form column (not full width)
         left_pad = max(0.0, (1.0 - PAY_BUTTON_WIDTH_RATIO) / 2.0)
         btn_cols = st.columns([left_pad, PAY_BUTTON_WIDTH_RATIO, left_pad])
+
         with btn_cols[1]:
             if st.button("Place Order & Pay"):
                 payload_inputs = {
@@ -495,14 +499,3 @@ with right:
                     "ships_in_days": int(ships_in_days),
                 }
                 start_checkout(payload_inputs)
-
-
-
-
-
-
-
-
-
-
-
