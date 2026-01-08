@@ -9,3 +9,7 @@ psycopg2-binary
 sendgrid
 requests
 pandas
+PyJWT
+cryptography
+httpx
+supabase
