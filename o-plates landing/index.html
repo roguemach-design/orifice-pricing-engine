@@ -3,71 +3,134 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>O-Plates | Precision Orifice Plates</title>
-  <meta name="description" content="Configure and price custom orifice plates in minutes." />
+  <title>O-Plates | Orifice Plate Quoting</title>
+  <meta name="description" content="Configure, price, and quote custom orifice plates in minutes." />
+  <link rel="stylesheet" href="styles.css" />
 </head>
 
 <body>
-  <header class="wrap">
-    <div class="topbar">
-      <div class="brand">O-Plates</div>
-      <nav class="nav">
-        <a href="https://quote.o-plates.com" class="navlink">Build a Plate</a>
-        <a href="#contact" class="navlink">Contact</a>
+  <!-- Top toolbar -->
+  <header class="topbar">
+    <div class="topbar__inner">
+      <a class="brand" href="/">
+        <span class="brand__mark">O</span>
+        <span class="brand__name">O-Plates</span>
+      </a>
+
+      <nav class="topbar__nav">
+        <a class="navlink" href="#capabilities">Capabilities</a>
+        <a class="navlink" href="#how">How it works</a>
       </nav>
+
+      <div class="topbar__actions">
+        <!-- TODO: update these URLs when you have real routes -->
+        <a class="btn btn--ghost" href="mailto:sales@o-plates.com">Contact Us</a>
+        <a class="btn btn--primary" href="https://quote.o-plates.com">Log In</a>
+      </div>
     </div>
   </header>
 
   <main class="wrap">
+    <!-- Hero -->
     <section class="hero">
-      <h1>Precision Orifice Plates — fast quoting, clean paperwork.</h1>
-      <p class="sub">
-        Configure a plate, get instant pricing, and generate a quote you can forward to purchasing.
-      </p>
+      <div class="hero__copy">
+        <h1>Fast, clean quoting for precision orifice plates.</h1>
+        <p class="muted">
+          Configure a plate, get instant pricing, and generate a quote your team can forward to purchasing.
+        </p>
 
-      <div class="ctaRow">
-        <a class="btn primary" href="https://quote.o-plates.com">Build a Plate →</a>
-        <a class="btn ghost" href="#how">How it works</a>
+        <div class="hero__cta">
+          <a class="btn btn--primary btn--lg" href="https://quote.o-plates.com">Start a Quote →</a>
+          <a class="btn btn--ghost btn--lg" href="#how">See how it works</a>
+        </div>
+
+        <div class="badges">
+          <span class="badge">304 / 316 Stainless</span>
+          <span class="badge">Custom bores & tolerances</span>
+          <span class="badge">Selectable lead times</span>
+          <span class="badge">PDF quote ready</span>
+        </div>
       </div>
 
-      <ul class="bullets">
-        <li>304 / 316 Stainless</li>
-        <li>Custom bores & tolerances</li>
-        <li>Lead times you can select</li>
-        <li>PDF quote + reorder-ready</li>
-      </ul>
+      <div class="hero__panel">
+        <div class="panel">
+          <div class="panel__title">Quick actions</div>
+          <a class="panel__link" href="https://quote.o-plates.com">Build a plate</a>
+          <a class="panel__link" href="mailto:sales@o-plates.com?subject=O-Plates%20Question">Ask a question</a>
+          <a class="panel__link" href="#capabilities">View capabilities</a>
+        </div>
+
+        <div class="panel panel--sub">
+          <div class="panel__title">Purchasing workflow</div>
+          <div class="panel__text muted">
+            Configure → generate PDF quote → forward internally → purchase later using quote number.
+          </div>
+        </div>
+      </div>
     </section>
 
+    <!-- Capabilities -->
+    <section id="capabilities" class="grid">
+      <div class="card">
+        <h2>Capabilities</h2>
+        <ul class="list">
+          <li>Materials: 304 / 316 stainless</li>
+          <li>Thickness: configurable</li>
+          <li>Bore + tolerance: configurable</li>
+          <li>Handles/options: configurable</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h2>What you get</h2>
+        <ul class="list">
+          <li>Instant price</li>
+          <li>Shipping estimate</li>
+          <li>PDF quote for purchasing</li>
+          <li>Reorder-ready configuration</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- How it works -->
     <section id="how" class="card">
       <h2>How it works</h2>
-      <ol class="steps">
-        <li>Configure plate dimensions and options.</li>
-        <li>Instant price + lead time.</li>
-        <li>Generate a PDF quote or checkout.</li>
-      </ol>
+      <div class="steps">
+        <div class="step">
+          <div class="step__num">1</div>
+          <div>
+            <div class="step__title">Configure</div>
+            <div class="muted">Enter dimensions, bore, tolerance, options.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step__num">2</div>
+          <div>
+            <div class="step__title">Quote</div>
+            <div class="muted">Get instant pricing and lead time.</div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step__num">3</div>
+          <div>
+            <div class="step__title">Purchase</div>
+            <div class="muted">Checkout now or generate a PDF quote for later.</div>
+          </div>
+        </div>
+      </div>
     </section>
 
-    <section id="contact" class="card">
-      <h2>Contact</h2>
-      <p class="sub">
-        Questions or special requirements? Email us and we’ll respond quickly.
-      </p>
-      <p>
-        <a class="btn primary" href="mailto:sales@o-plates.com">sales@o-plates.com</a>
-      </p>
-      <p class="fineprint">
-        If you’re purchasing, you can request a quote number and place an order later.
-      </p>
-    </section>
+    <!-- Footer -->
+    <footer class="footer">
+      <div class="footer__left muted">© <span id="y"></span> O-Plates</div>
+      <div class="footer__right">
+        <a class="navlink" href="mailto:sales@o-plates.com">sales@o-plates.com</a>
+      </div>
+    </footer>
   </main>
 
-  <footer class="wrap footer">
-    <span class="fineprint">© <span id="year"></span> O-Plates</span>
-  </footer>
-
   <script>
-    document.getElementById("year").textContent = new Date().getFullYear();
+    document.getElementById("y").textContent = new Date().getFullYear();
   </script>
 </body>
 </html>
-
