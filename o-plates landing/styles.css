@@ -101,7 +101,17 @@ a{ color: inherit; }
   grid-template-columns: 1.3fr .8fr;
   gap: 18px;
   padding: 28px 0 14px;
+  align-items: stretch;
 }
+.hero__copy{
+  display:flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+.hero__top{ /* keeps the top content grouped */
+  display:block;
+}
+.spacer{ flex: 1; } /* pushes What you get down to align with right column bottom */
 .hero h1{
   font-size: clamp(2.1rem, 3.6vw, 3.2rem);
   line-height: 1.08;
@@ -119,7 +129,16 @@ a{ color: inherit; }
   font-size: .92rem;
 }
 
-/* side panels */
+/* cards/panels */
+.card{
+  border-radius: var(--radius);
+  background: rgba(18,26,38,.62);
+  border: 1px solid rgba(34,48,73,.75);
+  box-shadow: var(--shadow);
+  padding: 16px;
+}
+.card h2{ margin: 0 0 10px; font-size: 1.25rem; }
+
 .hero__panel{ display:grid; gap: 14px; }
 .panel{
   border-radius: var(--radius);
@@ -143,6 +162,8 @@ a{ color: inherit; }
 }
 .panel__link:hover{ border-color: rgba(75,125,255,.55); }
 
+.list{ margin: 0; padding-left: 18px; color: var(--muted); display:grid; gap: 8px; }
+
 /* workflow */
 .workflow{ display:grid; gap:12px; }
 .workflow__step{
@@ -164,23 +185,6 @@ a{ color: inherit; }
   width:8px;height:8px;border-radius:50%;
   background: var(--accent);
 }
-
-/* sections */
-.grid{
-  display:grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
-  margin: 14px 0;
-}
-.card{
-  border-radius: var(--radius);
-  background: rgba(18,26,38,.62);
-  border: 1px solid rgba(34,48,73,.75);
-  box-shadow: var(--shadow);
-  padding: 16px;
-}
-.card h2{ margin: 0 0 10px; font-size: 1.25rem; }
-.list{ margin: 0; padding-left: 18px; color: var(--muted); display:grid; gap: 8px; }
 
 /* steps */
 .steps{ display:grid; gap: 12px; }
@@ -210,5 +214,5 @@ a{ color: inherit; }
 @media (max-width: 920px){
   .hero{ grid-template-columns: 1fr; }
   .topbar__nav{ display:none; }
-  .grid{ grid-template-columns: 1fr; }
+  .spacer{ display:none; } /* don’t force alignment on mobile */
 }
