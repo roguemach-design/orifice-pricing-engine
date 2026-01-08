@@ -68,17 +68,6 @@ a{ color: inherit; }
   letter-spacing: .2px;
 }
 
-/* You removed the "O" mark in HTML; safe to keep this unused. */
-.brand__mark{
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  background: rgba(75,125,255,.18);
-  border: 1px solid rgba(75,125,255,.35);
-}
-
 .brand__name{ opacity: .95; }
 
 .topbar__nav{
@@ -156,7 +145,7 @@ a{ color: inherit; }
 
 .hero__top{ display: block; }
 
-.spacer{ flex: 1; } /* aligns What-you-get card with right column on desktop */
+.spacer{ flex: 1; }
 
 .hero h1{
   font-size: clamp(2.1rem, 3.6vw, 3.2rem);
@@ -224,42 +213,6 @@ a{ color: inherit; }
   margin-bottom: 10px;
 }
 
-.panel__link{
-  display: block;
-  padding: 10px 10px;
-  margin: 6px 0;
-  border-radius: 12px;
-  text-decoration: none;
-  background: rgba(11,14,20,.38);
-  border: 1px solid rgba(34,48,73,.45);
-  color: var(--text);
-  font-weight: 800;
-}
-
-.panel__link:hover{ border-color: rgba(75,125,255,.55); }
-
-/* Non-clickable “rounded buttons” inside the panel */
-.panel__pills{
-  display: grid;
-  gap: 10px;
-  margin-top: 10px;
-}
-
-.pill{
-  display: inline-flex;
-  align-items: center;
-  padding: 10px 10px;
-  border-radius: 999px;
-  background: rgba(18,26,38,.55);
-  border: 1px solid rgba(34,48,73,.75);
-  color: var(--muted);
-  font-weight: 800;
-  letter-spacing: .1px;
-  cursor: default;
-  user-select: none;
-}
-
-/* Lists */
 .list{
   margin: 0;
   padding-left: 18px;
@@ -359,5 +312,5 @@ a{ color: inherit; }
 @media (max-width: 920px){
   .hero{ grid-template-columns: 1fr; }
   .topbar__nav{ display: none; }
-  .spacer{ display: none; } /* don’t force alignment on mobile */
+  .spacer{ display: none; }
 }
