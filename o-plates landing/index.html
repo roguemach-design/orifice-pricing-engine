@@ -23,7 +23,6 @@
       </nav>
 
       <div class="topbar__actions">
-        <!-- TODO: update these URLs when you have real routes -->
         <a class="btn btn--ghost" href="mailto:sales@o-plates.com">Contact Us</a>
         <a class="btn btn--primary" href="https://quote.o-plates.com">Log In</a>
       </div>
@@ -36,7 +35,8 @@
       <div class="hero__copy">
         <h1>Fast, clean quoting for precision orifice plates.</h1>
         <p class="muted">
-          Configure a plate, get instant pricing, and generate a quote your team can forward to purchasing.
+          Configure a plate, get instant pricing, selectable lead times, and shipping options—then either check out
+          immediately or generate a PDF quote for internal purchasing.
         </p>
 
         <div class="hero__cta">
@@ -48,22 +48,46 @@
           <span class="badge">304 / 316 Stainless</span>
           <span class="badge">Custom bores & tolerances</span>
           <span class="badge">Selectable lead times</span>
-          <span class="badge">PDF quote ready</span>
+          <span class="badge">Shipping options at checkout</span>
         </div>
       </div>
 
       <div class="hero__panel">
         <div class="panel">
-          <div class="panel__title">Quick actions</div>
           <a class="panel__link" href="https://quote.o-plates.com">Build a plate</a>
-          <a class="panel__link" href="mailto:sales@o-plates.com?subject=O-Plates%20Question">Ask a question</a>
-          <a class="panel__link" href="#capabilities">View capabilities</a>
+          <a class="panel__link" href="https://quote.o-plates.com">View instant pricing &amp; lead times</a>
+          <a class="panel__link" href="https://quote.o-plates.com">Generate PDF or checkout with shipping options</a>
         </div>
 
         <div class="panel panel--sub">
           <div class="panel__title">Purchasing workflow</div>
-          <div class="panel__text muted">
-            Configure → generate PDF quote → forward internally → purchase later using quote number.
+
+          <div class="workflow">
+            <div class="workflow__step">
+              <span class="dot"></span>
+              <span>Configure a plate &amp; get instant pricing, lead time, and shipping options</span>
+            </div>
+
+            <div class="workflow__fork">
+              <div class="path">
+                <strong>Multiple sizes / internal approval</strong>
+                <span>
+                  Generate a PDF quote → forward to purchasing → internal review →
+                  issue PO → checkout using quote number
+                </span>
+              </div>
+
+              <div class="path">
+                <strong>Single size / ready to buy</strong>
+                <span>
+                  Go straight to checkout and receive your plates
+                </span>
+              </div>
+            </div>
+
+            <div class="fineprint muted" style="margin-top:8px">
+              Lead time and shipping selections are reflected directly in the quote and checkout—no surprises.
+            </div>
           </div>
         </div>
       </div>
@@ -85,9 +109,9 @@
         <h2>What you get</h2>
         <ul class="list">
           <li>Instant price</li>
-          <li>Shipping estimate</li>
+          <li>Selectable lead time</li>
+          <li>Shipping options at checkout</li>
           <li>PDF quote for purchasing</li>
-          <li>Reorder-ready configuration</li>
         </ul>
       </div>
     </section>
@@ -100,24 +124,38 @@
           <div class="step__num">1</div>
           <div>
             <div class="step__title">Configure</div>
-            <div class="muted">Enter dimensions, bore, tolerance, options.</div>
+            <div class="muted">Enter dimensions, bore, tolerance, and options.</div>
           </div>
         </div>
         <div class="step">
           <div class="step__num">2</div>
           <div>
             <div class="step__title">Quote</div>
-            <div class="muted">Get instant pricing and lead time.</div>
+            <div class="muted">Get instant pricing, lead time, and shipping options.</div>
           </div>
         </div>
         <div class="step">
           <div class="step__num">3</div>
           <div>
             <div class="step__title">Purchase</div>
-            <div class="muted">Checkout now or generate a PDF quote for later.</div>
+            <div class="muted">Checkout now or generate a PDF quote for purchasing and approval.</div>
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- Contact -->
+    <section id="contact" class="card">
+      <h2>Contact</h2>
+      <p class="muted">
+        Questions or special requirements? Email us and we’ll respond quickly.
+      </p>
+      <p>
+        <a class="btn btn--primary" href="mailto:sales@o-plates.com">sales@o-plates.com</a>
+      </p>
+      <p class="fineprint muted">
+        Purchasing teams can request a quote number and place an order later using that quote.
+      </p>
     </section>
 
     <!-- Footer -->
