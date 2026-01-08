@@ -11,8 +11,12 @@
   --radius: 16px;
 }
 
-*{ box-sizing:border-box; }
-html,body{ margin:0; padding:0; }
+/* -----------------------------
+   Base / Reset
+----------------------------- */
+*{ box-sizing: border-box; }
+html, body{ margin: 0; padding: 0; }
+
 body{
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
   color: var(--text);
@@ -22,12 +26,21 @@ body{
     linear-gradient(180deg, var(--bg1), var(--bg0));
 }
 
-/* layout */
-.wrap{ max-width: 1120px; margin:0 auto; padding: 28px 20px 44px; }
-.muted{ color: var(--muted); }
 a{ color: inherit; }
+.muted{ color: var(--muted); }
 
-/* topbar */
+/* -----------------------------
+   Layout
+----------------------------- */
+.wrap{
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 28px 20px 44px;
+}
+
+/* -----------------------------
+   Topbar
+----------------------------- */
 .topbar{
   position: sticky;
   top: 0;
@@ -36,89 +49,135 @@ a{ color: inherit; }
   background: rgba(11,14,20,.72);
   border-bottom: 1px solid rgba(34,48,73,.55);
 }
+
 .topbar__inner{
-  max-width:1120px;
-  margin:0 auto;
+  max-width: 1120px;
+  margin: 0 auto;
   padding: 14px 20px;
-  display:flex;
-  align-items:center;
+  display: flex;
+  align-items: center;
   gap: 16px;
 }
+
 .brand{
-  display:flex;
-  align-items:center;
-  gap:10px;
-  text-decoration:none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
   font-weight: 800;
-  letter-spacing:.2px;
+  letter-spacing: .2px;
 }
+
+/* You removed the "O" mark in HTML; safe to keep this unused. */
 .brand__mark{
-  width:30px;height:30px;
-  display:grid;place-items:center;
-  border-radius:10px;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
   background: rgba(75,125,255,.18);
-  border:1px solid rgba(75,125,255,.35);
+  border: 1px solid rgba(75,125,255,.35);
 }
-.brand__name{ opacity:.95; }
-.topbar__nav{ display:flex; gap: 14px; margin-left: 10px; }
+
+.brand__name{ opacity: .95; }
+
+.topbar__nav{
+  display: flex;
+  gap: 14px;
+  margin-left: 10px;
+}
+
 .navlink{
-  text-decoration:none;
+  text-decoration: none;
   color: var(--muted);
   font-weight: 600;
 }
-.navlink:hover{ color: var(--text); }
-.topbar__actions{ margin-left:auto; display:flex; gap:10px; }
 
-/* buttons */
+.navlink:hover{ color: var(--text); }
+
+.topbar__actions{
+  margin-left: auto;
+  display: flex;
+  gap: 10px;
+}
+
+/* -----------------------------
+   Buttons
+----------------------------- */
 .btn{
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 10px 14px;
   border-radius: 12px;
   border: 1px solid rgba(34,48,73,.9);
-  text-decoration:none;
+  text-decoration: none;
   font-weight: 800;
-  letter-spacing:.2px;
+  letter-spacing: .2px;
 }
-.btn--lg{ padding: 12px 16px; border-radius: 14px; }
+
+.btn--lg{
+  padding: 12px 16px;
+  border-radius: 14px;
+}
+
 .btn--primary{
   background: linear-gradient(180deg, rgba(75,125,255,1), rgba(58,104,255,1));
   border-color: transparent;
   box-shadow: 0 10px 30px rgba(75,125,255,.22);
 }
+
 .btn--primary:hover{ filter: brightness(1.08); }
+
 .btn--ghost{
   background: rgba(18,26,38,.55);
 }
+
 .btn--ghost:hover{
   border-color: rgba(75,125,255,.55);
 }
 
-/* hero */
+/* -----------------------------
+   Hero
+----------------------------- */
 .hero{
-  display:grid;
+  display: grid;
   grid-template-columns: 1.3fr .8fr;
   gap: 18px;
   padding: 28px 0 14px;
   align-items: stretch;
 }
+
 .hero__copy{
-  display:flex;
+  display: flex;
   flex-direction: column;
   min-height: 100%;
 }
-.hero__top{ /* keeps the top content grouped */
-  display:block;
-}
-.spacer{ flex: 1; } /* pushes What you get down to align with right column bottom */
+
+.hero__top{ display: block; }
+
+.spacer{ flex: 1; } /* aligns What-you-get card with right column on desktop */
+
 .hero h1{
   font-size: clamp(2.1rem, 3.6vw, 3.2rem);
   line-height: 1.08;
   margin: 0 0 12px;
 }
-.hero__cta{ display:flex; gap:12px; flex-wrap:wrap; margin: 18px 0 14px; }
-.badges{ display:flex; flex-wrap:wrap; gap:10px; margin-top: 10px; }
+
+.hero__cta{
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 18px 0 14px;
+}
+
+.badges{
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 10px;
+}
+
 .badge{
   padding: 8px 10px;
   border-radius: 999px;
@@ -129,7 +188,9 @@ a{ color: inherit; }
   font-size: .92rem;
 }
 
-/* cards/panels */
+/* -----------------------------
+   Cards / Panels
+----------------------------- */
 .card{
   border-radius: var(--radius);
   background: rgba(18,26,38,.62);
@@ -137,9 +198,17 @@ a{ color: inherit; }
   box-shadow: var(--shadow);
   padding: 16px;
 }
-.card h2{ margin: 0 0 10px; font-size: 1.25rem; }
 
-.hero__panel{ display:grid; gap: 14px; }
+.card h2{
+  margin: 0 0 10px;
+  font-size: 1.25rem;
+}
+
+.hero__panel{
+  display: grid;
+  gap: 14px;
+}
+
 .panel{
   border-radius: var(--radius);
   background: rgba(18,26,38,.62);
@@ -147,72 +216,148 @@ a{ color: inherit; }
   box-shadow: var(--shadow);
   padding: 14px;
 }
+
 .panel--sub{ background: rgba(18,26,38,.45); }
-.panel__title{ font-weight: 900; margin-bottom: 10px; }
+
+.panel__title{
+  font-weight: 900;
+  margin-bottom: 10px;
+}
+
 .panel__link{
-  display:block;
+  display: block;
   padding: 10px 10px;
   margin: 6px 0;
   border-radius: 12px;
-  text-decoration:none;
+  text-decoration: none;
   background: rgba(11,14,20,.38);
   border: 1px solid rgba(34,48,73,.45);
   color: var(--text);
   font-weight: 800;
 }
+
 .panel__link:hover{ border-color: rgba(75,125,255,.55); }
 
-.list{ margin: 0; padding-left: 18px; color: var(--muted); display:grid; gap: 8px; }
-
-/* workflow */
-.workflow{ display:grid; gap:12px; }
-.workflow__step{
-  display:flex; align-items:center; gap:10px;
-  font-weight:700;
+/* Non-clickable “rounded buttons” inside the panel */
+.panel__pills{
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
 }
+
+.pill{
+  display: inline-flex;
+  align-items: center;
+  padding: 10px 10px;
+  border-radius: 999px;
+  background: rgba(18,26,38,.55);
+  border: 1px solid rgba(34,48,73,.75);
+  color: var(--muted);
+  font-weight: 800;
+  letter-spacing: .1px;
+  cursor: default;
+  user-select: none;
+}
+
+/* Lists */
+.list{
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  display: grid;
+  gap: 8px;
+}
+
+/* -----------------------------
+   Workflow
+----------------------------- */
+.workflow{ display: grid; gap: 12px; }
+
+.workflow__step{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+}
+
 .workflow__fork{
-  display:grid; gap:12px;
+  display: grid;
+  gap: 12px;
   padding-left: 14px;
   border-left: 2px solid rgba(75,125,255,.35);
 }
+
 .path{
-  display:grid; gap:4px;
+  display: grid;
+  gap: 4px;
   color: var(--muted);
   font-size: .95rem;
 }
-.path strong{ color: var(--text); font-weight:800; }
+
+.path strong{
+  color: var(--text);
+  font-weight: 800;
+}
+
 .dot{
-  width:8px;height:8px;border-radius:50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
   background: var(--accent);
 }
 
-/* steps */
-.steps{ display:grid; gap: 12px; }
-.step{ display:flex; gap: 12px; align-items:flex-start; padding: 10px 0; border-top: 1px solid rgba(34,48,73,.55); }
-.step:first-child{ border-top: none; padding-top: 0; }
+/* -----------------------------
+   Steps
+----------------------------- */
+.steps{ display: grid; gap: 12px; }
+
+.step{
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 10px 0;
+  border-top: 1px solid rgba(34,48,73,.55);
+}
+
+.step:first-child{
+  border-top: none;
+  padding-top: 0;
+}
+
 .step__num{
-  width: 28px; height: 28px;
-  display:grid; place-items:center;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
   border-radius: 10px;
   background: rgba(75,125,255,.16);
-  border:1px solid rgba(75,125,255,.35);
+  border: 1px solid rgba(75,125,255,.35);
   font-weight: 900;
 }
-.step__title{ font-weight: 900; margin-bottom: 2px; }
 
-/* footer */
+.step__title{
+  font-weight: 900;
+  margin-bottom: 2px;
+}
+
+/* -----------------------------
+   Footer
+----------------------------- */
 .footer{
-  display:flex;
-  justify-content:space-between;
-  align-items:center;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   gap: 12px;
   padding: 22px 0 0;
 }
+
 .fineprint{ font-size: .92rem; }
 
-/* responsive */
+/* -----------------------------
+   Responsive
+----------------------------- */
 @media (max-width: 920px){
   .hero{ grid-template-columns: 1fr; }
-  .topbar__nav{ display:none; }
-  .spacer{ display:none; } /* don’t force alignment on mobile */
+  .topbar__nav{ display: none; }
+  .spacer{ display: none; } /* don’t force alignment on mobile */
 }
