@@ -20,6 +20,10 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from sendgrid import SendGridAPIClient
 from sendgrid.helpers.mail import Mail
 
+# JWT (Supabase)
+import jwt
+from jwt import PyJWKClient
+
 
 # ----------------------------
 # App + config
@@ -30,6 +34,8 @@ ALLOWED_ORIGINS = [
     "https://quote.o-plates.com",
     "https://orifice-pricing-ui.onrender.com",
     "https://orifice-admin-ui.onrender.com",
+    # add your portal origin once deployed, e.g.
+    # "https://orifice-customer-portal.onrender.com",
 ]
 
 app.add_middleware(
@@ -40,9 +46,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# API keys
+# API keys (server-to-server / your own UI)
 API_KEY = (os.environ.get("API_KEY") or "").strip()
-ADMIN_API_KEY = (os.environ.get("ADMIN_API_KEY") or "").strip()  # optional, separate admin auth
+ADMIN_API_KEY = (os.environ.get("ADMIN_API_KEY") or "").strip()  # optional separate admin auth
+
+# Supabase JWT verification (customer portal)
+SUPABASE_JWKS_URL = (os.environ.get("SUPABASE_JWKS_URL") or "").strip()
+SUPABASE_JWT_ISSUER = (os.environ.get("SUPABASE_JWT_ISSUER") or "").strip()
+SUPABASE_JWT_AUD = (os.environ.get("SUPABASE_JWT_AUD") or "authenticated").strip()
+_jwk_client: Optional[PyJWKClient] = PyJWKClient(SUPABASE_JWKS_URL) if SUPABASE_JWKS_URL else None
 
 # Stripe config
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
@@ -72,6 +84,9 @@ class Order(Base):
     # Human-friendly order number (1, 2, 3...) -> display as OP-0001, etc.
     order_number = Column(Integer, unique=True, index=True, nullable=True)
 
+    # Customer identity (Supabase user id)
+    customer_id = Column(String, index=True, nullable=True)
+
     stripe_session_id = Column(String, unique=True, index=True)
     stripe_payment_intent = Column(String, nullable=True)
 
@@ -92,13 +107,15 @@ def init_db() -> None:
     if not engine:
         return
 
-    # Create base tables if missing
     Base.metadata.create_all(bind=engine)
 
-    # Lightweight “auto-migration” for order_number (best-effort)
+    # Lightweight “auto-migration” (best-effort)
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_number INTEGER"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_orders_order_number ON orders(order_number)"))
+
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_id VARCHAR"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_customer_id ON orders(customer_id)"))
 
 
 init_db()
@@ -107,6 +124,11 @@ init_db()
 # ----------------------------
 # Helpers
 # ----------------------------
+def _db_required() -> None:
+    if not SessionLocal:
+        raise HTTPException(status_code=500, detail="DB not configured (missing DATABASE_URL).")
+
+
 def _require_api_key(x_api_key: Optional[str] = Header(default=None, alias="x-api-key")) -> None:
     expected = (API_KEY or "").strip()
     provided = (x_api_key or "").strip()
@@ -115,9 +137,6 @@ def _require_api_key(x_api_key: Optional[str] = Header(default=None, alias="x-ap
 
 
 def _require_admin_key(x_api_key: Optional[str] = Header(default=None, alias="x-api-key")) -> None:
-    """
-    Optional separate admin protection. If ADMIN_API_KEY is not set, falls back to API_KEY.
-    """
     expected = (ADMIN_API_KEY or API_KEY or "").strip()
     provided = (x_api_key or "").strip()
     if expected and (not provided or provided != expected):
@@ -131,11 +150,6 @@ def _send_email(to_email: str, subject: str, html: str) -> None:
     SendGridAPIClient(SENDGRID_API_KEY).send(msg)
 
 
-def _db_required() -> None:
-    if not SessionLocal:
-        raise HTTPException(status_code=500, detail="DB not configured (missing DATABASE_URL).")
-
-
 def _format_order_number(n: Optional[int]) -> Optional[str]:
     if not n:
         return None
@@ -143,10 +157,6 @@ def _format_order_number(n: Optional[int]) -> Optional[str]:
 
 
 def _assign_order_number(db, o: Order) -> None:
-    """
-    Assigns the next available order_number (1, 2, 3...) if missing.
-    Uses a retry loop to handle rare race conditions.
-    """
     if o.order_number:
         return
 
@@ -164,6 +174,69 @@ def _assign_order_number(db, o: Order) -> None:
     raise HTTPException(status_code=500, detail="Could not assign order number (please retry).")
 
 
+def _decode_supabase_user_id_from_bearer(authorization: Optional[str]) -> Optional[str]:
+    """
+    Returns Supabase user id (sub) if Authorization: Bearer <jwt> is valid.
+    Otherwise returns None.
+    """
+    if not authorization:
+        return None
+    if not authorization.lower().startswith("bearer "):
+        return None
+    token = authorization.split(" ", 1)[1].strip()
+    if not token:
+        return None
+
+    if not (_jwk_client and SUPABASE_JWT_ISSUER):
+        return None
+
+    try:
+        signing_key = _jwk_client.get_signing_key_from_jwt(token).key
+        decoded = jwt.decode(
+            token,
+            signing_key,
+            algorithms=["RS256"],
+            audience=SUPABASE_JWT_AUD,
+            issuer=SUPABASE_JWT_ISSUER,
+            options={"verify_exp": True},
+        )
+        return decoded.get("sub")
+    except Exception:
+        return None
+
+
+def _require_customer_user_id(
+    authorization: Optional[str] = Header(default=None, alias="authorization"),
+) -> str:
+    user_id = _decode_supabase_user_id_from_bearer(authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return user_id
+
+
+def _api_key_or_customer_user_id(
+    x_api_key: Optional[str] = Header(default=None, alias="x-api-key"),
+    authorization: Optional[str] = Header(default=None, alias="authorization"),
+) -> Optional[str]:
+    """
+    Allows either:
+      - x-api-key (your current Streamlit quote UI), OR
+      - Authorization: Bearer <supabase_jwt> (customer portal)
+    Returns customer_user_id if bearer is valid, else None.
+    Raises 401 if neither is valid.
+    """
+    expected = (API_KEY or "").strip()
+    provided = (x_api_key or "").strip()
+    if expected and provided == expected:
+        return None
+
+    user_id = _decode_supabase_user_id_from_bearer(authorization)
+    if user_id:
+        return user_id
+
+    raise HTTPException(status_code=401, detail="Unauthorized")
+
+
 # ----------------------------
 # Request models
 # ----------------------------
@@ -179,9 +252,8 @@ class QuoteRequest(BaseModel):
     chamfer: bool
     ships_in_days: int
 
-    # Optional fields (keep defaults here so UI can omit safely)
     handle_label: str = Field(default="No label")
-    chamfer_width: Optional[float] = Field(default=0.062)  # inches
+    chamfer_width: Optional[float] = Field(default=0.062)
 
 
 class CheckoutCreateRequest(BaseModel):
@@ -203,7 +275,6 @@ async def quote(request: Request):
     # Normalize optional fields
     payload["handle_label"] = (payload.get("handle_label") or "").strip() or "No label"
 
-    # Default chamfer_width if chamfer True and missing/blank
     if payload.get("chamfer"):
         cw = payload.get("chamfer_width")
         if cw is None or cw == "":
@@ -215,17 +286,18 @@ async def quote(request: Request):
     return calculate_quote(inputs)
 
 
-@app.post("/checkout/create", dependencies=[Depends(_require_api_key)])
-def checkout_create(req: CheckoutCreateRequest):
+@app.post("/checkout/create")
+def checkout_create(
+    req: CheckoutCreateRequest,
+    customer_user_id: Optional[str] = Depends(_api_key_or_customer_user_id),
+):
     """
-    Called by Streamlit to start Stripe Checkout.
-    Server recomputes pricing + shipping options (do not trust client).
-    Also saves a "pending" order record keyed to the Stripe session.
+    Allows either x-api-key or a Supabase Bearer token.
+    If Bearer token is present, the order is tied to customer_id for the portal.
     """
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Stripe is not configured (missing STRIPE_SECRET_KEY).")
 
-    # Recompute quote on server (req includes defaults for handle_label/chamfer_width)
     inputs = QuoteInputs(**req.inputs.model_dump())
     result = calculate_quote(inputs)
 
@@ -277,10 +349,13 @@ def checkout_create(req: CheckoutCreateRequest):
                 }
             },
         ],
-        metadata={"quote_id": str(result.get("quote_id", ""))},
+        metadata={
+            "quote_id": str(result.get("quote_id", "")),
+            "customer_id": customer_user_id or "",
+        },
     )
 
-    # Save a "pending" order
+    # Save "pending" order
     if SessionLocal:
         db = SessionLocal()
         try:
@@ -290,6 +365,7 @@ def checkout_create(req: CheckoutCreateRequest):
                     id=str(uuid.uuid4()),
                     stripe_session_id=session.id,
                     quote_payload=req.inputs.model_dump(),
+                    customer_id=customer_user_id,
                 )
                 db.add(o)
                 db.commit()
@@ -301,11 +377,7 @@ def checkout_create(req: CheckoutCreateRequest):
 
 @app.get("/orders/by-session/{session_id}")
 def get_order_by_session(session_id: str):
-    """
-    Used by the Streamlit success page to show order summary after redirect.
-    """
     _db_required()
-
     db = SessionLocal()
     try:
         o = db.query(Order).filter(Order.stripe_session_id == session_id).first()
@@ -321,7 +393,6 @@ def get_order_by_session(session_id: str):
             "amount_subtotal_usd": (o.amount_subtotal_cents or 0) / 100.0,
             "amount_shipping_usd": (o.amount_shipping_cents or 0) / 100.0,
             "shipping_service": o.shipping_service,
-            # ✅ include address fields for UI success page
             "shipping_name": o.shipping_name,
             "shipping_address": o.shipping_address,
             "created_at": o.created_at.isoformat() if o.created_at else None,
@@ -331,7 +402,69 @@ def get_order_by_session(session_id: str):
 
 
 # ----------------------------
-# Admin endpoints
+# Customer portal endpoints
+# ----------------------------
+@app.get("/me/orders")
+def me_orders(customer_user_id: str = Depends(_require_customer_user_id), limit: int = 50):
+    _db_required()
+    limit = max(1, min(int(limit), 200))
+
+    db = SessionLocal()
+    try:
+        orders = (
+            db.query(Order)
+            .filter(Order.customer_id == customer_user_id)
+            .order_by(Order.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+
+        return [
+            {
+                "id": o.id,
+                "order_number_display": _format_order_number(o.order_number),
+                "created_at": o.created_at.isoformat() if o.created_at else None,
+                "customer_email": o.customer_email,
+                "amount_total_usd": (o.amount_total_cents or 0) / 100.0,
+                "amount_shipping_usd": (o.amount_shipping_cents or 0) / 100.0,
+                "shipping_service": o.shipping_service,
+            }
+            for o in orders
+        ]
+    finally:
+        db.close()
+
+
+@app.get("/me/orders/{order_id}")
+def me_order_detail(order_id: str, customer_user_id: str = Depends(_require_customer_user_id)):
+    _db_required()
+    db = SessionLocal()
+    try:
+        o = db.query(Order).filter(Order.id == order_id, Order.customer_id == customer_user_id).first()
+        if not o:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        return {
+            "id": o.id,
+            "order_number_display": _format_order_number(o.order_number),
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+            "stripe_session_id": o.stripe_session_id,
+            "stripe_payment_intent": o.stripe_payment_intent,
+            "customer_email": o.customer_email,
+            "amount_subtotal_usd": (o.amount_subtotal_cents or 0) / 100.0,
+            "amount_shipping_usd": (o.amount_shipping_cents or 0) / 100.0,
+            "amount_total_usd": (o.amount_total_cents or 0) / 100.0,
+            "shipping_service": o.shipping_service,
+            "shipping_name": o.shipping_name,
+            "shipping_address": o.shipping_address,
+            "quote_payload": o.quote_payload,
+        }
+    finally:
+        db.close()
+
+
+# ----------------------------
+# Admin endpoints (unchanged)
 # ----------------------------
 @app.get("/admin/orders", dependencies=[Depends(_require_admin_key)])
 def admin_list_orders(q: Optional[str] = None, limit: int = 50):
@@ -353,19 +486,17 @@ def admin_list_orders(q: Optional[str] = None, limit: int = 50):
             )
 
         orders = query.limit(limit).all()
-
         return [
             {
                 "id": o.id,
-                "order_number": o.order_number,
                 "order_number_display": _format_order_number(o.order_number),
                 "created_at": o.created_at.isoformat() if o.created_at else None,
                 "customer_email": o.customer_email,
                 "amount_total_usd": (o.amount_total_cents or 0) / 100.0,
                 "amount_shipping_usd": (o.amount_shipping_cents or 0) / 100.0,
                 "shipping_service": o.shipping_service,
-                # keep available if needed, admin UI can hide it
-                "stripe_session_id": o.stripe_session_id,
+                "shipping_name": o.shipping_name,
+                "shipping_address": o.shipping_address,
             }
             for o in orders
         ]
@@ -376,7 +507,6 @@ def admin_list_orders(q: Optional[str] = None, limit: int = 50):
 @app.get("/admin/orders/{order_id}", dependencies=[Depends(_require_admin_key)])
 def admin_get_order(order_id: str):
     _db_required()
-
     db = SessionLocal()
     try:
         o = db.query(Order).filter(Order.id == order_id).first()
@@ -385,7 +515,6 @@ def admin_get_order(order_id: str):
 
         return {
             "id": o.id,
-            "order_number": o.order_number,
             "order_number_display": _format_order_number(o.order_number),
             "created_at": o.created_at.isoformat() if o.created_at else None,
             "stripe_session_id": o.stripe_session_id,
@@ -398,6 +527,7 @@ def admin_get_order(order_id: str):
             "shipping_name": o.shipping_name,
             "shipping_address": o.shipping_address,
             "quote_payload": o.quote_payload,
+            "customer_id": o.customer_id,
         }
     finally:
         db.close()
@@ -405,11 +535,6 @@ def admin_get_order(order_id: str):
 
 @app.post("/stripe/webhook")
 async def stripe_webhook(request: Request):
-    """
-    Stripe calls this. Do NOT protect with API_KEY.
-    Must verify signature using STRIPE_WEBHOOK_SECRET.
-    Saves the paid order and emails confirmation.
-    """
     if not WEBHOOK_SECRET:
         raise HTTPException(status_code=500, detail="Stripe webhook not configured (missing STRIPE_WEBHOOK_SECRET).")
 
@@ -424,14 +549,13 @@ async def stripe_webhook(request: Request):
     if event["type"] == "checkout.session.completed":
         session = event["data"]["object"] or {}
 
-        # ✅ Refresh session from Stripe to ensure we have full details
+        # Refresh from Stripe to ensure full details
         try:
             session = stripe.checkout.Session.retrieve(
                 session.get("id"),
                 expand=["shipping_cost.shipping_rate", "customer_details", "shipping_details"],
             )
         except Exception:
-            # If refresh fails, fall back to the event payload
             pass
 
         stripe_session_id = session.get("id")
@@ -440,16 +564,14 @@ async def stripe_webhook(request: Request):
         customer_details = session.get("customer_details") or {}
         customer_email = customer_details.get("email")
 
-        amount_total = session.get("amount_total")  # cents
-        amount_subtotal = session.get("amount_subtotal")  # cents
-        amount_shipping = ((session.get("shipping_cost") or {}).get("amount_total"))  # cents
+        amount_total = session.get("amount_total")
+        amount_subtotal = session.get("amount_subtotal")
+        amount_shipping = ((session.get("shipping_cost") or {}).get("amount_total"))
 
-        # ✅ Determine selected shipping option (prefer expanded shipping_rate)
         shipping_service = None
         try:
             shipping_cost = session.get("shipping_cost") or {}
-            sr = shipping_cost.get("shipping_rate")  # expanded object if expand worked
-
+            sr = shipping_cost.get("shipping_rate")
             if isinstance(sr, dict):
                 shipping_service = (sr.get("metadata") or {}).get("service") or sr.get("display_name")
             else:
@@ -460,12 +582,13 @@ async def stripe_webhook(request: Request):
         except Exception:
             shipping_service = None
 
-        # ✅ Shipping name/address with fallback to customer_details
         shipping_details = session.get("shipping_details") or {}
         shipping_name = shipping_details.get("name") or customer_details.get("name")
         shipping_address = shipping_details.get("address") or customer_details.get("address")
 
-        # Save/update order in DB
+        # Pull customer_id from metadata if present (fallback)
+        customer_id = (session.get("metadata") or {}).get("customer_id") or None
+
         if SessionLocal:
             db = SessionLocal()
             try:
@@ -475,6 +598,10 @@ async def stripe_webhook(request: Request):
                     db.add(o)
                     db.commit()
                     db.refresh(o)
+
+                # Preserve pending customer_id; else use metadata fallback
+                if not o.customer_id and customer_id:
+                    o.customer_id = customer_id
 
                 o.stripe_payment_intent = payment_intent
                 o.customer_email = customer_email
@@ -488,18 +615,13 @@ async def stripe_webhook(request: Request):
                 db.commit()
                 db.refresh(o)
 
-                # Assign human-friendly order number now that it's paid
                 _assign_order_number(db, o)
-
-                order_id = o.id
                 order_display = _format_order_number(o.order_number) or "OP-????"
             finally:
                 db.close()
         else:
-            order_id = "N/A"
             order_display = "OP-????"
 
-        # Email confirmation
         if customer_email:
             _send_email(
                 to_email=customer_email,
@@ -507,7 +629,6 @@ async def stripe_webhook(request: Request):
                 html=f"""
                 <p>Thanks — we received your order.</p>
                 <p><b>Order #:</b> {order_display}</p>
-                <p><b>Internal ID:</b> {order_id}</p>
                 <p><b>Total Paid:</b> ${((amount_total or 0) / 100):.2f}</p>
                 <p>We’ll email your approval drawing next.</p>
                 """,
