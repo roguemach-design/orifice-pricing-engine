@@ -8,6 +8,7 @@ import requests
 import streamlit as st
 from supabase import create_client, Client
 
+st.sidebar.write("SUPABASE_URL =", os.environ.get("SUPABASE_URL"))
 
 # ----------------------------
 # Page setup
