@@ -1,11 +1,11 @@
-# ui_app.py
+# pages/1_Quote.py
 import os
 from typing import Dict, Optional
 
 import requests
 import streamlit as st
-from auth import auth_headers, is_logged_in
 
+from auth import render_auth_sidebar, auth_headers, is_logged_in
 from pricing_engine import QuoteInputs, calculate_quote
 import pricing_config as cfg
 
@@ -75,6 +75,11 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+# -----------------------------
+# Shared auth sidebar (login persists across pages)
+# -----------------------------
+render_auth_sidebar(show_debug=False)
 
 st.markdown("<h1>Orifice Plate Instant Quote</h1>", unsafe_allow_html=True)
 
@@ -270,8 +275,14 @@ def start_checkout(payload_inputs: dict) -> None:
     body = {"inputs": payload_inputs}
 
     headers: Dict[str, str] = {}
-    if API_KEY:
-        headers["x-api-key"] = API_KEY
+
+    # Logged-in customers: use Bearer token so API saves customer_id on the order
+    if is_logged_in():
+        headers.update(auth_headers())
+    else:
+        # Guest flow (existing behavior)
+        if API_KEY:
+            headers["x-api-key"] = API_KEY
 
     r = requests.post(f"{API_BASE}/checkout/create", json=body, headers=headers, timeout=30)
 
@@ -309,7 +320,6 @@ with left:
     st.markdown(f"<div style='height:{IMAGE_TOP_SPACER_PX}px'></div>", unsafe_allow_html=True)
     _render_product_image()
 
-    # Tight layout: fewer dividers
     if not LEFT_TIGHTEN:
         st.divider()
 
@@ -470,16 +480,18 @@ with left:
 # RIGHT: Pay button (bottom-center, not full width)
 # -----------------------------
 with right:
-    # Small spacer so button feels like it's "at the bottom" of the right panel
     st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
-    # Keep the button aligned with the (right-shifted) input column width
     _spacer, form_col = st.columns([1 - RIGHT_FORM_WIDTH, RIGHT_FORM_WIDTH], gap="large")
     with form_col:
-        # Note for buyer
+        # Logged-in indicator (ties the order to account)
+        if is_logged_in():
+            st.success("You’re logged in — this order will be saved to your account.")
+        else:
+            st.info("Checkout as guest — log in from the sidebar to save orders to your account.")
+
         st.caption("Shipping option is selected during checkout.")
 
-        # Centered button within form column (not full width)
         left_pad = max(0.0, (1.0 - PAY_BUTTON_WIDTH_RATIO) / 2.0)
         btn_cols = st.columns([left_pad, PAY_BUTTON_WIDTH_RATIO, left_pad])
 
@@ -500,5 +512,3 @@ with right:
                     "ships_in_days": int(ships_in_days),
                 }
                 start_checkout(payload_inputs)
-
-
