@@ -8,8 +8,6 @@ import requests
 import streamlit as st
 from supabase import create_client, Client
 
-st.sidebar.write("SUPABASE_URL =", os.environ.get("SUPABASE_URL"))
-
 # ----------------------------
 # Page setup
 # ----------------------------
@@ -20,6 +18,9 @@ st.caption("Login → view past orders → reorder (next)")
 API_BASE = os.environ.get("API_BASE", "https://orifice-pricing-api.onrender.com").rstrip("/")
 SUPABASE_URL = (os.environ.get("SUPABASE_URL") or "").strip()
 SUPABASE_ANON_KEY = (os.environ.get("SUPABASE_ANON_KEY") or "").strip()
+
+# Safe to show
+st.sidebar.write("SUPABASE_URL =", SUPABASE_URL)
 
 if "auth" not in st.session_state:
     st.session_state.auth = {
@@ -37,15 +38,6 @@ def _sb() -> Client:
 
 def _is_logged_in() -> bool:
     return bool(st.session_state.auth.get("access_token"))
-
-# ---- TEMP DEBUG: show access token ----
-with st.sidebar.expander("DEBUG: Access Token (temporary)"):
-    token = st.session_state.auth.get("access_token")
-    if token:
-        st.code(token)
-    else:
-        st.write("No token found")
-
 
 def _logout() -> None:
     st.session_state.auth = {"access_token": None, "refresh_token": None, "user": None, "email": None}
@@ -103,7 +95,11 @@ with st.sidebar:
     st.subheader("Login")
 
     if not _is_logged_in():
-        email = st.text_input("Email", value=st.session_state.auth.get("email") or "", placeholder="you@company.com").strip()
+        email = st.text_input(
+            "Email",
+            value=st.session_state.auth.get("email") or "",
+            placeholder="you@company.com",
+        ).strip()
 
         col1, col2 = st.columns(2)
         with col1:
@@ -111,7 +107,13 @@ with st.sidebar:
         with col2:
             verify_code = st.button("Verify code")
 
-        otp_code = st.text_input("6-digit code", value="", placeholder="123456", max_chars=6).strip()
+        # ---- CHANGE: allow 6–8 digits (or more) because Supabase may send 8 ----
+        otp_code = st.text_input(
+            "OTP code",
+            value="",
+            placeholder="123456 (sometimes 8 digits)",
+            max_chars=12,   # was 6
+        ).strip()
 
         if send_code:
             if not email:
@@ -119,7 +121,6 @@ with st.sidebar:
             else:
                 try:
                     sb = _sb()
-                    # Supabase Email OTP (sends a 6-digit code if enabled in Supabase Auth settings)
                     sb.auth.sign_in_with_otp({"email": email})
                     st.session_state.auth["email"] = email
                     st.success("Code sent. Check your email.")
@@ -128,7 +129,9 @@ with st.sidebar:
 
         if verify_code:
             if not email or not otp_code:
-                st.error("Enter email + the 6-digit code.")
+                st.error("Enter email + the OTP code.")
+            elif (not otp_code.isdigit()) or (len(otp_code) < 6):
+                st.error("OTP must be numeric and at least 6 digits.")
             else:
                 try:
                     sb = _sb()
@@ -139,21 +142,39 @@ with st.sidebar:
                             "type": "email",
                         }
                     )
-                    # resp has session + user
-                    session = getattr(resp, "session", None) or (resp.get("session") if isinstance(resp, dict) else None)
-                    user = getattr(resp, "user", None) or (resp.get("user") if isinstance(resp, dict) else None)
 
-                    if not session:
-                        st.error("OTP verify did not return a session. Check Supabase OTP settings.")
+                    # ---- CHANGE: robustly extract session + access_token for object OR dict responses ----
+                    session = getattr(resp, "session", None)
+                    user = getattr(resp, "user", None)
+
+                    if session is None and isinstance(resp, dict):
+                        session = resp.get("session")
+                        user = resp.get("user")
+
+                    # Extract access_token / refresh_token regardless of structure
+                    access_token = None
+                    refresh_token = None
+
+                    if isinstance(session, dict):
+                        access_token = session.get("access_token")
+                        refresh_token = session.get("refresh_token")
                     else:
-                        st.session_state.auth = {
-                            "access_token": session.access_token,
-                            "refresh_token": session.refresh_token,
-                            "user": user,
-                            "email": email,
-                        }
-                        st.success("Logged in.")
-                        st.rerun()
+                        access_token = getattr(session, "access_token", None)
+                        refresh_token = getattr(session, "refresh_token", None)
+
+                    if not access_token:
+                        st.error("OTP verify succeeded but no access token was returned. Check Supabase Auth settings.")
+                        st.stop()
+
+                    st.session_state.auth = {
+                        "access_token": access_token,
+                        "refresh_token": refresh_token,
+                        "user": user,
+                        "email": email,
+                    }
+                    st.success("Logged in.")
+                    st.rerun()
+
                 except Exception as e:
                     st.error(f"Verify failed: {e}")
 
@@ -162,6 +183,20 @@ with st.sidebar:
         if st.button("Log out"):
             _logout()
 
+    # ----------------------------
+    # DEBUG (TEMP) — place it AFTER login block so it reflects current session
+    # ----------------------------
+    st.divider()
+    st.subheader("DEBUG (temporary)")
+    token = st.session_state.auth.get("access_token")
+    st.write("Has access token:", bool(token))
+    if token:
+        st.write("Token prefix:", token[:20])
+        with st.expander("Show full access token (temporary)"):
+            st.code(token)
+    else:
+        st.caption("No token yet (expected before login).")
+
 
 # ----------------------------
 # Guardrail
@@ -169,11 +204,6 @@ with st.sidebar:
 if not _is_logged_in():
     st.info("Log in to view your orders.")
     st.stop()
-    
-with st.sidebar:
-    st.write("Has access token:", bool(st.session_state.auth.get("access_token")))
-    if st.session_state.auth.get("access_token"):
-        st.write("Token prefix:", st.session_state.auth["access_token"][:20])
 
 
 # ----------------------------
@@ -281,7 +311,6 @@ st.dataframe(_kv_table(summary), use_container_width=True, hide_index=True)
 
 qp = _safe_dict(detail.get("quote_payload"))
 if qp:
-    # normalize display defaults to match your quote expectations
     qp["handle_label"] = (qp.get("handle_label") or "").strip() or "No label"
     if not qp.get("chamfer"):
         qp["chamfer_width"] = None
@@ -302,4 +331,3 @@ st.info(
 
 with st.expander("Show full order JSON"):
     st.json(detail)
-
