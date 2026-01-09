@@ -183,6 +183,7 @@ def _decode_supabase_user_id_from_bearer(authorization: Optional[str]) -> Option
         return None
     if not authorization.lower().startswith("bearer "):
         return None
+
     token = authorization.split(" ", 1)[1].strip()
     if not token:
         return None
@@ -191,18 +192,30 @@ def _decode_supabase_user_id_from_bearer(authorization: Optional[str]) -> Option
         return None
 
     try:
+        # Read the token header to determine algorithm (Supabase may use ES256 or RS256)
+        header = jwt.get_unverified_header(token)
+        alg = (header.get("alg") or "").upper()
+
+        # Only allow known-safe algorithms
+        if alg not in {"RS256", "ES256"}:
+            return None
+
         signing_key = _jwk_client.get_signing_key_from_jwt(token).key
+
         decoded = jwt.decode(
             token,
             signing_key,
-            algorithms=["RS256"],
+            algorithms=[alg],
             audience=SUPABASE_JWT_AUD,
             issuer=SUPABASE_JWT_ISSUER,
             options={"verify_exp": True},
         )
+
         return decoded.get("sub")
+
     except Exception:
         return None
+
 
 
 def _require_customer_user_id(
