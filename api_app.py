@@ -502,6 +502,24 @@ def admin_list_orders(q: Optional[str] = None, limit: int = 50):
         ]
     finally:
         db.close()
+        
+# ----------------------------
+# DEBUG endpoint (TEMPORARY)
+# ----------------------------
+@app.get("/debug/whoami")
+def debug_whoami(
+    authorization: Optional[str] = Header(default=None, alias="authorization"),
+):
+    user_id = _decode_supabase_user_id_from_bearer(authorization)
+    return {
+        "has_auth_header": bool(authorization),
+        "auth_starts_with_bearer": bool(authorization and authorization.lower().startswith("bearer ")),
+        "user_id": user_id,
+        "issuer": SUPABASE_JWT_ISSUER,
+        "aud": SUPABASE_JWT_AUD,
+        "jwks_url": SUPABASE_JWKS_URL,
+        "jwks_configured": bool(_jwk_client),
+    }
 
 
 @app.get("/admin/orders/{order_id}", dependencies=[Depends(_require_admin_key)])
