@@ -38,6 +38,15 @@ def _sb() -> Client:
 def _is_logged_in() -> bool:
     return bool(st.session_state.auth.get("access_token"))
 
+# ---- TEMP DEBUG: show access token ----
+with st.sidebar.expander("DEBUG: Access Token (temporary)"):
+    token = st.session_state.auth.get("access_token")
+    if token:
+        st.code(token)
+    else:
+        st.write("No token found")
+
+
 def _logout() -> None:
     st.session_state.auth = {"access_token": None, "refresh_token": None, "user": None, "email": None}
     st.rerun()
