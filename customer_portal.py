@@ -160,6 +160,11 @@ with st.sidebar:
 if not _is_logged_in():
     st.info("Log in to view your orders.")
     st.stop()
+    
+with st.sidebar:
+    st.write("Has access token:", bool(st.session_state.auth.get("access_token")))
+    if st.session_state.auth.get("access_token"):
+        st.write("Token prefix:", st.session_state.auth["access_token"][:20])
 
 
 # ----------------------------
