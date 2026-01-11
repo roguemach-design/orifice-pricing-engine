@@ -58,6 +58,16 @@ def _kv_table(d: Dict[str, Any], order: Optional[list[str]] = None) -> pd.DataFr
 # Page UI
 # ----------------------------
 st.title("My Orders")
+
+# 👉 NEW: quick actions row
+top = st.columns([1, 1, 2])
+with top[0]:
+    if st.button("➕ Start a Quote"):
+        st.switch_page("pages/1_Quote.py")
+with top[1]:
+    if st.button("🧾 View Quote Cart"):
+        st.switch_page("pages/3_Quote_Cart.py")
+
 st.caption("View past orders tied to your login. Reorder coming next.")
 
 top_cols = st.columns([1, 1, 2])
