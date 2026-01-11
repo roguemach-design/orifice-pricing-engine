@@ -81,6 +81,13 @@ st.markdown(
 # -----------------------------
 render_auth_sidebar(show_debug=False)
 
+# ✅ NEW: cart support (session state)
+import uuid
+from datetime import datetime
+
+if "cart" not in st.session_state or not isinstance(st.session_state.cart, list):
+    st.session_state.cart = []
+
 st.markdown("<h1>Orifice Plate Instant Quote</h1>", unsafe_allow_html=True)
 
 
@@ -99,6 +106,7 @@ def _qp_get(name: str) -> Optional[str]:
     if name not in qp:
         return None
     v = qp[name]
+   жаў
     if isinstance(v, list):
         return v[0] if v else None
     return v
@@ -476,6 +484,25 @@ with left:
     s1.metric("Estimated Total Weight", f"{weight_lb:.2f} lb")
     s2.metric("Estimated Package Size", f"{pkg['length']} x {pkg['width']} x {pkg['height']} in")
 
+
+# -----------------------------
+# Cart helper (NEW)
+# -----------------------------
+def _add_to_cart(payload_inputs: dict, result: dict) -> None:
+    st.session_state.cart.append(
+        {
+            "line_id": str(uuid.uuid4()),
+            "created_at": datetime.utcnow().isoformat() + "Z",
+            "inputs": payload_inputs,
+            # snapshot pricing at time added (optional but useful)
+            "unit_price": float(result.get("unit_price") or 0),
+            "total_price": float(result.get("total_price") or 0),
+            "material": payload_inputs.get("material"),
+            "thickness": payload_inputs.get("thickness"),
+        }
+    )
+
+
 # -----------------------------
 # RIGHT: Pay button (bottom-center, not full width)
 # -----------------------------
@@ -512,3 +539,31 @@ with right:
                     "ships_in_days": int(ships_in_days),
                 }
                 start_checkout(payload_inputs)
+
+            # Under your existing "Place Order & Pay" button block:
+            st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
+
+            # Only for logged-in users (multi-item workflow)
+            add_disabled = not is_logged_in()
+            if st.button("➕ Add to Quote", disabled=add_disabled, use_container_width=True):
+                payload_inputs = {
+                    "quantity": int(quantity),
+                    "material": str(material),
+                    "thickness": float(thickness),
+                    "handle_width": float(handle_width),
+                    "handle_length_from_bore": float(handle_length),
+                    "paddle_dia": float(paddle_dia),
+                    "bore_dia": float(bore_dia),
+                    "bore_tolerance": float(bore_tolerance),
+                    "chamfer": bool(chamfer),
+                    "chamfer_width": float(chamfer_width) if chamfer and chamfer_width is not None else None,
+                    "handle_label": (handle_label or "").strip() or "No label",
+                    "ships_in_days": int(ships_in_days),
+                }
+                _add_to_cart(payload_inputs, result)
+                st.success(f"Added to Quote Cart. Items in cart: {len(st.session_state.cart)}")
+                # Optional: jump them to cart immediately
+                st.switch_page("pages/3_Quote_Cart.py")
+
+            if add_disabled:
+                st.caption("Log in from the sidebar to add multiple configured plates to a quote.")
