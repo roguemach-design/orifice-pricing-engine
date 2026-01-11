@@ -106,7 +106,6 @@ def _qp_get(name: str) -> Optional[str]:
     if name not in qp:
         return None
     v = qp[name]
-   жаў
     if isinstance(v, list):
         return v[0] if v else None
     return v
@@ -176,7 +175,6 @@ def _format_address(addr: object) -> str:
         lines.append(country)
 
     return "\n".join([ln for ln in lines if ln.strip()])
-
 
 # -----------------------------
 # Success page (session_id in query params)
