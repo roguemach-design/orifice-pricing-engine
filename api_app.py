@@ -2,7 +2,7 @@
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, List
 
 import stripe
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -217,7 +217,6 @@ def _decode_supabase_user_id_from_bearer(authorization: Optional[str]) -> Option
         return None
 
 
-
 def _require_customer_user_id(
     authorization: Optional[str] = Header(default=None, alias="authorization"),
 ) -> str:
@@ -271,6 +270,11 @@ class QuoteRequest(BaseModel):
 
 class CheckoutCreateRequest(BaseModel):
     inputs: QuoteRequest
+
+
+# NEW: cart checkout request
+class CartCheckoutCreateRequest(BaseModel):
+    items: List[QuoteRequest]
 
 
 # ----------------------------
@@ -378,6 +382,111 @@ def checkout_create(
                     id=str(uuid.uuid4()),
                     stripe_session_id=session.id,
                     quote_payload=req.inputs.model_dump(),
+                    customer_id=customer_user_id,
+                )
+                db.add(o)
+                db.commit()
+        finally:
+            db.close()
+
+    return {"checkout_url": session.url, "session_id": session.id}
+
+
+# NEW: cart checkout endpoint (minimal add)
+@app.post("/checkout/cart/create")
+def checkout_cart_create(
+    req: CartCheckoutCreateRequest,
+    customer_user_id: str = Depends(_require_customer_user_id),
+):
+    """
+    Creates a single Stripe Checkout session for a multi-line cart.
+    Requires customer login (Bearer token) so we can tie to customer_id.
+    """
+    if not stripe.api_key:
+        raise HTTPException(status_code=500, detail="Stripe is not configured (missing STRIPE_SECRET_KEY).")
+
+    if not req.items:
+        raise HTTPException(status_code=400, detail="Cart is empty")
+
+    total_items_cents = 0
+    ship_ground_cents = 0
+    ship_2day_cents = 0
+    ship_nextday_cents = 0
+
+    normalized_items = []
+
+    for it in req.items:
+        inputs = QuoteInputs(**it.model_dump())
+        res = calculate_quote(inputs)
+
+        line_cents = int(res.get("total_price_cents") or round(float(res["total_price"]) * 100))
+        total_items_cents += line_cents
+
+        shipping = res.get("shipping") or {}
+        ship_ground_cents += int(shipping.get("ups_ground_cents") or 0)
+        ship_2day_cents += int(shipping.get("ups_2day_cents") or 0)
+        ship_nextday_cents += int(shipping.get("ups_nextday_cents") or 0)
+
+        normalized_items.append(it.model_dump())
+
+    session = stripe.checkout.Session.create(
+        mode="payment",
+        success_url=f"{APP_BASE_URL}/success?session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=f"{APP_BASE_URL}/cancel",
+        shipping_address_collection={"allowed_countries": ["US"]},
+        line_items=[
+            {
+                "price_data": {
+                    "currency": "usd",
+                    "product_data": {"name": f"O-Plates Quote Cart ({len(req.items)} items)"},
+                    "unit_amount": int(total_items_cents),
+                },
+                "quantity": 1,
+            }
+        ],
+        shipping_options=[
+            {
+                "shipping_rate_data": {
+                    "type": "fixed_amount",
+                    "fixed_amount": {"amount": int(ship_ground_cents), "currency": "usd"},
+                    "display_name": "UPS Ground",
+                    "metadata": {"service": "ups_ground"},
+                }
+            },
+            {
+                "shipping_rate_data": {
+                    "type": "fixed_amount",
+                    "fixed_amount": {"amount": int(ship_2day_cents), "currency": "usd"},
+                    "display_name": "UPS 2nd Day Air",
+                    "metadata": {"service": "ups_2day"},
+                }
+            },
+            {
+                "shipping_rate_data": {
+                    "type": "fixed_amount",
+                    "fixed_amount": {"amount": int(ship_nextday_cents), "currency": "usd"},
+                    "display_name": "UPS Next Day Air",
+                    "metadata": {"service": "ups_nextday"},
+                }
+            },
+        ],
+        metadata={
+            "customer_id": customer_user_id,
+            "is_cart": "true",
+            "cart_count": str(len(req.items)),
+        },
+    )
+
+    # Save "pending" order (cart payload)
+    if SessionLocal:
+        db = SessionLocal()
+        try:
+            existing = db.query(Order).filter(Order.stripe_session_id == session.id).first()
+            if not existing:
+                o = Order(
+                    id=str(uuid.uuid4()),
+                    stripe_session_id=session.id,
+                    quote_payload={"cart_items": normalized_items},
                     customer_id=customer_user_id,
                 )
                 db.add(o)
@@ -515,7 +624,8 @@ def admin_list_orders(q: Optional[str] = None, limit: int = 50):
         ]
     finally:
         db.close()
-        
+
+
 # ----------------------------
 # DEBUG endpoint (TEMPORARY)
 # ----------------------------
