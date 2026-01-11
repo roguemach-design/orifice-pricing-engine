@@ -13,3 +13,4 @@ PyJWT
 cryptography
 httpx
 supabase
+black
