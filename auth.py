@@ -55,20 +55,26 @@ def sb() -> Client:
 # ----------------------------
 # Cookie manager
 # ----------------------------
-@st.cache_resource
 def _cookie_mgr():
+    # IMPORTANT: do NOT cache this. CookieManager is a Streamlit component.
     if stx is None:
         return None
-    return stx.CookieManager()
+
+    if "_cookie_manager" not in st.session_state:
+        st.session_state["_cookie_manager"] = stx.CookieManager()
+
+    return st.session_state["_cookie_manager"]
 
 
 def _cookie_get() -> Optional[dict]:
     cm = _cookie_mgr()
     if cm is None:
         return None
+
     raw = cm.get(COOKIE_NAME)
     if not raw:
         return None
+
     try:
         return json.loads(raw)
     except Exception:
@@ -79,6 +85,7 @@ def _cookie_set(payload: dict) -> None:
     cm = _cookie_mgr()
     if cm is None:
         return
+
     cm.set(
         COOKIE_NAME,
         json.dumps(payload),
@@ -111,7 +118,6 @@ def _restore_auth_from_cookie_if_needed() -> None:
         "user": None,
         "email": data.get("email"),
     }
-
 
 # ----------------------------
 # JWT helpers (no extra deps)
