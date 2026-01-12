@@ -1,6 +1,7 @@
 # pages/2_My_Orders.py
 from datetime import datetime
 from typing import Any, Dict, Optional, List
+import json
 
 import pandas as pd
 import streamlit as st
@@ -40,17 +41,32 @@ def _safe_dict(x) -> Dict[str, Any]:
     return x if isinstance(x, dict) else {}
 
 
+def _to_scalar(v: Any) -> Any:
+    """
+    Streamlit dataframe uses PyArrow; columns can't mix scalars with dict/list objects.
+    Convert any complex value to a JSON string so Arrow conversion always succeeds.
+    """
+    if v is None:
+        return ""
+    if isinstance(v, (str, int, float, bool)):
+        return v
+    try:
+        return json.dumps(v, indent=2, sort_keys=True, default=str)
+    except Exception:
+        return str(v)
+
+
 def _kv_table(d: Dict[str, Any], order: Optional[list[str]] = None) -> pd.DataFrame:
     rows: list[tuple[str, Any]] = []
     if order:
         for k in order:
             if k in d:
-                rows.append((k, d.get(k, "")))
+                rows.append((k, _to_scalar(d.get(k, ""))))
         for k in d.keys():
             if k not in set(order):
-                rows.append((k, d.get(k, "")))
+                rows.append((k, _to_scalar(d.get(k, ""))))
     else:
-        rows = [(k, v) for k, v in d.items()]
+        rows = [(k, _to_scalar(v)) for k, v in d.items()]
     return pd.DataFrame(rows, columns=["Field", "Value"])
 
 
@@ -59,7 +75,7 @@ def _kv_table(d: Dict[str, Any], order: Optional[list[str]] = None) -> pd.DataFr
 # ----------------------------
 st.title("My Orders")
 
-# 👉 NEW: quick actions row
+# 👉 quick actions row
 top = st.columns([1, 1, 2])
 with top[0]:
     if st.button("➕ Start a Quote"):
