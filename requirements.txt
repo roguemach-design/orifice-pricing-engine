@@ -15,3 +15,4 @@ httpx
 supabase
 black
 reportlab
+extra-streamlit-components
