@@ -8,13 +8,32 @@ This is the ONLY file you should need to edit to tune pricing + availability.
 # ============================================================
 # 1) MATERIAL + THICKNESS PRICING ($/sq in)
 # ============================================================
-# NOTE: If a material/thickness is not listed here, it cannot be quoted.
 PRICE_PER_SQ_IN = {
-    "304": {0.125: 0.220, 0.25: 0.425, 0.375: 0.460, 0.5: 0.000},   # TODO set 1/2 price
-    "316": {0.125: 0.270, 0.25: 0.440, 0.375: 0.580, 0.5: 0.000},   # TODO set 1/2 price
-    "Carbon Steel": {0.125: 0.090, 0.25: 0.100, 0.375: 0.130, 0.5: 0.000},  # TODO set 1/2 price
-    "Monel": {0.125: 2.780, 0.25: 6.670, 0.5: 0.000},               # TODO set 1/2 price (if offered)
-    "Hastelloy": {0.125: 3.580, 0.25: 7.540, 0.375: 14.020, 0.5: 0.000},    # TODO set 1/2 price
+    "304": {
+        0.120: 0.1302,   # 11ga approx
+        0.250: 0.2564,
+        0.375: 0.3814,
+        0.500: 0.6307,
+    },
+    "316": {
+        0.120: 0.1868,   # 11ga approx
+        0.250: 0.3763,
+        0.375: 0.5710,
+        0.500: 0.8773,
+    },
+    "Carbon Steel": {
+        0.120: 0.04785,  # 11ga approx
+        0.250: 0.07444,
+        0.375: 0.11065,
+        0.500: 0.15030,
+    },
+}
+
+# Use density math for weight, but correct stainless upward
+WEIGHT_MULTIPLIER_BY_MATERIAL = {
+    "304": 1.06,
+    "316": 1.06,
+    "Carbon Steel": 1.00,
 }
 
 # ============================================================
@@ -25,8 +44,8 @@ MATERIAL_ENABLED = {
     "304": True,
     "316": True,
     "Carbon Steel": True,
-    "Monel": True,
-    "Hastelloy": True,
+    "Monel": False,
+    "Hastelloy": False,
 }
 
 # Optional: thickness enable/disable per material
@@ -128,3 +147,4 @@ QTY_DISCOUNT_TIERS = [
     {"min_qty": 25,  "multiplier": 0.92},
     {"min_qty": 50,  "multiplier": 0.90},
 ]
+
