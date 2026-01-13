@@ -1,11 +1,11 @@
 # ui_app.py
 import os
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 
 import requests
 import streamlit as st
 
-from pricing_engine import QuoteInputs, calculate_quote
+from pricing_engine import QuoteInputs, calculate_quote  # calculate_quote kept as fallback
 import tuning_knobs as cfg
 
 
@@ -36,14 +36,14 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# ---- EASY TUNING KNOBS ----
+# ---- EASY TUNING KNOBS (UI-only layout knobs) ----
 RIGHT_FORM_WIDTH = 0.72      # 0.55 - 0.85 (smaller = narrower input column)
 IMAGE_TOP_SPACER_PX = 10     # move image down more/less
 LEFT_TIGHTEN = True          # tighter left column spacing
 PAY_BUTTON_HEIGHT_PX = 56    # taller button
 PAY_BUTTON_FONT_PX = 18
 PAY_BUTTON_WIDTH_RATIO = 0.56  # how wide button is (0.40-0.80) of the input column
-# ---------------------------
+# -----------------------------------------------
 
 st.markdown(
     f"""
@@ -88,6 +88,88 @@ LOCAL_IMAGE_PATH = os.environ.get("PRODUCT_IMAGE_PATH", "oplatetemp.png")
 PRODUCT_IMAGE_URL = (os.environ.get("PRODUCT_IMAGE_URL") or "").strip()
 
 
+# -----------------------------
+# Live config + API quote (NO REDEPLOY REQUIRED)
+# -----------------------------
+@st.cache_data(ttl=5, show_spinner=False)
+def fetch_active_config() -> dict:
+    """
+    Pull live availability toggles from API.
+    Falls back to empty dict if unreachable.
+    """
+    headers: Dict[str, str] = {}
+    if API_KEY:
+        headers["x-api-key"] = API_KEY
+
+    try:
+        r = requests.get(f"{API_BASE}/config/active", headers=headers, timeout=10)
+        if r.status_code == 200:
+            j = r.json()
+            if isinstance(j, dict):
+                return j
+    except Exception:
+        pass
+
+    return {}
+
+
+def _to_bool_map(d: Any) -> Dict[str, bool]:
+    if not isinstance(d, dict):
+        return {}
+    return {str(k): bool(v) for k, v in d.items()}
+
+
+def _to_int_bool_map(d: Any) -> Dict[int, bool]:
+    out: Dict[int, bool] = {}
+    if not isinstance(d, dict):
+        return out
+    for k, v in d.items():
+        try:
+            out[int(k)] = bool(v)
+        except Exception:
+            continue
+    return out
+
+
+def _to_float_bool_map_by_material(d: Any) -> Dict[str, Dict[float, bool]]:
+    out: Dict[str, Dict[float, bool]] = {}
+    if not isinstance(d, dict):
+        return out
+    for mat, tmap in d.items():
+        if not isinstance(tmap, dict):
+            continue
+        out[str(mat)] = {}
+        for t, enabled in tmap.items():
+            try:
+                out[str(mat)][float(t)] = bool(enabled)
+            except Exception:
+                continue
+    return out
+
+
+def quote_via_api(payload: dict) -> dict:
+    """
+    Source-of-truth pricing via API so admin knob changes apply immediately.
+    """
+    headers: Dict[str, str] = {}
+    if API_KEY:
+        headers["x-api-key"] = API_KEY
+
+    r = requests.post(f"{API_BASE}/quote", json=payload, headers=headers, timeout=20)
+    if r.status_code != 200:
+        raise RuntimeError(f"Quote API error {r.status_code}: {r.text}")
+    j = r.json()
+    if not isinstance(j, dict):
+        raise RuntimeError("Quote API returned non-JSON-object response.")
+    return j
+
+
+ACTIVE_CFG = fetch_active_config()
+
+
+# -----------------------------
+# Helpers (existing)
+# -----------------------------
 def _qp_get(name: str) -> Optional[str]:
     qp = st.query_params
     if name not in qp:
@@ -241,7 +323,6 @@ def _estimate_package_in(paddle_dia: float, handle_length_from_bore: float, thic
 
 
 def _estimate_total_weight_lb(material: str, area_sq_in: float, thickness: float, qty: int) -> float:
-    # Prefer cfg densities/weight multipliers if present
     densities = getattr(cfg, "DENSITY_LB_PER_IN3", None)
     if not isinstance(densities, dict) or not densities:
         densities = {
@@ -318,14 +399,13 @@ with left:
     st.markdown(f"<div style='height:{IMAGE_TOP_SPACER_PX}px'></div>", unsafe_allow_html=True)
     _render_product_image()
 
-    # Tight layout: fewer dividers
     if not LEFT_TIGHTEN:
         st.divider()
 
     st.subheader("Quote Summary")
 
 # -----------------------------
-# RIGHT: inputs (narrowed) + Pay button bottom-center
+# RIGHT: inputs (narrowed)
 # -----------------------------
 with right:
     _spacer, form_col = st.columns([1 - RIGHT_FORM_WIDTH, RIGHT_FORM_WIDTH], gap="medium")
@@ -336,13 +416,24 @@ with right:
             quantity = st.number_input("Qty", min_value=1, value=1, step=1)
 
         # -----------------------------
+        # Live availability maps (prefer API, fallback to local cfg)
+        # -----------------------------
+        material_enabled_map = _to_bool_map(ACTIVE_CFG.get("material_enabled")) or getattr(cfg, "MATERIAL_ENABLED", {})
+        if not material_enabled_map:
+            # fallback: everything present in cfg.PRICE_PER_SQ_IN enabled
+            material_enabled_map = {m: True for m in getattr(cfg, "PRICE_PER_SQ_IN", {}).keys()}
+
+        thickness_enabled_by_material = _to_float_bool_map_by_material(
+            ACTIVE_CFG.get("thickness_enabled_by_material")
+        ) or getattr(cfg, "THICKNESS_ENABLED_BY_MATERIAL", {})
+
+        lead_enabled_map = _to_int_bool_map(ACTIVE_CFG.get("lead_time_enabled")) or getattr(cfg, "LEAD_TIME_ENABLED", {})
+        if not lead_enabled_map:
+            lead_enabled_map = {int(d): True for d in getattr(cfg, "LEAD_TIME_MULTIPLIER", {}).keys()}
+
+        # -----------------------------
         # Material dropdown (show unavailable)
         # -----------------------------
-        material_enabled_map = getattr(cfg, "MATERIAL_ENABLED", None)
-        if not isinstance(material_enabled_map, dict) or not material_enabled_map:
-            # Fallback: if no explicit toggles, treat materials present as enabled
-            material_enabled_map = {m: True for m in cfg.PRICE_PER_SQ_IN.keys()}
-
         materials_all = sorted(material_enabled_map.keys())
 
         def _material_label(m: str) -> str:
@@ -365,15 +456,38 @@ with right:
         # -----------------------------
         # Thickness dropdown (show unavailable)
         # -----------------------------
-        # "available" thicknesses after config filtering (or raw dict)
-        available_thicknesses = sorted(cfg.PRICE_PER_SQ_IN.get(material, {}).keys())
+        # Build a master thickness list from API config if present, else fallback to cfg.PRICE_PER_SQ_IN union
+        thickness_master = []
+        if thickness_enabled_by_material:
+            all_t = set()
+            for m, tmap in thickness_enabled_by_material.items():
+                for t, _en in (tmap or {}).items():
+                    try:
+                        all_t.add(float(t))
+                    except Exception:
+                        continue
+            thickness_master = sorted(all_t)
 
-        # Use a master list if you have one; otherwise use union across all enabled materials
-        thickness_master = getattr(cfg, "THICKNESS_OPTIONS_IN", None)
-        if not isinstance(thickness_master, list) or not thickness_master:
-            thickness_master = sorted(
-                {t for m, tmap in cfg.PRICE_PER_SQ_IN.items() for t in tmap.keys()}
-            )
+        if not thickness_master:
+            # fallback to local cfg union
+            all_t = set()
+            ppsi = getattr(cfg, "PRICE_PER_SQ_IN", {})
+            if isinstance(ppsi, dict):
+                for _m, tmap in ppsi.items():
+                    if isinstance(tmap, dict):
+                        for t in tmap.keys():
+                            try:
+                                all_t.add(float(t))
+                            except Exception:
+                                pass
+            thickness_master = sorted(all_t)
+
+        # available thickness for this material = enabled True in API map; fallback to cfg.PRICE_PER_SQ_IN
+        enabled_map_for_mat = thickness_enabled_by_material.get(material) if isinstance(thickness_enabled_by_material, dict) else None
+        if isinstance(enabled_map_for_mat, dict) and enabled_map_for_mat:
+            available_thicknesses = sorted([t for t, en in enabled_map_for_mat.items() if en])
+        else:
+            available_thicknesses = sorted(getattr(cfg, "PRICE_PER_SQ_IN", {}).get(material, {}).keys())
 
         def _th_label(t: float) -> str:
             base = f'{float(t):.3f}"'
@@ -457,34 +571,29 @@ with right:
         # -----------------------------
         # Lead time dropdown (show unavailable)
         # -----------------------------
-        lead_mult = getattr(cfg, "LEAD_TIME_MULTIPLIER", {})
-        lead_enabled_map = getattr(cfg, "LEAD_TIME_ENABLED", None)
-        if not isinstance(lead_enabled_map, dict) or not lead_enabled_map:
-            lead_enabled_map = {int(d): True for d in lead_mult.keys()}
-
         lead_days_all = sorted(lead_enabled_map.keys())
 
         def _ld_label(d: int) -> str:
             base = f"{int(d)} days"
-            return base if lead_enabled_map.get(d, False) and d in lead_mult else f"{base} (unavailable)"
+            return base if lead_enabled_map.get(d, False) else f"{base} (unavailable)"
 
         lead_labels = [_ld_label(d) for d in lead_days_all]
         lead_label_to_day = dict(zip(lead_labels, lead_days_all))
 
-        # Default: cfg.DEFAULT_LEAD_TIME_DAYS if valid, else first enabled
-        default_ld = getattr(cfg, "DEFAULT_LEAD_TIME_DAYS", None)
-        if not isinstance(default_ld, int):
-            default_ld = None
+        default_lt = ACTIVE_CFG.get("default_lead_time_days")
+        try:
+            default_lt = int(default_lt)
+        except Exception:
+            default_lt = None
 
-        if default_ld is None or (not lead_enabled_map.get(default_ld, False)) or (default_ld not in lead_mult):
-            default_ld = next((d for d in lead_days_all if lead_enabled_map.get(d, False) and d in lead_mult), lead_days_all[0])
+        if default_lt is None or default_lt not in lead_days_all or not lead_enabled_map.get(default_lt, False):
+            default_lt = next((d for d in lead_days_all if lead_enabled_map.get(d, False)), lead_days_all[0])
+        default_lt_idx = lead_days_all.index(default_lt)
 
-        default_ld_idx = lead_days_all.index(default_ld)
+        selected_lt_label = st.selectbox("Ships in (days)", options=lead_labels, index=default_lt_idx)
+        ships_in_days = int(lead_label_to_day[selected_lt_label])
 
-        selected_ld_label = st.selectbox("Ships in (days)", options=lead_labels, index=default_ld_idx)
-        ships_in_days = int(lead_label_to_day[selected_ld_label])
-
-        if (not lead_enabled_map.get(ships_in_days, False)) or (ships_in_days not in lead_mult):
+        if not lead_enabled_map.get(ships_in_days, False):
             st.warning(f"⚠️ **{ships_in_days} days** is currently unavailable.")
             st.stop()
 
@@ -506,7 +615,7 @@ if errors:
     st.stop()
 
 # -----------------------------
-# Pricing (local preview)
+# Pricing (API is source of truth)
 # -----------------------------
 inputs = QuoteInputs(
     quantity=int(quantity),
@@ -523,7 +632,28 @@ inputs = QuoteInputs(
     ships_in_days=int(ships_in_days),
 )
 
-result = calculate_quote(inputs)
+# Build payload for API quote
+payload_inputs = {
+    "quantity": int(quantity),
+    "material": str(material),
+    "thickness": float(thickness),
+    "handle_width": float(handle_width),
+    "handle_length_from_bore": float(handle_length),
+    "paddle_dia": float(paddle_dia),
+    "bore_dia": float(bore_dia),
+    "bore_tolerance": float(bore_tolerance),
+    "chamfer": bool(chamfer),
+    "chamfer_width": float(chamfer_width) if chamfer and chamfer_width is not None else None,
+    "handle_label": (handle_label or "").strip() or "No label",
+    "ships_in_days": int(ships_in_days),
+}
+
+try:
+    result = quote_via_api(payload_inputs)
+except Exception as e:
+    # Fallback (so site doesn't hard-fail if API has a hiccup)
+    st.warning(f"Quote API unavailable; using local pricing fallback. ({e})")
+    result = calculate_quote(inputs)
 
 # Shipping estimates (computed once)
 area_sq_in = result.get("area_sq_in", _estimate_area_sq_in(paddle_dia, handle_length))
@@ -537,12 +667,12 @@ pkg = result.get(
 )
 
 # -----------------------------
-# LEFT: Quote summary + shipping estimates (tight)
+# LEFT: Quote summary + shipping estimates
 # -----------------------------
 with left:
     c1, c2 = st.columns(2)
-    c1.metric("Unit Price", f"${result['unit_price']:,.2f}")
-    c2.metric("Total Price", f"${result['total_price']:,.2f}")
+    c1.metric("Unit Price", f"${result.get('unit_price', 0):,.2f}")
+    c2.metric("Total Price", f"${result.get('total_price', 0):,.2f}")
 
     if not LEFT_TIGHTEN:
         st.divider()
@@ -553,36 +683,18 @@ with left:
     s2.metric("Estimated Package Size", f"{pkg['length']} x {pkg['width']} x {pkg['height']} in")
 
 # -----------------------------
-# RIGHT: Pay button (bottom-center, not full width)
+# RIGHT: Pay button
 # -----------------------------
 with right:
-    # Small spacer so button feels like it's "at the bottom" of the right panel
     st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
-    # Keep the button aligned with the (right-shifted) input column width
     _spacer, form_col = st.columns([1 - RIGHT_FORM_WIDTH, RIGHT_FORM_WIDTH], gap="large")
     with form_col:
-        # Note for buyer
         st.caption("Shipping option is selected during checkout.")
 
-        # Centered button within form column (not full width)
         left_pad = max(0.0, (1.0 - PAY_BUTTON_WIDTH_RATIO) / 2.0)
         btn_cols = st.columns([left_pad, PAY_BUTTON_WIDTH_RATIO, left_pad])
 
         with btn_cols[1]:
             if st.button("Place Order & Pay"):
-                payload_inputs = {
-                    "quantity": int(quantity),
-                    "material": str(material),
-                    "thickness": float(thickness),
-                    "handle_width": float(handle_width),
-                    "handle_length_from_bore": float(handle_length),
-                    "paddle_dia": float(paddle_dia),
-                    "bore_dia": float(bore_dia),
-                    "bore_tolerance": float(bore_tolerance),
-                    "chamfer": bool(chamfer),
-                    "chamfer_width": float(chamfer_width) if chamfer and chamfer_width is not None else None,
-                    "handle_label": (handle_label or "").strip() or "No label",
-                    "ships_in_days": int(ships_in_days),
-                }
                 start_checkout(payload_inputs)
