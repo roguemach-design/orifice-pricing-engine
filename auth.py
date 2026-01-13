@@ -53,17 +53,13 @@ def sb() -> Client:
 
 
 # ----------------------------
-# Cookie manager
+# Cookie manager (NO caching)
 # ----------------------------
 def _cookie_mgr():
-    # IMPORTANT: do NOT cache this. CookieManager is a Streamlit component.
     if stx is None:
         return None
-
-    if "_cookie_manager" not in st.session_state:
-        st.session_state["_cookie_manager"] = stx.CookieManager()
-
-    return st.session_state["_cookie_manager"]
+    # key must be stable across reruns
+    return stx.CookieManager(key="auth_cookie_mgr")
 
 
 def _cookie_get() -> Optional[dict]:
@@ -102,9 +98,11 @@ def _cookie_clear() -> None:
 
 def _restore_auth_from_cookie_if_needed() -> None:
     """
-    If session_state is empty but cookie exists, restore tokens into session_state.
+    Restore auth from cookie into session_state on fresh page loads.
     """
     _ensure_auth_state()
+
+    # already logged in → do nothing
     if st.session_state.auth.get("access_token"):
         return
 
