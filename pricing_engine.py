@@ -4,7 +4,7 @@ import math
 
 from pydantic import BaseModel, Field
 
-import pricing_config as cfg
+import tuning_knobs as cfg
 
 
 class QuoteInputs(BaseModel):
@@ -191,3 +191,4 @@ def calculate_quote(x: QuoteInputs) -> Dict[str, Any]:
         "handle_label": x.handle_label,
         "chamfer_width": x.chamfer_width,
     }
+
