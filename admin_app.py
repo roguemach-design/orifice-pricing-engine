@@ -17,62 +17,17 @@ st.caption("View recent orders stored in Postgres via the Orifice Pricing API.")
 # Config
 # ----------------------------
 API_BASE = os.environ.get("API_BASE", "https://orifice-pricing-api.onrender.com").rstrip("/")
-DEFAULT_LIMIT = int(os.environ.get("ADMIN_DEFAULT_LIMIT", "50"))
-
-# ----------------------------
-# Sidebar
-# ----------------------------
-with st.sidebar:
-    st.subheader("Connection")
-    st.write("API Base:")
-    st.code(API_BASE)
-
-    admin_key = (
-        st.text_input(
-            "Admin API Key",
-            type="password",
-            value=os.environ.get("ADMIN_API_KEY", ""),
-            help="Must match ADMIN_API_KEY on the API service (or API_KEY if admin falls back).",
-        )
-        .strip()
-    )
-
-    st.divider()
-    st.subheader("Filters")
-    limit = st.number_input("Max rows", min_value=1, max_value=500, value=DEFAULT_LIMIT, step=10)
-
-    col1, col2 = st.columns(2)
-    with col1:
-        refresh = st.button("🔄 Refresh")
-    with col2:
-        ping = st.button("🩺 Ping API")
+admin_key = (os.environ.get("ADMIN_API_KEY") or os.environ.get("API_KEY") or "").strip()
 
 # ----------------------------
 # Helpers
 # ----------------------------
-def api_get(path: str, *, params: dict | None = None) -> requests.Response:
-    headers: dict[str, str] = {}
-    if admin_key:
-        headers["x-api-key"] = admin_key
-    return requests.get(f"{API_BASE}{path}", headers=headers, params=params, timeout=30)
-
-
-def _usd(x) -> str:
-    try:
-        if x is None:
-            return ""
-        return f"${float(x):,.2f}"
-    except Exception:
-        return str(x)
-
-
-def _dt(x: str) -> str:
-    try:
-        if not x:
-            return ""
-        return datetime.fromisoformat(x.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M")
-    except Exception:
-        return str(x)
+def _df_height_for_rows(n: int) -> int:
+    if n <= 5:
+        return 220
+    if n <= 12:
+        return 340
+    return 480
 
 
 def _safe_dict(x) -> Dict[str, Any]:
@@ -87,281 +42,325 @@ def _kv_table(d: Dict[str, Any], order: Optional[list[str]] = None) -> pd.DataFr
             if k in d:
                 rows.append((k, d.get(k, "")))
         for k in d.keys():
-            if k not in set(order):
+            if k not in order:
                 rows.append((k, d.get(k, "")))
     else:
-        rows = [(k, v) for k, v in d.items()]
+        for k, v in d.items():
+            rows.append((k, v))
 
     return pd.DataFrame(rows, columns=["Field", "Value"])
 
 
-def _df_height_for_rows(n_rows: int) -> int:
-    """Approximate a dataframe height so it doesn't scroll."""
-    header = 38
-    row_h = 34
-    padding = 10
-    return min(900, header + n_rows * row_h + padding)
+def api_get(path: str, *, params: dict | None = None) -> requests.Response:
+    headers: dict[str, str] = {}
+    if admin_key:
+        headers["x-api-key"] = admin_key
+    return requests.get(f"{API_BASE}{path}", headers=headers, params=params, timeout=30)
 
 
-def _format_shipping_address(addr: Any) -> str:
-    """
-    Stripe-style address dict:
-    {line1,line2,city,state,postal_code,country}
-    """
-    a = _safe_dict(addr)
-    if not a:
-        return ""
-
-    parts = []
-    line1 = (a.get("line1") or "").strip()
-    line2 = (a.get("line2") or "").strip()
-    city = (a.get("city") or "").strip()
-    state = (a.get("state") or "").strip()
-    postal = (a.get("postal_code") or "").strip()
-    country = (a.get("country") or "").strip()
-
-    if line1:
-        parts.append(line1)
-    if line2:
-        parts.append(line2)
-
-    city_state_zip = " ".join([p for p in [city, state, postal] if p]).strip()
-    if city_state_zip:
-        parts.append(city_state_zip)
-
-    if country:
-        parts.append(country)
-
-    return "\n".join(parts)
+def api_put(path: str, *, json_body: dict | None = None) -> requests.Response:
+    headers: dict[str, str] = {}
+    if admin_key:
+        headers["x-api-key"] = admin_key
+    return requests.put(f"{API_BASE}{path}", headers=headers, json=json_body, timeout=30)
 
 
 # ----------------------------
-# Top actions
+# DEBUG OUTPUT (optional)
 # ----------------------------
-if ping:
-    try:
-        r = requests.get(f"{API_BASE}/health", timeout=10)
-        st.success(f"API /health: {r.status_code} {r.text}")
-    except Exception as e:
-        st.error(f"API ping failed: {e}")
-
-st.divider()
+with st.sidebar:
+    debug = st.toggle("Debug mode", value=False)
 
 # ----------------------------
 # Guardrails
 # ----------------------------
 if not admin_key:
-    st.info("Enter your **Admin API Key** in the sidebar to load orders.")
+    st.warning("Missing ADMIN_API_KEY (or API_KEY). Set it in your Render env vars for this service.")
     st.stop()
 
 # ----------------------------
-# Load orders
+# Pricing knobs (Admin-editable)
 # ----------------------------
-orders: list[dict] = []
+st.subheader("Pricing knobs")
+st.caption("Toggle materials / thickness / lead times without redeploy. Saved in Postgres via the API.")
 
-if refresh or True:
-    with st.spinner("Loading orders..."):
-        try:
-            r = api_get("/admin/orders", params={"limit": int(limit)})
+cfg_data: dict | None = None
+cfg_load_error: Optional[str] = None
 
-            if r.status_code == 401:
-                st.error("Unauthorized (401). Your Admin API Key is wrong or not being sent.")
-                st.code(r.text)
-                st.stop()
+try:
+    r_cfg = api_get("/admin/config")
+    if r_cfg.status_code == 200:
+        cfg_data = r_cfg.json() if isinstance(r_cfg.json(), dict) else None
+        if cfg_data is None:
+            cfg_load_error = "Config response was not a JSON object."
+    elif r_cfg.status_code == 404:
+        cfg_load_error = "API does not have /admin/config yet. Deploy the updated api_app.py."
+    elif r_cfg.status_code == 401:
+        cfg_load_error = "Unauthorized (401). Check ADMIN_API_KEY."
+    else:
+        cfg_load_error = f"Failed to load config: {r_cfg.status_code} {r_cfg.text}"
+except Exception as e:
+    cfg_load_error = f"Failed to load config: {e}"
 
-            if r.status_code == 404:
-                st.error("404 Not Found. Your API does not have /admin/orders yet (or the route path differs).")
-                st.code(r.text)
-                st.stop()
+if cfg_load_error:
+    st.warning(cfg_load_error)
 
-            if r.status_code != 200:
-                st.error(f"API error: {r.status_code}")
-                st.code(r.text)
-                st.stop()
+if cfg_data:
+    material_enabled: dict = cfg_data.get("material_enabled", {}) or {}
+    thickness_enabled_by_material: dict = cfg_data.get("thickness_enabled_by_material", {}) or {}
+    lead_time_enabled: dict = cfg_data.get("lead_time_enabled", {}) or {}
+    default_lead_time_days = cfg_data.get("default_lead_time_days", 21)
 
-            data = r.json()
+    # ---- Materials ----
+    st.markdown("### Availability")
+    st.markdown("**Materials**")
 
-            # Support either:
-            # 1) API returns {"orders": [...]} (dict)
-            # 2) API returns [...] (list)
-            if isinstance(data, dict):
-                orders = data.get("orders", [])
-            elif isinstance(data, list):
-                orders = data
-            else:
-                st.error(f"Unexpected API response type: {type(data)}")
-                st.stop()
+    mats = sorted(material_enabled.keys())
+    if not mats:
+        st.info("No materials found in config.")
+    else:
+        mat_cols = st.columns(min(4, max(1, len(mats))))
+        new_material_enabled = dict(material_enabled)
 
-        except Exception as e:
-            st.error(f"Failed to load orders: {e}")
-            st.stop()
+        for i, m in enumerate(mats):
+            with mat_cols[i % len(mat_cols)]:
+                new_material_enabled[m] = st.checkbox(
+                    m,
+                    value=bool(material_enabled.get(m, False)),
+                    key=f"mat_{m}",
+                )
 
-# ----------------------------
-# Orders table
-# ----------------------------
-if not orders:
-    st.warning("No orders returned.")
-    st.stop()
+    # ---- Lead times ----
+    st.markdown("**Lead times (days)**")
+    lt_days = sorted([int(x) for x in lead_time_enabled.keys()]) if lead_time_enabled else []
+    new_lead_time_enabled = {str(d): bool(lead_time_enabled.get(str(d), False)) for d in lt_days}
 
-rows = []
-for o in orders:
-    rows.append(
-        {
-            "Order #": o.get("order_number_display") or "",
-            # keep internal ID for selection/lookups (not shown)
-            "_order_id": o.get("id", ""),
-            "Created": _dt(o.get("created_at", "")),
-            "Email": o.get("customer_email", ""),
-            "Total": _usd(o.get("amount_total_usd")),
-            "Shipping": _usd(o.get("amount_shipping_usd")),
-            "Ship Service": o.get("shipping_service") or "",
-        }
+    if not lt_days:
+        st.info("No lead times found in config.")
+    else:
+        lt_cols = st.columns(min(4, max(1, len(lt_days))))
+        for i, d in enumerate(lt_days):
+            with lt_cols[i % len(lt_cols)]:
+                new_lead_time_enabled[str(d)] = st.checkbox(
+                    f"{d} days",
+                    value=bool(lead_time_enabled.get(str(d), False)),
+                    key=f"lt_{d}",
+                )
+
+    default_lead_time_days = st.number_input(
+        "Default lead time (days)",
+        min_value=1,
+        max_value=365,
+        value=int(default_lead_time_days) if str(default_lead_time_days).isdigit() else 21,
+        step=1,
+        key="default_lt",
     )
 
-df = pd.DataFrame(rows)
+    # ---- Thickness by material ----
+    st.markdown("**Thickness by material**")
+    new_thickness_enabled_by_material: dict[str, dict[str, bool]] = {}
 
-st.subheader(f"Orders ({len(df)})")
-st.dataframe(
-    df.drop(columns=["_order_id"]),
-    use_container_width=True,
-    hide_index=True,
-)
+    if not thickness_enabled_by_material:
+        st.info("No thickness map found in config.")
+    else:
+        for m in sorted(thickness_enabled_by_material.keys()):
+            tmap = thickness_enabled_by_material.get(m, {}) or {}
+            # keys are strings like "0.25"
+            th_keys = sorted(tmap.keys(), key=lambda x: float(x))
+
+            with st.expander(f"{m} thickness availability", expanded=False):
+                th_cols = st.columns(min(4, max(1, len(th_keys))))
+                new_map = dict(tmap)
+                for i, t in enumerate(th_keys):
+                    label = f'{float(t):.3f}"'
+                    with th_cols[i % len(th_cols)]:
+                        new_map[t] = st.checkbox(
+                            label,
+                            value=bool(tmap.get(t, False)),
+                            key=f"th_{m}_{t}",
+                        )
+                new_thickness_enabled_by_material[m] = new_map
+
+    # ---- Save ----
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        save_cfg = st.button("💾 Save pricing knobs", type="primary", use_container_width=True)
+    with c2:
+        st.caption("Tip: uncheck a lead time to remove it from quoting immediately (no redeploy).")
+
+    if save_cfg:
+        payload = dict(cfg_data)
+
+        # Only overwrite if we successfully built the new maps
+        if mats:
+            payload["material_enabled"] = new_material_enabled
+        if lt_days:
+            payload["lead_time_enabled"] = new_lead_time_enabled
+        payload["default_lead_time_days"] = int(default_lead_time_days)
+
+        if thickness_enabled_by_material:
+            payload["thickness_enabled_by_material"] = new_thickness_enabled_by_material
+
+        try:
+            r_save = api_put("/admin/config", json_body=payload)
+            if r_save.status_code == 200:
+                st.success("Saved. New settings apply immediately for pricing/checkout.")
+            elif r_save.status_code == 401:
+                st.error("Unauthorized (401) saving config. Check ADMIN_API_KEY.")
+                if debug:
+                    st.code(r_save.text)
+            else:
+                st.error(f"Failed to save: {r_save.status_code}")
+                if debug:
+                    st.code(r_save.text)
+        except Exception as e:
+            st.error(f"Failed to save config: {e}")
+
+    if debug:
+        st.subheader("DEBUG: /admin/config raw")
+        st.json(cfg_data)
 
 st.divider()
 
 # ----------------------------
-# Order details (clean table view)
+# Orders viewer
 # ----------------------------
-st.subheader("Order details")
+st.subheader("Orders")
 
-order_options = df["_order_id"].tolist()
+colA, colB, colC = st.columns([2, 1, 1])
+with colA:
+    q = st.text_input("Search (email / session id / order id)", value="")
+with colB:
+    limit = st.number_input("Limit", min_value=1, max_value=200, value=50, step=1)
+with colC:
+    refresh = st.button("🔄 Refresh", use_container_width=True)
 
+params = {"q": q.strip(), "limit": int(limit)} if q.strip() else {"limit": int(limit)}
 
-def _label_for_order_id(oid: str) -> str:
-    row = df[df["_order_id"] == oid]
-    if row.empty:
-        return oid
-    r0 = row.iloc[0]
-    order_num = r0.get("Order #") or "OP-????"
-    created = r0.get("Created") or ""
-    email = r0.get("Email") or ""
-    return f"{order_num} — {email} — {created}"
-
-
-selected_id = st.selectbox("Select an order", order_options, format_func=_label_for_order_id)
-
-detail: Optional[Dict[str, Any]] = None
 try:
-    r2 = api_get(f"/admin/orders/{selected_id}")
-    if r2.status_code == 200:
-        detail = r2.json()
-    elif r2.status_code == 401:
-        st.error("Unauthorized (401) when loading order details. Check your Admin API Key.")
-        st.code(r2.text)
+    r = api_get("/admin/orders", params=params)
+    if r.status_code != 200:
+        st.error(f"API error: {r.status_code}")
+        if debug:
+            st.code(r.text)
         st.stop()
-    else:
-        st.error(f"Could not load details: {r2.status_code}")
-        st.code(r2.text)
-        st.stop()
+    orders = r.json()
 except Exception as e:
-    st.error(f"Could not load details: {e}")
+    st.error(f"Failed to load orders: {e}")
     st.stop()
 
-if not detail:
-    st.warning("No detail found for selected order.")
+if debug:
+    st.subheader("DEBUG: Orders response type")
+    st.write(type(orders))
+    st.subheader("DEBUG: First order JSON")
+    st.json(orders[0] if isinstance(orders, list) and orders else {"note": "No orders returned"})
+
+if not orders:
+    st.info("No orders found.")
     st.stop()
 
-ship_to_name = detail.get("shipping_name", "") or ""
-ship_to_address = _format_shipping_address(detail.get("shipping_address"))
+df = pd.DataFrame(orders)
 
-# --- Order Summary table ---
-order_summary = {
-    "Order #": detail.get("order_number_display") or "",
-    "Internal Order ID": detail.get("id", ""),
-    "Created": _dt(detail.get("created_at", "")),
-    "Customer Email": detail.get("customer_email", ""),
-    "Subtotal": _usd(detail.get("amount_subtotal_usd")),
-    "Shipping": _usd(detail.get("amount_shipping_usd")),
-    "Total": _usd(detail.get("amount_total_usd")),
-    "Shipping Service": detail.get("shipping_service", ""),
-    "Ship To Name": ship_to_name,
-    "Ship To Address": ship_to_address,
-}
+# Friendly columns
+for c in ["created_at", "amount_total_usd", "amount_shipping_usd"]:
+    if c not in df.columns:
+        df[c] = None
 
-st.subheader("Order summary")
-summary_df = _kv_table(
-    order_summary,
+# Sort newest first if created_at exists
+try:
+    df["created_at_dt"] = pd.to_datetime(df["created_at"], errors="coerce")
+    df = df.sort_values("created_at_dt", ascending=False).drop(columns=["created_at_dt"])
+except Exception:
+    pass
+
+show_cols = [c for c in ["order_number_display", "created_at", "customer_email", "amount_total_usd", "shipping_service"] if c in df.columns]
+st.dataframe(df[show_cols], use_container_width=True, hide_index=True, height=_df_height_for_rows(len(df)))
+
+# Select an order to view detail
+order_ids = df["id"].tolist() if "id" in df.columns else []
+order_labels = []
+for _, row in df.iterrows():
+    label = (row.get("order_number_display") or "").strip() or row.get("id", "")
+    email = (row.get("customer_email") or "").strip()
+    created = (row.get("created_at") or "").strip()
+    order_labels.append(f"{label} — {email} — {created}")
+
+selected = st.selectbox("Select an order", options=list(range(len(order_ids))), format_func=lambda i: order_labels[i])
+
+order_id = order_ids[selected]
+
+st.subheader("Order detail")
+
+try:
+    r2 = api_get(f"/admin/orders/{order_id}")
+    if r2.status_code != 200:
+        st.error(f"API error: {r2.status_code}")
+        if debug:
+            st.code(r2.text)
+        st.stop()
+    detail = r2.json()
+except Exception as e:
+    st.error(f"Failed to load order detail: {e}")
+    st.stop()
+
+# Display top-level fields
+top_order = _safe_dict(detail)
+order_df = _kv_table(
+    top_order,
     order=[
-        "Order #",
-        "Created",
-        "Customer Email",
-        "Subtotal",
-        "Shipping",
-        "Total",
-        "Shipping Service",
-        "Ship To Name",
-        "Ship To Address",
-        "Internal Order ID",
+        "order_number_display",
+        "created_at",
+        "customer_email",
+        "amount_subtotal_usd",
+        "amount_shipping_usd",
+        "amount_total_usd",
+        "shipping_service",
+        "shipping_name",
+        "stripe_session_id",
+        "stripe_payment_intent",
+        "customer_id",
+        "id",
     ],
 )
-st.dataframe(
-    summary_df,
-    use_container_width=True,
-    hide_index=True,
-    height=_df_height_for_rows(len(summary_df)),
-)
 
-# Also show address in a readable multi-line box (nice UX)
-if ship_to_name or ship_to_address:
-    st.subheader("Shipping")
-    st.text_input("Ship to name", value=ship_to_name, disabled=True)
-    st.text_area("Ship to address", value=ship_to_address or "(no address captured)", height=110, disabled=True)
+st.dataframe(order_df, use_container_width=True, hide_index=True, height=_df_height_for_rows(len(order_df)))
 
-# --- Configured Inputs table (quote_payload) ---
-qp = _safe_dict(detail.get("quote_payload"))
-if qp:
-    qp_display = dict(qp)
+# Quote payload details
+quote_payload = _safe_dict(detail.get("quote_payload"))
+if quote_payload:
+    st.subheader("Quote payload")
 
-    # Ensure display defaults
-    qp_display["handle_label"] = (qp_display.get("handle_label") or "").strip() or "No label"
+    # Cart case
+    if "cart_items" in quote_payload and isinstance(quote_payload["cart_items"], list):
+        cart_items = quote_payload["cart_items"]
+        st.caption(f"Cart items: {len(cart_items)}")
+        items_df = pd.DataFrame(cart_items)
+        st.dataframe(items_df, use_container_width=True, hide_index=True, height=_df_height_for_rows(len(items_df)))
+    else:
+        inputs_df = _kv_table(
+            quote_payload,
+            order=[
+                "quantity",
+                "material",
+                "thickness",
+                "handle_width",
+                "handle_length_from_bore",
+                "paddle_dia",
+                "bore_dia",
+                "bore_tolerance",
+                "chamfer",
+                "chamfer_width",
+                "handle_label",
+                "ships_in_days",
+            ],
+        )
 
-    if not qp_display.get("chamfer"):
-        qp_display["chamfer_width"] = None
-    elif qp_display.get("chamfer_width") is None:
-        qp_display["chamfer_width"] = 0.062
-
-    # Pretty formatting for chamfer width
-    if qp_display.get("chamfer_width") is not None:
-        try:
-            qp_display["chamfer_width"] = f'{float(qp_display["chamfer_width"]):.3f}'
-        except Exception:
-            pass
-
-    st.subheader("Configured inputs")
-    inputs_df = _kv_table(
-        qp_display,
-        order=[
-            "quantity",
-            "material",
-            "thickness",
-            "handle_width",
-            "handle_length_from_bore",
-            "paddle_dia",
-            "bore_dia",
-            "bore_tolerance",
-            "chamfer",
-            "chamfer_width",
-            "handle_label",
-            "ships_in_days",
-        ],
-    )
-
-    st.dataframe(
-        inputs_df,
-        use_container_width=True,
-        hide_index=True,
-        height=_df_height_for_rows(len(inputs_df)),
-    )
+        st.dataframe(
+            inputs_df,
+            use_container_width=True,
+            hide_index=True,
+            height=_df_height_for_rows(len(inputs_df)),
+        )
 
 with st.expander("Show full order JSON"):
     st.json(detail)
