@@ -3,6 +3,7 @@ import base64
 import json
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
 
 import requests
@@ -81,10 +82,14 @@ def _cookie_set(payload: dict) -> None:
     cm = _cookie_mgr()
     if cm is None:
         return
+
+    # ✅ CookieManager expects datetime (not float)
+    expires_dt = datetime.now(timezone.utc) + timedelta(days=COOKIE_TTL_DAYS)
+
     cm.set(
         COOKIE_NAME,
         json.dumps(payload),
-        expires_at=time.time() + (COOKIE_TTL_DAYS * 86400),
+        expires_at=expires_dt,
     )
 
 
@@ -211,6 +216,7 @@ def api_get(path: str, *, params: dict | None = None, timeout: int = 30) -> requ
 # Sidebar UI
 # ----------------------------
 def render_auth_sidebar(*, show_debug: bool = True) -> None:
+    # ✅ IMPORTANT: restore BEFORE widgets
     _ensure_auth_state()
     _restore_auth_from_cookie_if_needed()
     _refresh_session_if_needed()
@@ -234,28 +240,38 @@ def render_auth_sidebar(*, show_debug: bool = True) -> None:
 
             otp_code = st.text_input("OTP code", placeholder="6–8 digit code").strip()
 
-            if send_code and email:
-                sb().auth.sign_in_with_otp({"email": email})
-                st.session_state.auth["email"] = email
-                st.success("Code sent.")
+            if send_code:
+                if not email:
+                    st.error("Enter your email first.")
+                else:
+                    sb().auth.sign_in_with_otp({"email": email})
+                    st.session_state.auth["email"] = email
+                    st.success("Code sent.")
 
-            if verify_code and email and otp_code:
-                resp = sb().auth.verify_otp({"email": email, "token": otp_code, "type": "email"})
-                session = getattr(resp, "session", None) or resp.get("session")
+            if verify_code:
+                if not email or not otp_code:
+                    st.error("Enter email + OTP code.")
+                else:
+                    resp = sb().auth.verify_otp({"email": email, "token": otp_code, "type": "email"})
+                    session = getattr(resp, "session", None) or (resp.get("session") if isinstance(resp, dict) else None)
 
-                access = getattr(session, "access_token", None) or session.get("access_token")
-                refresh = getattr(session, "refresh_token", None) or session.get("refresh_token")
+                    access = getattr(session, "access_token", None) if not isinstance(session, dict) else session.get("access_token")
+                    refresh = getattr(session, "refresh_token", None) if not isinstance(session, dict) else session.get("refresh_token")
 
-                st.session_state.auth = {
-                    "access_token": access,
-                    "refresh_token": refresh,
-                    "user": None,
-                    "email": email,
-                }
+                    if not access:
+                        st.error("No access token returned. Check Supabase OTP settings.")
+                        st.stop()
 
-                _cookie_set({"access_token": access, "refresh_token": refresh, "email": email})
-                st.success("Logged in.")
-                st.rerun()
+                    st.session_state.auth = {
+                        "access_token": access,
+                        "refresh_token": refresh,
+                        "user": None,
+                        "email": email,
+                    }
+
+                    _cookie_set({"access_token": access, "refresh_token": refresh, "email": email})
+                    st.success("Logged in.")
+                    st.rerun()
 
         else:
             st.success(f"Logged in as {st.session_state.auth.get('email')}")
