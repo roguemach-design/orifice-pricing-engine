@@ -6,7 +6,7 @@ import requests
 import streamlit as st
 
 from pricing_engine import QuoteInputs, calculate_quote
-import pricing_config as cfg
+import tuning_knobs as cfg
 
 
 # -----------------------------
@@ -499,3 +499,4 @@ with right:
                     "ships_in_days": int(ships_in_days),
                 }
                 start_checkout(payload_inputs)
+
