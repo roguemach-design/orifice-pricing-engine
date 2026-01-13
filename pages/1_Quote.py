@@ -7,7 +7,7 @@ import streamlit as st
 
 from auth import render_auth_sidebar, auth_headers, is_logged_in
 from pricing_engine import QuoteInputs, calculate_quote
-import pricing_config as cfg
+import tuning_knobs as cfg
 
 
 # -----------------------------
