@@ -52,12 +52,16 @@ def sb() -> Client:
 
 
 # ----------------------------
-# Cookie manager (NO caching)
+# Cookie manager (singleton, NO caching)
 # ----------------------------
 def _cookie_mgr():
     if stx is None:
         return None
-    return stx.CookieManager(key="auth_cookie_mgr")
+
+    if "_cookie_mgr_instance" not in st.session_state:
+        st.session_state["_cookie_mgr_instance"] = stx.CookieManager()
+
+    return st.session_state["_cookie_mgr_instance"]
 
 
 def _cookie_get() -> Optional[dict]:
@@ -93,11 +97,14 @@ def _cookie_clear() -> None:
 
 def _restore_auth_from_cookie_if_needed() -> None:
     _ensure_auth_state()
+
     if st.session_state.auth.get("access_token"):
         return
+
     data = _cookie_get()
     if not data:
         return
+
     st.session_state.auth = {
         "access_token": data.get("access_token"),
         "refresh_token": data.get("refresh_token"),
@@ -107,13 +114,15 @@ def _restore_auth_from_cookie_if_needed() -> None:
 
 
 # ----------------------------
-# JWT helpers (read exp only)
+# JWT helpers (read-only)
 # ----------------------------
 def _jwt_payload(token: str) -> Optional[dict]:
     try:
         parts = token.split(".")
+        if len(parts) != 3:
+            return None
         payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
-        return json.loads(base64.urlsafe_b64decode(payload_b64))
+        return json.loads(base64.urlsafe_b64decode(payload_b64).decode())
     except Exception:
         return None
 
@@ -127,41 +136,50 @@ def _token_expires_soon(token: str) -> bool:
 
 def _refresh_session_if_needed() -> None:
     _ensure_auth_state()
-    at = st.session_state.auth.get("access_token")
-    rt = st.session_state.auth.get("refresh_token")
-    if not at or not rt or not _token_expires_soon(at):
+
+    access_token = st.session_state.auth.get("access_token")
+    refresh_token = st.session_state.auth.get("refresh_token")
+
+    if not access_token or not refresh_token:
+        return
+
+    if not _token_expires_soon(access_token):
         return
 
     try:
-        resp = sb().auth.refresh_session(rt)
-        session = resp.session if hasattr(resp, "session") else resp.get("session")
+        resp = sb().auth.refresh_session(refresh_token)
+        session = getattr(resp, "session", None) or (resp.get("session") if isinstance(resp, dict) else None)
+
         if not session:
             return
 
-        new_at = getattr(session, "access_token", None) or session.get("access_token")
-        new_rt = getattr(session, "refresh_token", None) or session.get("refresh_token")
+        new_access = getattr(session, "access_token", None) or session.get("access_token")
+        new_refresh = getattr(session, "refresh_token", None) or session.get("refresh_token")
 
-        if new_at:
-            st.session_state.auth["access_token"] = new_at
-        if new_rt:
-            st.session_state.auth["refresh_token"] = new_rt
+        if new_access:
+            st.session_state.auth["access_token"] = new_access
+        if new_refresh:
+            st.session_state.auth["refresh_token"] = new_refresh
 
         _cookie_set(
             {
-                "access_token": st.session_state.auth["access_token"],
-                "refresh_token": st.session_state.auth["refresh_token"],
-                "email": st.session_state.auth["email"],
+                "access_token": st.session_state.auth.get("access_token"),
+                "refresh_token": st.session_state.auth.get("refresh_token"),
+                "email": st.session_state.auth.get("email"),
             }
         )
+
     except Exception:
         return
 
 
 # ----------------------------
-# Public helpers
+# Auth helpers
 # ----------------------------
 def is_logged_in() -> bool:
     _restore_auth_from_cookie_if_needed()
+    _refresh_session_if_needed()
+    _ensure_auth_state()
     return bool(st.session_state.auth.get("access_token"))
 
 
@@ -179,61 +197,63 @@ def auth_headers() -> Dict[str, str]:
     return {"Authorization": f"Bearer {tok}"} if tok else {}
 
 
-def require_login(message: str = "Log in to continue.") -> None:
-    _restore_auth_from_cookie_if_needed()
-    _refresh_session_if_needed()
+def require_login(message: str = "Log in in the sidebar to continue.") -> None:
     if not is_logged_in():
         st.info(message)
         st.stop()
 
 
-def api_get(path: str, *, params: dict | None = None) -> requests.Response:
-    return requests.get(f"{API_BASE}{path}", headers=auth_headers(), params=params, timeout=30)
+def api_get(path: str, *, params: dict | None = None, timeout: int = 30) -> requests.Response:
+    return requests.get(f"{API_BASE}{path}", headers=auth_headers(), params=params, timeout=timeout)
 
 
 # ----------------------------
 # Sidebar UI
 # ----------------------------
 def render_auth_sidebar(*, show_debug: bool = True) -> None:
-    # 🔥 REQUIRED: FIRST LINE
+    _ensure_auth_state()
     _restore_auth_from_cookie_if_needed()
     _refresh_session_if_needed()
-    _ensure_auth_state()
 
     with st.sidebar:
+        st.subheader("Connection")
+        st.code(API_BASE)
+
+        st.caption("Supabase URL:")
+        st.code(SUPABASE_URL or "(missing)")
+
+        st.divider()
         st.subheader("Login")
 
         if not is_logged_in():
-            email = st.text_input("Email", value=st.session_state.auth.get("email") or "")
-            otp = st.text_input("OTP code", max_chars=12)
+            email = st.text_input("Email", value=st.session_state.auth.get("email") or "").strip()
 
-            if st.button("Send code"):
+            c1, c2 = st.columns(2)
+            send_code = c1.button("Send code")
+            verify_code = c2.button("Verify code")
+
+            otp_code = st.text_input("OTP code", placeholder="6–8 digit code").strip()
+
+            if send_code and email:
                 sb().auth.sign_in_with_otp({"email": email})
                 st.session_state.auth["email"] = email
                 st.success("Code sent.")
 
-            if st.button("Verify code"):
-                resp = sb().auth.verify_otp({"email": email, "token": otp, "type": "email"})
-                session = resp.session if hasattr(resp, "session") else resp.get("session")
+            if verify_code and email and otp_code:
+                resp = sb().auth.verify_otp({"email": email, "token": otp_code, "type": "email"})
+                session = getattr(resp, "session", None) or resp.get("session")
 
-                access_token = getattr(session, "access_token", None) or session.get("access_token")
-                refresh_token = getattr(session, "refresh_token", None) or session.get("refresh_token")
+                access = getattr(session, "access_token", None) or session.get("access_token")
+                refresh = getattr(session, "refresh_token", None) or session.get("refresh_token")
 
                 st.session_state.auth = {
-                    "access_token": access_token,
-                    "refresh_token": refresh_token,
+                    "access_token": access,
+                    "refresh_token": refresh,
                     "user": None,
                     "email": email,
                 }
 
-                _cookie_set(
-                    {
-                        "access_token": access_token,
-                        "refresh_token": refresh_token,
-                        "email": email,
-                    }
-                )
-
+                _cookie_set({"access_token": access, "refresh_token": refresh, "email": email})
                 st.success("Logged in.")
                 st.rerun()
 
