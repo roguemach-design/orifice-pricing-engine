@@ -241,15 +241,25 @@ def _estimate_package_in(paddle_dia: float, handle_length_from_bore: float, thic
 
 
 def _estimate_total_weight_lb(material: str, area_sq_in: float, thickness: float, qty: int) -> float:
-    densities = {
-        "304": 0.289,
-        "316": 0.289,
-        "Carbon Steel": 0.283,
-        "Monel": 0.319,
-        "Hastelloy": 0.321,
-    }
-    density = densities.get(material, 0.289)
-    return round(area_sq_in * thickness * density * qty, 2)
+    # Prefer cfg densities/weight multipliers if present
+    densities = getattr(cfg, "DENSITY_LB_PER_IN3", None)
+    if not isinstance(densities, dict) or not densities:
+        densities = {
+            "304": 0.289,
+            "316": 0.289,
+            "Carbon Steel": 0.283,
+            "Monel": 0.319,
+            "Hastelloy": 0.321,
+        }
+
+    mult_map = getattr(cfg, "WEIGHT_MULTIPLIER_BY_MATERIAL", None)
+    if not isinstance(mult_map, dict) or not mult_map:
+        mult_map = {}
+
+    density = float(densities.get(material, 0.289))
+    mult = float(mult_map.get(material, 1.0))
+
+    return round(area_sq_in * thickness * density * qty * mult, 2)
 
 
 def _render_product_image() -> None:
@@ -324,13 +334,63 @@ with right:
         r1c1, r1c2 = st.columns([1, 2])
         with r1c1:
             quantity = st.number_input("Qty", min_value=1, value=1, step=1)
-        with r1c2:
-            material = st.selectbox("Material Type", options=list(cfg.PRICE_PER_SQ_IN.keys()))
 
-        thickness = st.selectbox(
-            "Plate Thickness (in)",
-            options=sorted(cfg.PRICE_PER_SQ_IN[material].keys()),
-        )
+        # -----------------------------
+        # Material dropdown (show unavailable)
+        # -----------------------------
+        material_enabled_map = getattr(cfg, "MATERIAL_ENABLED", None)
+        if not isinstance(material_enabled_map, dict) or not material_enabled_map:
+            # Fallback: if no explicit toggles, treat materials present as enabled
+            material_enabled_map = {m: True for m in cfg.PRICE_PER_SQ_IN.keys()}
+
+        materials_all = sorted(material_enabled_map.keys())
+
+        def _material_label(m: str) -> str:
+            return m if material_enabled_map.get(m, False) else f"{m} (unavailable)"
+
+        material_labels = [_material_label(m) for m in materials_all]
+        label_to_material = dict(zip(material_labels, materials_all))
+
+        default_material = next((m for m in materials_all if material_enabled_map.get(m, False)), materials_all[0])
+        default_index = materials_all.index(default_material)
+
+        with r1c2:
+            selected_material_label = st.selectbox("Material Type", options=material_labels, index=default_index)
+            material = label_to_material[selected_material_label]
+
+        if not material_enabled_map.get(material, False):
+            st.warning(f"⚠️ **{material}** is currently unavailable. Please choose a different material.")
+            st.stop()
+
+        # -----------------------------
+        # Thickness dropdown (show unavailable)
+        # -----------------------------
+        # "available" thicknesses after config filtering (or raw dict)
+        available_thicknesses = sorted(cfg.PRICE_PER_SQ_IN.get(material, {}).keys())
+
+        # Use a master list if you have one; otherwise use union across all enabled materials
+        thickness_master = getattr(cfg, "THICKNESS_OPTIONS_IN", None)
+        if not isinstance(thickness_master, list) or not thickness_master:
+            thickness_master = sorted(
+                {t for m, tmap in cfg.PRICE_PER_SQ_IN.items() for t in tmap.keys()}
+            )
+
+        def _th_label(t: float) -> str:
+            base = f'{float(t):.3f}"'
+            return base if t in available_thicknesses else f"{base} (unavailable)"
+
+        th_labels = [_th_label(t) for t in thickness_master]
+        th_label_to_val = dict(zip(th_labels, thickness_master))
+
+        default_th = available_thicknesses[0] if available_thicknesses else thickness_master[0]
+        default_th_idx = thickness_master.index(default_th) if default_th in thickness_master else 0
+
+        selected_th_label = st.selectbox("Plate Thickness (in)", options=th_labels, index=default_th_idx)
+        thickness = float(th_label_to_val[selected_th_label])
+
+        if thickness not in available_thicknesses:
+            st.warning(f"⚠️ **{material}** in **{thickness:.3f}\"** is currently unavailable.")
+            st.stop()
 
         r2c1, r2c2 = st.columns(2)
         with r2c1:
@@ -394,12 +454,39 @@ with right:
                 format="%.3f",
             )
 
-        ships_options = sorted(cfg.LEAD_TIME_MULTIPLIER.keys())
-        ships_in_days = st.selectbox(
-            "Ships in (days)",
-            options=ships_options,
-            index=ships_options.index(21) if 21 in ships_options else 0,
-        )
+        # -----------------------------
+        # Lead time dropdown (show unavailable)
+        # -----------------------------
+        lead_mult = getattr(cfg, "LEAD_TIME_MULTIPLIER", {})
+        lead_enabled_map = getattr(cfg, "LEAD_TIME_ENABLED", None)
+        if not isinstance(lead_enabled_map, dict) or not lead_enabled_map:
+            lead_enabled_map = {int(d): True for d in lead_mult.keys()}
+
+        lead_days_all = sorted(lead_enabled_map.keys())
+
+        def _ld_label(d: int) -> str:
+            base = f"{int(d)} days"
+            return base if lead_enabled_map.get(d, False) and d in lead_mult else f"{base} (unavailable)"
+
+        lead_labels = [_ld_label(d) for d in lead_days_all]
+        lead_label_to_day = dict(zip(lead_labels, lead_days_all))
+
+        # Default: cfg.DEFAULT_LEAD_TIME_DAYS if valid, else first enabled
+        default_ld = getattr(cfg, "DEFAULT_LEAD_TIME_DAYS", None)
+        if not isinstance(default_ld, int):
+            default_ld = None
+
+        if default_ld is None or (not lead_enabled_map.get(default_ld, False)) or (default_ld not in lead_mult):
+            default_ld = next((d for d in lead_days_all if lead_enabled_map.get(d, False) and d in lead_mult), lead_days_all[0])
+
+        default_ld_idx = lead_days_all.index(default_ld)
+
+        selected_ld_label = st.selectbox("Ships in (days)", options=lead_labels, index=default_ld_idx)
+        ships_in_days = int(lead_label_to_day[selected_ld_label])
+
+        if (not lead_enabled_map.get(ships_in_days, False)) or (ships_in_days not in lead_mult):
+            st.warning(f"⚠️ **{ships_in_days} days** is currently unavailable.")
+            st.stop()
 
 
 # -----------------------------
@@ -499,4 +586,3 @@ with right:
                     "ships_in_days": int(ships_in_days),
                 }
                 start_checkout(payload_inputs)
-
