@@ -651,9 +651,10 @@ payload_inputs = {
 try:
     result = quote_via_api(payload_inputs)
 except Exception as e:
-    # Fallback (so site doesn't hard-fail if API has a hiccup)
-    st.warning(f"Quote API unavailable; using local pricing fallback. ({e})")
-    result = calculate_quote(inputs)
+    st.error("Quote API error — pricing is currently unavailable.")
+    st.code(str(e))
+    st.stop()
+
 
 # Shipping estimates (computed once)
 area_sq_in = result.get("area_sq_in", _estimate_area_sq_in(paddle_dia, handle_length))
@@ -698,3 +699,4 @@ with right:
         with btn_cols[1]:
             if st.button("Place Order & Pay"):
                 start_checkout(payload_inputs)
+
