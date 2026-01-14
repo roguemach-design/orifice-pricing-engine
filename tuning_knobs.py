@@ -10,19 +10,19 @@ This is the ONLY file you should need to edit to tune pricing + availability.
 # ============================================================
 PRICE_PER_SQ_IN = {
     "304": {
-        0.120: 0.1302,   # 11ga approx
+        0.125: 0.1302,   # 11ga approx
         0.250: 0.2564,
         0.375: 0.3814,
         0.500: 0.6307,
     },
     "316": {
-        0.120: 0.1868,   # 11ga approx
+        0.125: 0.1868,   # 11ga approx
         0.250: 0.3763,
         0.375: 0.5710,
         0.500: 0.8773,
     },
     "Carbon Steel": {
-        0.120: 0.04785,  # 11ga approx
+        0.125: 0.04785,  # 11ga approx
         0.250: 0.07444,
         0.375: 0.11065,
         0.500: 0.15030,
@@ -147,4 +147,5 @@ QTY_DISCOUNT_TIERS = [
     {"min_qty": 25,  "multiplier": 0.92},
     {"min_qty": 50,  "multiplier": 0.90},
 ]
+
 
