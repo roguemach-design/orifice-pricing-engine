@@ -472,7 +472,8 @@ def _apply_cfg_from_db_config(config_json: dict) -> None:
 
 def _calculate_quote_with_db_knobs(inputs: QuoteInputs) -> dict:
     """
-    Loads active knobs from DB and applies them to cfg for the duration of this calculation.
+    Loads active knobs from DB and applies them to tuning_knobs (cfg)
+    for the duration of this calculation.
     """
     _db_required()
     db = SessionLocal()
@@ -481,37 +482,98 @@ def _calculate_quote_with_db_knobs(inputs: QuoteInputs) -> dict:
     finally:
         db.close()
 
-    # ----------------------------
-    # FIX: Coerce DB JSON keys into correct Python types
-    # ----------------------------
-    try:
-        # price_per_sq_in: {material: {thickness(str): price}} -> thickness(float)
-        ppsi = active.get("price_per_sq_in") or {}
-        fixed_ppsi = {}
-        for mat, tmap in ppsi.items():
-            if not isinstance(tmap, dict):
-                continue
-            fixed_ppsi[str(mat)] = {}
-            for t, price in tmap.items():
-                try:
-                    fixed_ppsi[str(mat)][float(t)] = float(price)
-                except Exception:
-                    pass
-        active["price_per_sq_in"] = fixed_ppsi
+    # ---- Coerce DB JSON keys into correct Python types ----
+    ppsi = active.get("price_per_sq_in") or {}
+    fixed_ppsi: dict[str, dict[float, float]] = {}
+    for mat, tmap in ppsi.items():
+        if not isinstance(tmap, dict):
+            continue
+        fixed_ppsi[str(mat)] = {}
+        for t, price in tmap.items():
+            try:
+                fixed_ppsi[str(mat)][float(t)] = float(price)
+            except Exception:
+                pass
 
-        # thickness_enabled_by_material: {material: {thickness(str): enabled}} -> thickness(float)
-        thmap = active.get("thickness_enabled_by_material") or {}
-        fixed_th = {}
-        for mat, tmap in thmap.items():
-            if not isinstance(tmap, dict):
-                continue
-            fixed_th[str(mat)] = {}
-            for t, enabled in tmap.items():
-                try:
-                    fixed_th[str(mat)][float(t)] = bool(enabled)
-                except Exception:
-                    pass
-        active["thickness_enabled_by_material"] = fixed_th
+    thmap = active.get("thickness_enabled_by_material") or {}
+    fixed_th: dict[str, dict[float, bool]] = {}
+    for mat, tmap in thmap.items():
+        if not isinstance(tmap, dict):
+            continue
+        fixed_th[str(mat)] = {}
+        for t, enabled in tmap.items():
+            try:
+                fixed_th[str(mat)][float(t)] = bool(enabled)
+            except Exception:
+                pass
+
+    lt_enabled_raw = active.get("lead_time_enabled") or {}
+    fixed_lt_enabled: dict[int, bool] = {}
+    if isinstance(lt_enabled_raw, dict):
+        for k, v in lt_enabled_raw.items():
+            try:
+                fixed_lt_enabled[int(k)] = bool(v)
+            except Exception:
+                pass
+
+    lt_mult_raw = active.get("lead_time_multiplier") or {}
+    fixed_lt_mult: dict[int, float] = {}
+    if isinstance(lt_mult_raw, dict):
+        for k, v in lt_mult_raw.items():
+            try:
+                fixed_lt_mult[int(k)] = float(v)
+            except Exception:
+                pass
+
+    mat_enabled_raw = active.get("material_enabled") or {}
+    fixed_mat_enabled: dict[str, bool] = {}
+    if isinstance(mat_enabled_raw, dict):
+        fixed_mat_enabled = {str(k): bool(v) for k, v in mat_enabled_raw.items()}
+
+    default_lt = active.get("default_lead_time_days")
+    try:
+        fixed_default_lt = int(default_lt) if default_lt is not None else None
+    except Exception:
+        fixed_default_lt = None
+
+    # ---- Apply to live tuning_knobs module used by pricing_engine ----
+    old_ppsi = getattr(cfg, "PRICE_PER_SQ_IN", None)
+    old_th = getattr(cfg, "THICKNESS_ENABLED_BY_MATERIAL", None)
+    old_lt_enabled = getattr(cfg, "LEAD_TIME_ENABLED", None)
+    old_lt_mult = getattr(cfg, "LEAD_TIME_MULTIPLIER", None)
+    old_mat_enabled = getattr(cfg, "MATERIAL_ENABLED", None)
+    old_default_lt = getattr(cfg, "DEFAULT_LEAD_TIME_DAYS", None)
+
+    try:
+        if fixed_ppsi:
+            cfg.PRICE_PER_SQ_IN = fixed_ppsi
+        if fixed_th:
+            cfg.THICKNESS_ENABLED_BY_MATERIAL = fixed_th
+        if fixed_lt_enabled:
+            cfg.LEAD_TIME_ENABLED = fixed_lt_enabled
+        if fixed_lt_mult:
+            cfg.LEAD_TIME_MULTIPLIER = fixed_lt_mult
+        if fixed_mat_enabled:
+            cfg.MATERIAL_ENABLED = fixed_mat_enabled
+        if fixed_default_lt is not None:
+            cfg.DEFAULT_LEAD_TIME_DAYS = fixed_default_lt
+
+        return calculate_quote(inputs)
+
+    finally:
+        if old_ppsi is not None:
+            cfg.PRICE_PER_SQ_IN = old_ppsi
+        if old_th is not None:
+            cfg.THICKNESS_ENABLED_BY_MATERIAL = old_th
+        if old_lt_enabled is not None:
+            cfg.LEAD_TIME_ENABLED = old_lt_enabled
+        if old_lt_mult is not None:
+            cfg.LEAD_TIME_MULTIPLIER = old_lt_mult
+        if old_mat_enabled is not None:
+            cfg.MATERIAL_ENABLED = old_mat_enabled
+        if old_default_lt is not None:
+            cfg.DEFAULT_LEAD_TIME_DAYS = old_default_lt
+
 
         # lead_time_enabled: {"7": true} -> {7: true}
         ltmap = active.get("lead_time_enabled") or {}
@@ -529,9 +591,9 @@ def _calculate_quote_with_db_knobs(inputs: QuoteInputs) -> dict:
         except Exception:
             active["default_lead_time_days"] = 21
 
-    except Exception:
+        except Exception:
         # If coercion fails for any reason, just continue — we still want to try quoting
-        pass
+            pass
 
     with _CFG_LOCK:
         _restore_cfg_baseline()
