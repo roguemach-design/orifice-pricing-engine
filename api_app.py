@@ -481,6 +481,58 @@ def _calculate_quote_with_db_knobs(inputs: QuoteInputs) -> dict:
     finally:
         db.close()
 
+    # ----------------------------
+    # FIX: Coerce DB JSON keys into correct Python types
+    # ----------------------------
+    try:
+        # price_per_sq_in: {material: {thickness(str): price}} -> thickness(float)
+        ppsi = active.get("price_per_sq_in") or {}
+        fixed_ppsi = {}
+        for mat, tmap in ppsi.items():
+            if not isinstance(tmap, dict):
+                continue
+            fixed_ppsi[str(mat)] = {}
+            for t, price in tmap.items():
+                try:
+                    fixed_ppsi[str(mat)][float(t)] = float(price)
+                except Exception:
+                    pass
+        active["price_per_sq_in"] = fixed_ppsi
+
+        # thickness_enabled_by_material: {material: {thickness(str): enabled}} -> thickness(float)
+        thmap = active.get("thickness_enabled_by_material") or {}
+        fixed_th = {}
+        for mat, tmap in thmap.items():
+            if not isinstance(tmap, dict):
+                continue
+            fixed_th[str(mat)] = {}
+            for t, enabled in tmap.items():
+                try:
+                    fixed_th[str(mat)][float(t)] = bool(enabled)
+                except Exception:
+                    pass
+        active["thickness_enabled_by_material"] = fixed_th
+
+        # lead_time_enabled: {"7": true} -> {7: true}
+        ltmap = active.get("lead_time_enabled") or {}
+        fixed_lt = {}
+        for k, v in ltmap.items():
+            try:
+                fixed_lt[int(k)] = bool(v)
+            except Exception:
+                pass
+        active["lead_time_enabled"] = fixed_lt
+
+        # default_lead_time_days: "21" -> 21
+        try:
+            active["default_lead_time_days"] = int(active.get("default_lead_time_days", 21))
+        except Exception:
+            active["default_lead_time_days"] = 21
+
+    except Exception:
+        # If coercion fails for any reason, just continue — we still want to try quoting
+        pass
+
     with _CFG_LOCK:
         _restore_cfg_baseline()
         _apply_cfg_from_db_config(active)
@@ -488,7 +540,6 @@ def _calculate_quote_with_db_knobs(inputs: QuoteInputs) -> dict:
             return calculate_quote(inputs)
         finally:
             _restore_cfg_baseline()
-
 
 # ----------------------------
 # Request models
