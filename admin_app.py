@@ -72,6 +72,13 @@ def api_post(path: str, *, json_body: dict | None = None) -> requests.Response:
     return requests.post(f"{API_BASE}{path}", headers=headers, json=json_body, timeout=30)
 
 
+def _thickness_sort_key(x: str) -> float:
+    try:
+        return float(x)
+    except Exception:
+        return 0.0
+
+
 # ----------------------------
 # DEBUG OUTPUT (optional)
 # ----------------------------
@@ -112,8 +119,7 @@ except Exception as e:
 if cfg_load_error:
     st.warning(cfg_load_error)
 
-# ---- NEW: reset button (escape hatch) ----
-# Put this above the controls so you can recover even if pricing tables got nuked in DB.
+# ---- Reset button (escape hatch) ----
 r1, r2 = st.columns([1, 3])
 with r1:
     if st.button("♻️ Reset knobs to defaults", use_container_width=True):
@@ -138,18 +144,19 @@ if cfg_data:
     thickness_enabled_by_material: dict = cfg_data.get("thickness_enabled_by_material", {}) or {}
     lead_time_enabled: dict = cfg_data.get("lead_time_enabled", {}) or {}
     default_lead_time_days = cfg_data.get("default_lead_time_days", 21)
+    price_per_sq_in: dict = cfg_data.get("price_per_sq_in", {}) or {}
 
     # ---- Materials ----
     st.markdown("### Availability")
     st.markdown("**Materials**")
 
     mats = sorted(material_enabled.keys())
+    new_material_enabled = dict(material_enabled)
+
     if not mats:
         st.info("No materials found in config.")
     else:
         mat_cols = st.columns(min(4, max(1, len(mats))))
-        new_material_enabled = dict(material_enabled)
-
         for i, m in enumerate(mats):
             with mat_cols[i % len(mat_cols)]:
                 new_material_enabled[m] = st.checkbox(
@@ -208,6 +215,75 @@ if cfg_data:
                         )
                 new_thickness_enabled_by_material[m] = new_map
 
+    # ----------------------------
+    # NEW: Price table editor
+    # ----------------------------
+    st.markdown("### Price table ($ / sq in)")
+    st.caption("Edit pricing here to update quotes immediately (no redeploy).")
+
+    # Determine thickness columns from whatever exists in DB config
+    all_t = set()
+    for _m, tmap in price_per_sq_in.items():
+        if isinstance(tmap, dict):
+            for t in tmap.keys():
+                all_t.add(str(t))
+
+    thickness_cols = sorted(list(all_t), key=_thickness_sort_key)
+
+    new_price_per_sq_in: dict[str, dict[str, float]] = dict(price_per_sq_in)
+
+    if not price_per_sq_in:
+        st.warning("No `price_per_sq_in` found in config JSON. Use Reset to seed it from defaults.")
+    else:
+        materials = sorted(price_per_sq_in.keys())
+
+        # Build rectangular editor DF
+        rows = []
+        for m in materials:
+            row = {"material": m}
+            tmap = price_per_sq_in.get(m, {}) or {}
+            for t in thickness_cols:
+                v = tmap.get(t)
+                try:
+                    row[t] = float(v) if v is not None else None
+                except Exception:
+                    row[t] = None
+            rows.append(row)
+
+        df_prices = pd.DataFrame(rows)
+
+        edited = st.data_editor(
+            df_prices,
+            use_container_width=True,
+            num_rows="fixed",
+            column_config={
+                "material": st.column_config.TextColumn("Material", disabled=True),
+                **{
+                    t: st.column_config.NumberColumn(
+                        f'{float(t):.3f}"',
+                        min_value=0.0,
+                        step=0.0001,
+                    )
+                    for t in thickness_cols
+                },
+            },
+            key="price_table_editor",
+        )
+
+        # Convert editor DF -> dict[str][str] = float
+        new_price_per_sq_in = {}
+        for _, r in edited.iterrows():
+            mat = str(r["material"])
+            new_price_per_sq_in[mat] = {}
+            for t in thickness_cols:
+                val = r.get(t)
+                if val is None or (isinstance(val, float) and pd.isna(val)):
+                    continue
+                try:
+                    new_price_per_sq_in[mat][str(t)] = float(val)
+                except Exception:
+                    pass
+
     # ---- Save ----
     c1, c2 = st.columns([1, 2])
     with c1:
@@ -226,6 +302,9 @@ if cfg_data:
 
         if thickness_enabled_by_material:
             payload["thickness_enabled_by_material"] = new_thickness_enabled_by_material
+
+        # NEW: save updated price table
+        payload["price_per_sq_in"] = new_price_per_sq_in
 
         try:
             r_save = api_put("/admin/config", json_body=payload)
