@@ -542,11 +542,13 @@ def get_active_config_public():
         db.close()
 
 
+from pydantic import ValidationError  # add near imports if missing
+
 @app.post("/quote", dependencies=[Depends(_require_api_key)])
 async def quote(request: Request):
     payload = await request.json()
 
-    # Normalize optional fields
+    # ---- Normalize optional fields ----
     payload["handle_label"] = (payload.get("handle_label") or "").strip() or "No label"
 
     if payload.get("chamfer"):
@@ -556,8 +558,22 @@ async def quote(request: Request):
     else:
         payload["chamfer_width"] = None
 
-    inputs = QuoteInputs(**payload)
-    return _calculate_quote_with_db_knobs(inputs)
+    try:
+        inputs = QuoteInputs(**payload)
+        return _calculate_quote_with_db_knobs(inputs)
+
+    except ValidationError as e:
+        # bad types / missing fields
+        raise HTTPException(status_code=422, detail=str(e))
+
+    except ValueError as e:
+        # pricing_engine validation ("no price for thickness...", etc.)
+        raise HTTPException(status_code=400, detail=str(e))
+
+    except Exception as e:
+        # unexpected
+        raise HTTPException(status_code=500, detail=f"Unhandled quote error: {type(e).__name__}: {e}")
+
 
 
 # ----------------------------
