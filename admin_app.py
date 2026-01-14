@@ -65,6 +65,13 @@ def api_put(path: str, *, json_body: dict | None = None) -> requests.Response:
     return requests.put(f"{API_BASE}{path}", headers=headers, json=json_body, timeout=30)
 
 
+def api_post(path: str, *, json_body: dict | None = None) -> requests.Response:
+    headers: dict[str, str] = {}
+    if admin_key:
+        headers["x-api-key"] = admin_key
+    return requests.post(f"{API_BASE}{path}", headers=headers, json=json_body, timeout=30)
+
+
 # ----------------------------
 # DEBUG OUTPUT (optional)
 # ----------------------------
@@ -104,6 +111,27 @@ except Exception as e:
 
 if cfg_load_error:
     st.warning(cfg_load_error)
+
+# ---- NEW: reset button (escape hatch) ----
+# Put this above the controls so you can recover even if pricing tables got nuked in DB.
+r1, r2 = st.columns([1, 3])
+with r1:
+    if st.button("♻️ Reset knobs to defaults", use_container_width=True):
+        try:
+            rr = api_post("/admin/config/reset")
+            if rr.status_code == 200:
+                st.success("Reset complete. Reloading…")
+                st.rerun()
+            elif rr.status_code == 404:
+                st.error("API missing /admin/config/reset. Deploy the updated api_app.py.")
+            else:
+                st.error(f"Reset failed: {rr.status_code}")
+                if debug:
+                    st.code(rr.text)
+        except Exception as e:
+            st.error(f"Reset failed: {e}")
+with r2:
+    st.caption("Use reset if the website isn't reflecting knob changes or pricing tables got out of sync.")
 
 if cfg_data:
     material_enabled: dict = cfg_data.get("material_enabled", {}) or {}
@@ -165,7 +193,6 @@ if cfg_data:
     else:
         for m in sorted(thickness_enabled_by_material.keys()):
             tmap = thickness_enabled_by_material.get(m, {}) or {}
-            # keys are strings like "0.25"
             th_keys = sorted(tmap.keys(), key=lambda x: float(x))
 
             with st.expander(f"{m} thickness availability", expanded=False):
@@ -191,7 +218,6 @@ if cfg_data:
     if save_cfg:
         payload = dict(cfg_data)
 
-        # Only overwrite if we successfully built the new maps
         if mats:
             payload["material_enabled"] = new_material_enabled
         if lt_days:
@@ -261,12 +287,10 @@ if not orders:
 
 df = pd.DataFrame(orders)
 
-# Friendly columns
 for c in ["created_at", "amount_total_usd", "amount_shipping_usd"]:
     if c not in df.columns:
         df[c] = None
 
-# Sort newest first if created_at exists
 try:
     df["created_at_dt"] = pd.to_datetime(df["created_at"], errors="coerce")
     df = df.sort_values("created_at_dt", ascending=False).drop(columns=["created_at_dt"])
@@ -276,7 +300,6 @@ except Exception:
 show_cols = [c for c in ["order_number_display", "created_at", "customer_email", "amount_total_usd", "shipping_service"] if c in df.columns]
 st.dataframe(df[show_cols], use_container_width=True, hide_index=True, height=_df_height_for_rows(len(df)))
 
-# Select an order to view detail
 order_ids = df["id"].tolist() if "id" in df.columns else []
 order_labels = []
 for _, row in df.iterrows():
@@ -286,7 +309,6 @@ for _, row in df.iterrows():
     order_labels.append(f"{label} — {email} — {created}")
 
 selected = st.selectbox("Select an order", options=list(range(len(order_ids))), format_func=lambda i: order_labels[i])
-
 order_id = order_ids[selected]
 
 st.subheader("Order detail")
@@ -303,7 +325,6 @@ except Exception as e:
     st.error(f"Failed to load order detail: {e}")
     st.stop()
 
-# Display top-level fields
 top_order = _safe_dict(detail)
 order_df = _kv_table(
     top_order,
@@ -325,12 +346,10 @@ order_df = _kv_table(
 
 st.dataframe(order_df, use_container_width=True, hide_index=True, height=_df_height_for_rows(len(order_df)))
 
-# Quote payload details
 quote_payload = _safe_dict(detail.get("quote_payload"))
 if quote_payload:
     st.subheader("Quote payload")
 
-    # Cart case
     if "cart_items" in quote_payload and isinstance(quote_payload["cart_items"], list):
         cart_items = quote_payload["cart_items"]
         st.caption(f"Cart items: {len(cart_items)}")
