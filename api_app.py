@@ -125,7 +125,7 @@ class Order(Base):
     quote_payload = Column(JSON, nullable=True)  # what customer configured
 
 
-# NEW (Step 1): single-row config table for knobs
+# single-row config table for knobs
 class AppConfig(Base):
     __tablename__ = "app_config"
 
@@ -148,7 +148,6 @@ def init_db() -> None:
         conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_id VARCHAR"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_customer_id ON orders(customer_id)"))
 
-        # NEW (Step 2): app_config table
         conn.execute(
             text(
                 """
@@ -292,17 +291,28 @@ def _api_key_or_customer_user_id(
 
 
 # ----------------------------
-# Knobs config helpers (Step 3 + runtime apply)
+# Knobs config helpers (seed + runtime apply)
 # ----------------------------
+def _baseline_price_per_sq_in_as_db_shape() -> dict[str, dict[str, float]]:
+    """
+    Convert file baseline PRICE_PER_SQ_IN (float keys) -> DB json shape (string keys).
+    """
+    out: dict[str, dict[str, float]] = {}
+    base_ppsi = copy.deepcopy(_CFG_BASELINE.get("PRICE_PER_SQ_IN") or {})
+    for m, tmap in (base_ppsi or {}).items():
+        if not isinstance(tmap, dict):
+            continue
+        out[str(m)] = {str(float(t)): float(p) for t, p in tmap.items()}
+    return out
+
+
 def _default_knobs_config() -> dict:
     """
     Seed config stored in DB.
     NOTE: JSON keys must be strings, so thickness keys are stored as strings.
     """
-    # Start from current file baseline; then enforce "holding off" materials by default
     mats = copy.deepcopy(_CFG_BASELINE.get("MATERIAL_ENABLED") or {})
     if not mats:
-        # fall back to common set
         mats = {"304": True, "316": True, "Carbon Steel": True, "Monel": False, "Hastelloy": False}
 
     # Default: turn off Monel/Hastelloy unless you explicitly enable
@@ -315,7 +325,8 @@ def _default_knobs_config() -> dict:
     th_by_mat = copy.deepcopy(_CFG_BASELINE.get("THICKNESS_ENABLED_BY_MATERIAL") or {})
     th_by_mat_str: dict[str, dict[str, bool]] = {}
     for m, tmap in (th_by_mat or {}).items():
-        th_by_mat_str[m] = {str(float(t)): bool(v) for t, v in (tmap or {}).items()}
+        if isinstance(tmap, dict):
+            th_by_mat_str[str(m)] = {str(float(t)): bool(v) for t, v in tmap.items()}
 
     # Lead times stored as strings
     lt_enabled = copy.deepcopy(_CFG_BASELINE.get("LEAD_TIME_ENABLED") or {})
@@ -324,17 +335,13 @@ def _default_knobs_config() -> dict:
     lt_enabled_str = {str(int(k)): bool(v) for k, v in (lt_enabled or {}).items()}
 
     # Price table stored with string thickness keys
-    ppsi = copy.deepcopy(_CFG_BASELINE.get("PRICE_PER_SQ_IN") or {})
-    ppsi_str: dict[str, dict[str, float]] = {}
-    for m, tmap in (ppsi or {}).items():
-        ppsi_str[m] = {str(float(t)): float(p) for t, p in (tmap or {}).items()}
+    ppsi_str = _baseline_price_per_sq_in_as_db_shape()
 
     return {
         "material_enabled": {str(k): bool(v) for k, v in mats.items()},
         "thickness_enabled_by_material": th_by_mat_str,
         "lead_time_enabled": lt_enabled_str,
         "default_lead_time_days": int(_CFG_BASELINE.get("DEFAULT_LEAD_TIME_DAYS") or 21),
-        # optional knobs you may use in UI/weight calc:
         "price_per_sq_in": ppsi_str,
         "weight_multiplier_by_material": {str(k): float(v) for k, v in (_CFG_BASELINE.get("WEIGHT_MULTIPLIER_BY_MATERIAL") or {}).items()},
         "density_lb_per_in3": {str(k): float(v) for k, v in (_CFG_BASELINE.get("DENSITY_LB_PER_IN3") or {}).items()},
@@ -366,6 +373,10 @@ def _restore_cfg_baseline() -> None:
 def _apply_cfg_from_db_config(config_json: dict) -> None:
     """
     Apply DB knobs into cfg module so pricing_engine uses them immediately.
+
+    IMPORTANT HARDENING:
+    - If DB is missing/empty price_per_sq_in, we fall back to baseline price table
+      so /quote doesn't 500 from an empty cfg.PRICE_PER_SQ_IN.
     """
     material_enabled = config_json.get("material_enabled") or {}
     th_enabled_by_mat = config_json.get("thickness_enabled_by_material") or {}
@@ -374,13 +385,16 @@ def _apply_cfg_from_db_config(config_json: dict) -> None:
 
     # Optional tables
     ppsi = config_json.get("price_per_sq_in") or {}
+    if not isinstance(ppsi, dict) or not ppsi:
+        ppsi = _baseline_price_per_sq_in_as_db_shape()
+
     wmult = config_json.get("weight_multiplier_by_material") or {}
     dens = config_json.get("density_lb_per_in3") or {}
 
-    # Update cfg module fields used by UI / pricing filtering logic
+    # Update cfg module fields used by pricing filtering logic
     cfg.MATERIAL_ENABLED = {str(k): bool(v) for k, v in material_enabled.items()}
 
-    # store thickness enable keys as floats where possible
+    # Thickness enabled keys -> floats
     tebm: dict[str, dict[float, bool]] = {}
     for m, tmap in th_enabled_by_mat.items():
         tebm[str(m)] = {}
@@ -409,8 +423,7 @@ def _apply_cfg_from_db_config(config_json: dict) -> None:
     if isinstance(wmult, dict) and wmult:
         cfg.WEIGHT_MULTIPLIER_BY_MATERIAL = {str(k): float(v) for k, v in wmult.items()}
 
-    # Apply prices (material -> thickness -> price)
-    # Keep only enabled materials/thicknesses and compute final cfg.PRICE_PER_SQ_IN
+    # Apply prices (material -> thickness -> price), filtered by enabled material/thickness
     final_ppsi: dict[str, dict[float, float]] = {}
     for mat, tmap in ppsi.items():
         mat = str(mat)
@@ -424,19 +437,35 @@ def _apply_cfg_from_db_config(config_json: dict) -> None:
                 p = float(price)
             except Exception:
                 continue
-            # if thickness map exists, enforce it
+
             enabled_map = cfg.THICKNESS_ENABLED_BY_MATERIAL.get(mat)
             if isinstance(enabled_map, dict):
+                # if thickness map exists, enforce it strictly
                 if not enabled_map.get(t, False):
                     continue
-            # keep it
+
             final_ppsi.setdefault(mat, {})[t] = p
+
+    # If we somehow filtered everything out, fall back to baseline (still filtered by enabled)
+    if not final_ppsi:
+        base_ppsi = _baseline_price_per_sq_in_as_db_shape()
+        for mat, tmap in base_ppsi.items():
+            if not cfg.MATERIAL_ENABLED.get(mat, False):
+                continue
+            for t_str, price in (tmap or {}).items():
+                try:
+                    t = float(t_str)
+                    p = float(price)
+                except Exception:
+                    continue
+                enabled_map = cfg.THICKNESS_ENABLED_BY_MATERIAL.get(mat)
+                if isinstance(enabled_map, dict) and not enabled_map.get(t, False):
+                    continue
+                final_ppsi.setdefault(mat, {})[t] = p
 
     cfg.PRICE_PER_SQ_IN = final_ppsi
 
-    # Lead time multiplier is already in cfg as constants in file;
-    # Here we filter based on enabled keys if cfg has a master.
-    # If you later store lead multipliers in DB, extend this.
+    # Lead time multiplier: filter baseline master by enabled keys
     master_lt = copy.deepcopy(_CFG_BASELINE.get("LEAD_TIME_MULTIPLIER") or getattr(cfg, "LEAD_TIME_MULTIPLIER", {}))
     cfg.LEAD_TIME_MULTIPLIER = {int(d): float(master_lt[int(d)]) for d in cfg.LEAD_TIME_ENABLED.keys() if int(d) in master_lt}
 
@@ -503,7 +532,6 @@ def get_active_config_public():
     db = SessionLocal()
     try:
         active = _get_or_seed_active_config(db)
-        # Only expose what UI needs; keep it lean
         return {
             "material_enabled": active.get("material_enabled") or {},
             "thickness_enabled_by_material": active.get("thickness_enabled_by_material") or {},
@@ -532,15 +560,88 @@ async def quote(request: Request):
     return _calculate_quote_with_db_knobs(inputs)
 
 
+# ----------------------------
+# Admin config endpoints
+# ----------------------------
+@app.get("/admin/config", dependencies=[Depends(_require_admin_key)])
+def admin_get_config():
+    _db_required()
+    db = SessionLocal()
+    try:
+        active = _get_or_seed_active_config(db)
+        return active
+    finally:
+        db.close()
+
+
+@app.put("/admin/config", dependencies=[Depends(_require_admin_key)])
+async def admin_put_config(request: Request):
+    _db_required()
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Config must be a JSON object")
+
+    # Light validation
+    for k in ("material_enabled", "lead_time_enabled", "thickness_enabled_by_material", "price_per_sq_in"):
+        if k in payload and payload[k] is not None and not isinstance(payload[k], dict):
+            raise HTTPException(status_code=400, detail=f"{k} must be an object")
+
+    if "default_lead_time_days" in payload:
+        try:
+            payload["default_lead_time_days"] = int(payload["default_lead_time_days"])
+        except Exception:
+            raise HTTPException(status_code=400, detail="default_lead_time_days must be an integer")
+
+    payload["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    db = SessionLocal()
+    try:
+        row = db.query(AppConfig).filter(AppConfig.id == "active").first()
+        if not row:
+            row = AppConfig(id="active", config_json=payload)
+            db.add(row)
+        else:
+            row.config_json = payload
+            row.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(row)
+        return {"ok": True, "config": row.config_json}
+    finally:
+        db.close()
+
+
+@app.post("/admin/config/reset", dependencies=[Depends(_require_admin_key)])
+def admin_reset_config():
+    """
+    Reset the DB 'active' config to the current file defaults (tuning_knobs.py baseline).
+    This is the escape hatch when DB config gets out of sync / missing price tables.
+    """
+    _db_required()
+    db = SessionLocal()
+    try:
+        fresh = _default_knobs_config()
+        row = db.query(AppConfig).filter(AppConfig.id == "active").first()
+        if not row:
+            row = AppConfig(id="active", config_json=fresh)
+            db.add(row)
+        else:
+            row.config_json = fresh
+            row.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(row)
+        return {"ok": True, "config": row.config_json}
+    finally:
+        db.close()
+
+
+# ----------------------------
+# Checkout endpoints
+# ----------------------------
 @app.post("/checkout/create")
 def checkout_create(
     req: CheckoutCreateRequest,
     customer_user_id: Optional[str] = Depends(_api_key_or_customer_user_id),
 ):
-    """
-    Allows either x-api-key or a Supabase Bearer token.
-    If Bearer token is present, the order is tied to customer_id for the portal.
-    """
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Stripe is not configured (missing STRIPE_SECRET_KEY).")
 
@@ -590,8 +691,8 @@ def checkout_create(
                 "shipping_rate_data": {
                     "type": "fixed_amount",
                     "fixed_amount": {"amount": int(shipping["ups_nextday_cents"]), "currency": "usd"},
-                    "display_name": "UPS 2nd Day Air",
-                    "metadata": {"service": "ups_2day"},
+                    "display_name": "UPS Next Day Air",
+                    "metadata": {"service": "ups_nextday"},
                 }
             },
         ],
@@ -626,10 +727,6 @@ def checkout_cart_create(
     req: CartCheckoutCreateRequest,
     customer_user_id: str = Depends(_require_customer_user_id),
 ):
-    """
-    Creates a single Stripe Checkout session for a multi-line cart.
-    Requires customer login (Bearer token) so we can tie to customer_id.
-    """
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Stripe is not configured (missing STRIPE_SECRET_KEY).")
 
@@ -725,6 +822,9 @@ def checkout_cart_create(
     return {"checkout_url": session.url, "session_id": session.id}
 
 
+# ----------------------------
+# Orders endpoints + webhook (unchanged below)
+# ----------------------------
 @app.get("/orders/by-session/{session_id}")
 def get_order_by_session(session_id: str):
     _db_required()
@@ -751,9 +851,6 @@ def get_order_by_session(session_id: str):
         db.close()
 
 
-# ----------------------------
-# Customer portal endpoints
-# ----------------------------
 @app.get("/me/orders")
 def me_orders(customer_user_id: str = Depends(_require_customer_user_id), limit: int = 50):
     _db_required()
@@ -813,59 +910,6 @@ def me_order_detail(order_id: str, customer_user_id: str = Depends(_require_cust
         db.close()
 
 
-# ----------------------------
-# Admin config endpoints (Step 4)
-# ----------------------------
-@app.get("/admin/config", dependencies=[Depends(_require_admin_key)])
-def admin_get_config():
-    _db_required()
-    db = SessionLocal()
-    try:
-        active = _get_or_seed_active_config(db)
-        return active
-    finally:
-        db.close()
-
-
-@app.put("/admin/config", dependencies=[Depends(_require_admin_key)])
-async def admin_put_config(request: Request):
-    _db_required()
-    payload = await request.json()
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="Config must be a JSON object")
-
-    # Light validation
-    for k in ("material_enabled", "lead_time_enabled", "thickness_enabled_by_material", "price_per_sq_in"):
-        if k in payload and payload[k] is not None and not isinstance(payload[k], dict):
-            raise HTTPException(status_code=400, detail=f"{k} must be an object")
-
-    if "default_lead_time_days" in payload:
-        try:
-            payload["default_lead_time_days"] = int(payload["default_lead_time_days"])
-        except Exception:
-            raise HTTPException(status_code=400, detail="default_lead_time_days must be an integer")
-
-    payload["updated_at"] = datetime.now(timezone.utc).isoformat()
-
-    db = SessionLocal()
-    try:
-        row = db.query(AppConfig).filter(AppConfig.id == "active").first()
-        if not row:
-            row = AppConfig(id="active", config_json=payload)
-            db.add(row)
-        else:
-            row.config_json = payload
-            row.updated_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(row)
-        return {"ok": True, "config": row.config_json}
-    finally:
-        db.close()
-
-
-# ----------------------------
-# Admin endpoints (unchanged)
-# ----------------------------
 @app.get("/admin/orders", dependencies=[Depends(_require_admin_key)])
 def admin_list_orders(q: Optional[str] = None, limit: int = 50):
     _db_required()
@@ -904,9 +948,6 @@ def admin_list_orders(q: Optional[str] = None, limit: int = 50):
         db.close()
 
 
-# ----------------------------
-# DEBUG endpoint (TEMPORARY)
-# ----------------------------
 @app.get("/debug/whoami")
 def debug_whoami(
     authorization: Optional[str] = Header(default=None, alias="authorization"),
@@ -1018,7 +1059,6 @@ async def stripe_webhook(request: Request):
                     db.commit()
                     db.refresh(o)
 
-                # Preserve pending customer_id; else use metadata fallback
                 if not o.customer_id and customer_id:
                     o.customer_id = customer_id
 
