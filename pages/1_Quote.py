@@ -6,8 +6,7 @@ import requests
 import streamlit as st
 
 from auth import render_auth_sidebar, auth_headers, is_logged_in
-from pricing_engine import QuoteInputs, calculate_quote
-import tuning_knobs as cfg
+from plate_preview import render_plate_svg
 
 
 # -----------------------------
@@ -277,8 +276,14 @@ def _render_product_image() -> None:
 # -----------------------------
 # Checkout
 # -----------------------------
-def start_checkout(payload_inputs: dict) -> None:
-    body = {"inputs": payload_inputs}
+def start_checkout(payload_inputs: dict, priced_configuration: dict) -> None:
+    idempotency_key = st.session_state.setdefault("checkout_idempotency_key", str(uuid.uuid4()))
+    body = {
+        "inputs": payload_inputs,
+        "configuration_id": priced_configuration.get("configuration_id"),
+        "pricing_config_version": priced_configuration.get("pricing_config_version"),
+        "idempotency_key": idempotency_key,
+    }
 
     headers: Dict[str, str] = {}
 
@@ -314,6 +319,59 @@ def start_checkout(payload_inputs: dict) -> None:
     st.link_button("Continue to Stripe Checkout", checkout_url)
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def load_active_config() -> dict:
+    response = requests.get(f"{API_BASE}/config/active", timeout=15)
+    response.raise_for_status()
+    return response.json()
+
+
+def request_authoritative_price(payload_inputs: dict) -> tuple[Optional[dict], Optional[str]]:
+    headers = {"x-api-key": API_KEY} if API_KEY else {}
+    try:
+        response = requests.post(
+            f"{API_BASE}/quote",
+            json=payload_inputs,
+            headers=headers,
+            timeout=20,
+        )
+    except requests.RequestException:
+        return None, "Live pricing is temporarily unavailable. Your entries are preserved; please try again."
+
+    if response.status_code == 200:
+        return response.json(), None
+
+    try:
+        detail = response.json().get("detail")
+    except Exception:
+        detail = None
+    if isinstance(detail, dict):
+        message = detail.get("message") or "This configuration could not be priced."
+    elif isinstance(detail, list):
+        message = "; ".join(str(item.get("msg") or item) for item in detail)
+    else:
+        message = str(detail or "Live pricing is temporarily unavailable.")
+    return None, message
+
+
+try:
+    active_config = load_active_config()
+except requests.RequestException:
+    st.error("The configurator cannot load current product availability. Please try again shortly.")
+    st.stop()
+
+material_options = active_config.get("materials") or [
+    name
+    for name, enabled in active_config.get("material_enabled", {}).items()
+    if enabled
+]
+lead_time_options = active_config.get("lead_times_days") or [
+    int(days)
+    for days, enabled in active_config.get("lead_time_enabled", {}).items()
+    if enabled
+]
+
+
 # -----------------------------
 # Two-column layout
 # -----------------------------
@@ -324,12 +382,7 @@ left, right = st.columns([1.0, 1.45], gap="large")
 # -----------------------------
 with left:
     st.markdown(f"<div style='height:{IMAGE_TOP_SPACER_PX}px'></div>", unsafe_allow_html=True)
-    _render_product_image()
-
-    if not LEFT_TIGHTEN:
-        st.divider()
-
-    st.subheader("Quote Summary")
+    st.subheader("Configuration Preview")
 
 # -----------------------------
 # RIGHT: inputs (narrowed) + Pay button bottom-center
@@ -338,39 +391,55 @@ with right:
     _spacer, form_col = st.columns([1 - RIGHT_FORM_WIDTH, RIGHT_FORM_WIDTH], gap="medium")
 
     with form_col:
+        st.caption("PRODUCT")
+        st.text_input("Plate style", value="Handled Orifice Plate", disabled=True)
         r1c1, r1c2 = st.columns([1, 2])
         with r1c1:
-            quantity = st.number_input("Qty", min_value=1, value=1, step=1)
+            quantity = st.number_input("Quantity", min_value=1, value=1, step=1)
         with r1c2:
-            material = st.selectbox("Material Type", options=list(cfg.PRICE_PER_SQ_IN.keys()))
+            material = st.selectbox("Material", options=material_options)
 
+        thickness_options = sorted(
+            active_config.get("thicknesses_by_material", {}).get(material, [])
+            or [
+                float(value)
+                for value, enabled in active_config.get(
+                    "thickness_enabled_by_material", {}
+                ).get(material, {}).items()
+                if enabled
+            ]
+        )
         thickness = st.selectbox(
-            "Plate Thickness (in)",
-            options=sorted(cfg.PRICE_PER_SQ_IN[material].keys()),
+            "Plate thickness (in.)",
+            options=thickness_options,
+            help="Finished nominal plate thickness.",
         )
 
+        st.caption("DIMENSIONS")
         r2c1, r2c2 = st.columns(2)
         with r2c1:
             handle_width = st.number_input(
-                "Handle Width (in)",
+                "Handle width (in.)",
                 min_value=0.0,
                 value=1.500,
                 step=0.001,
                 format="%.3f",
+                help="Width of the rectangular handle.",
             )
         with r2c2:
             handle_length = st.number_input(
-                "Handle Length from Bore (in)",
+                "Handle length from bore center (in.)",
                 min_value=0.0,
                 value=9.000,
                 step=0.001,
                 format="%.3f",
+                help="Distance from the bore center to the end of the handle.",
             )
 
         r3c1, r3c2 = st.columns(2)
         with r3c1:
             paddle_dia = st.number_input(
-                "Paddle Diameter (in)",
+                "Plate outside diameter (in.)",
                 min_value=0.01,
                 max_value=48.0,
                 value=3.000,
@@ -379,43 +448,45 @@ with right:
             )
         with r3c2:
             bore_dia = st.number_input(
-                "Bore Diameter (in)",
+                "Bore diameter (in.)",
                 min_value=0.01,
                 value=1.000,
                 step=0.001,
                 format="%.3f",
             )
 
-        tol_options = sorted(cfg.INSPECTION_MINS_BY_TOL.keys())
+        st.caption("REQUIREMENTS")
+        tol_options = sorted(active_config.get("tolerance_options_in") or [0.001, 0.002, 0.005])
         bore_tolerance = st.selectbox(
-            "Bore Tolerance (± in)",
+            "Bore tolerance (± in.)",
             options=tol_options,
             index=tol_options.index(0.005) if 0.005 in tol_options else 0,
+            help="Permitted variation from the specified finished bore diameter.",
         )
 
         handle_label = st.text_input(
-            "Handle Label (optional)",
+            "Handle marking (optional)",
             value="",
             placeholder="UPSTREAM x.xxx BORE x.xxx BETA",
+            max_chars=80,
+            help="Letters, numbers, spaces, and standard shop-marking punctuation only.",
         )
 
-        chamfer = st.checkbox("Chamfer", value=True)
+        chamfer = st.checkbox(
+            "Standard bore chamfer",
+            value=True,
+            help="Applies the current standard chamfer. Special edge requirements require manual review.",
+        )
+        chamfer_width: Optional[float] = 0.062 if chamfer else None
 
-        chamfer_width: Optional[float] = None
-        if chamfer:
-            chamfer_width = st.number_input(
-                "Chamfer Width (in)",
-                min_value=0.0,
-                value=0.062,
-                step=0.001,
-                format="%.3f",
-            )
-
-        ships_options = sorted(cfg.LEAD_TIME_MULTIPLIER.keys())
+        st.caption("DELIVERY")
+        ships_options = sorted(lead_time_options)
+        default_ship = int(active_config.get("default_lead_time_days") or ships_options[-1])
         ships_in_days = st.selectbox(
-            "Ships in (days)",
+            "Estimated ships in (days)",
             options=ships_options,
-            index=ships_options.index(21) if 21 in ships_options else 0,
+            index=ships_options.index(default_ship) if default_ship in ships_options else 0,
+            help="Current selectable production lead time. Final shipping method is selected at checkout.",
         )
 
 
@@ -424,9 +495,11 @@ with right:
 # -----------------------------
 errors = []
 if bore_dia >= paddle_dia:
-    errors.append("Bore Diameter must be smaller than Paddle Diameter.")
+    errors.append("Bore diameter must be smaller than the plate outside diameter.")
 if handle_length <= (paddle_dia / 2):
-    errors.append("Handle Length (From Bore) must be longer than the Paddle Radius.")
+    errors.append("Handle length from bore center must extend beyond the plate radius.")
+if handle_width <= 0:
+    errors.append("Handle width must be greater than zero.")
 
 if errors:
     with right:
@@ -436,51 +509,72 @@ if errors:
     st.stop()
 
 # -----------------------------
-# Pricing (local preview)
+# Pricing (authoritative API)
 # -----------------------------
-inputs = QuoteInputs(
-    quantity=int(quantity),
-    material=str(material),
-    thickness=float(thickness),
-    handle_width=float(handle_width),
-    handle_length_from_bore=float(handle_length),
-    paddle_dia=float(paddle_dia),
-    bore_dia=float(bore_dia),
-    bore_tolerance=float(bore_tolerance),
-    chamfer=bool(chamfer),
-    chamfer_width=float(chamfer_width) if chamfer and chamfer_width is not None else None,
-    handle_label=(handle_label or "").strip() or "No label",
-    ships_in_days=int(ships_in_days),
-)
+payload_inputs = {
+    "quantity": int(quantity),
+    "material": str(material),
+    "thickness": float(thickness),
+    "handle_width": float(handle_width),
+    "handle_length_from_bore": float(handle_length),
+    "paddle_dia": float(paddle_dia),
+    "bore_dia": float(bore_dia),
+    "bore_tolerance": float(bore_tolerance),
+    "chamfer": bool(chamfer),
+    "chamfer_width": float(chamfer_width) if chamfer and chamfer_width is not None else None,
+    "handle_label": (handle_label or "").strip() or "No label",
+    "ships_in_days": int(ships_in_days),
+}
 
-result = calculate_quote(inputs)
+result, pricing_error = request_authoritative_price(payload_inputs)
+if pricing_error:
+    with right:
+        st.error(pricing_error)
+        st.caption("Checkout is disabled until the live price can be verified.")
+    result = None
 
 # Shipping estimates (computed once)
-area_sq_in = result.get("area_sq_in", _estimate_area_sq_in(paddle_dia, handle_length))
-weight_lb = result.get(
-    "estimated_total_weight_lb",
-    _estimate_total_weight_lb(material, area_sq_in, float(thickness), int(quantity)),
-)
-pkg = result.get(
-    "estimated_package_in",
-    _estimate_package_in(paddle_dia, handle_length, float(thickness), int(quantity)),
-)
+area_sq_in = result.get("area_sq_in") if result else None
+weight_lb = result.get("estimated_total_weight_lb") if result else None
+pkg = result.get("estimated_package_in") if result else None
 
 # -----------------------------
 # LEFT: Quote summary + shipping estimates (tight)
 # -----------------------------
 with left:
-    c1, c2 = st.columns(2)
-    c1.metric("Unit Price", f"${result['unit_price']:,.2f}")
-    c2.metric("Total Price", f"${result['total_price']:,.2f}")
+    st.markdown(
+        render_plate_svg(
+            paddle_dia=paddle_dia,
+            bore_dia=bore_dia,
+            handle_width=handle_width,
+            handle_length_from_bore=handle_length,
+            thickness=float(thickness),
+            material=material,
+        ),
+        unsafe_allow_html=True,
+    )
+    st.subheader("Quote Summary")
+    if result:
+        c1, c2 = st.columns(2)
+        c1.metric("Unit price", f"${result['unit_price']:,.2f}")
+        c2.metric("Total", f"${result['total_price']:,.2f}")
+        st.caption(f"Configuration ID: `{result.get('configuration_id', '')}`")
+        st.caption(
+            f"{material} · {float(thickness):.3f} in. · Qty {int(quantity)} · "
+            f"Estimated ships in {int(ships_in_days)} days"
+        )
+    else:
+        st.warning("A verified price is not currently available.")
 
     if not LEFT_TIGHTEN:
         st.divider()
 
-    st.caption("Shipping estimates")
-    s1, s2 = st.columns(2)
-    s1.metric("Estimated Total Weight", f"{weight_lb:.2f} lb")
-    s2.metric("Estimated Package Size", f"{pkg['length']} x {pkg['width']} x {pkg['height']} in")
+    if result and weight_lb is not None and pkg:
+        st.caption("Shipping estimates")
+        s1, s2 = st.columns(2)
+        s1.metric("Estimated total weight", f"{weight_lb:.2f} lb")
+        s2.metric("Estimated package", f"{pkg['length']} × {pkg['width']} × {pkg['height']} in.")
+        st.caption(result.get("shipping_treatment", "Shipping is selected at checkout."))
 
 
 # -----------------------------
@@ -515,53 +609,25 @@ with right:
         else:
             st.info("Checkout as guest — log in from the sidebar to save orders to your account.")
 
-        st.caption("Shipping option is selected during checkout.")
+        st.caption("The live price is revalidated before checkout. Shipping is selected during checkout.")
 
         left_pad = max(0.0, (1.0 - PAY_BUTTON_WIDTH_RATIO) / 2.0)
         btn_cols = st.columns([left_pad, PAY_BUTTON_WIDTH_RATIO, left_pad])
 
         with btn_cols[1]:
-            if st.button("Place Order & Pay"):
-                payload_inputs = {
-                    "quantity": int(quantity),
-                    "material": str(material),
-                    "thickness": float(thickness),
-                    "handle_width": float(handle_width),
-                    "handle_length_from_bore": float(handle_length),
-                    "paddle_dia": float(paddle_dia),
-                    "bore_dia": float(bore_dia),
-                    "bore_tolerance": float(bore_tolerance),
-                    "chamfer": bool(chamfer),
-                    "chamfer_width": float(chamfer_width) if chamfer and chamfer_width is not None else None,
-                    "handle_label": (handle_label or "").strip() or "No label",
-                    "ships_in_days": int(ships_in_days),
-                }
-                start_checkout(payload_inputs)
+            if st.button("Buy this configuration", disabled=result is None):
+                start_checkout(payload_inputs, result)
 
             # Under your existing "Place Order & Pay" button block:
             st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
             # Only for logged-in users (multi-item workflow)
-            add_disabled = not is_logged_in()
-            if st.button("➕ Add to Quote", disabled=add_disabled, use_container_width=True):
-                payload_inputs = {
-                    "quantity": int(quantity),
-                    "material": str(material),
-                    "thickness": float(thickness),
-                    "handle_width": float(handle_width),
-                    "handle_length_from_bore": float(handle_length),
-                    "paddle_dia": float(paddle_dia),
-                    "bore_dia": float(bore_dia),
-                    "bore_tolerance": float(bore_tolerance),
-                    "chamfer": bool(chamfer),
-                    "chamfer_width": float(chamfer_width) if chamfer and chamfer_width is not None else None,
-                    "handle_label": (handle_label or "").strip() or "No label",
-                    "ships_in_days": int(ships_in_days),
-                }
+            add_disabled = not is_logged_in() or result is None
+            if st.button("Add another plate", disabled=add_disabled, use_container_width=True):
                 _add_to_cart(payload_inputs, result)
                 st.success(f"Added to Quote Cart. Items in cart: {len(st.session_state.cart)}")
                 # Optional: jump them to cart immediately
                 st.switch_page("pages/3_Quote_Cart.py")
 
             if add_disabled:
-                st.caption("Log in from the sidebar to add multiple configured plates to a quote.")
+                st.caption("Log in to add multiple plates; a verified live price is required.")

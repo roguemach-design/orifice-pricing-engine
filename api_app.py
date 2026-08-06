@@ -3,13 +3,14 @@ import os
 import uuid
 import copy
 import threading
+import re
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
 import stripe
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from pricing_engine import QuoteInputs, calculate_quote
 
@@ -467,146 +468,44 @@ def _apply_cfg_from_db_config(config_json: dict) -> None:
 
     # Lead time multiplier: filter baseline master by enabled keys
     master_lt = copy.deepcopy(_CFG_BASELINE.get("LEAD_TIME_MULTIPLIER") or getattr(cfg, "LEAD_TIME_MULTIPLIER", {}))
-    cfg.LEAD_TIME_MULTIPLIER = {int(d): float(master_lt[int(d)]) for d in cfg.LEAD_TIME_ENABLED.keys() if int(d) in master_lt}
+    cfg.LEAD_TIME_MULTIPLIER = {
+        int(d): float(master_lt[int(d)])
+        for d, enabled in cfg.LEAD_TIME_ENABLED.items()
+        if enabled and int(d) in master_lt
+    }
 
 
 def _calculate_quote_with_db_knobs(inputs: QuoteInputs) -> dict:
-    """
-    Loads active knobs from DB and applies them to tuning_knobs (cfg)
-    for the duration of this calculation.
-    """
+    """Calculate with the active DB config as the sole pricing authority."""
     _db_required()
     db = SessionLocal()
     try:
-        active = _get_or_seed_active_config(db)
+        row = db.query(AppConfig).filter(AppConfig.id == "active").first()
+        if not row:
+            _get_or_seed_active_config(db)
+            row = db.query(AppConfig).filter(AppConfig.id == "active").first()
+        active = row.config_json if row and isinstance(row.config_json, dict) else _default_knobs_config()
+        version = row.updated_at.isoformat() if row and row.updated_at else "active-unversioned"
     finally:
         db.close()
-
-    # ---- Coerce DB JSON keys into correct Python types ----
-    ppsi = active.get("price_per_sq_in") or {}
-    fixed_ppsi: dict[str, dict[float, float]] = {}
-    for mat, tmap in ppsi.items():
-        if not isinstance(tmap, dict):
-            continue
-        fixed_ppsi[str(mat)] = {}
-        for t, price in tmap.items():
-            try:
-                fixed_ppsi[str(mat)][float(t)] = float(price)
-            except Exception:
-                pass
-
-    thmap = active.get("thickness_enabled_by_material") or {}
-    fixed_th: dict[str, dict[float, bool]] = {}
-    for mat, tmap in thmap.items():
-        if not isinstance(tmap, dict):
-            continue
-        fixed_th[str(mat)] = {}
-        for t, enabled in tmap.items():
-            try:
-                fixed_th[str(mat)][float(t)] = bool(enabled)
-            except Exception:
-                pass
-
-    lt_enabled_raw = active.get("lead_time_enabled") or {}
-    fixed_lt_enabled: dict[int, bool] = {}
-    if isinstance(lt_enabled_raw, dict):
-        for k, v in lt_enabled_raw.items():
-            try:
-                fixed_lt_enabled[int(k)] = bool(v)
-            except Exception:
-                pass
-
-    lt_mult_raw = active.get("lead_time_multiplier") or {}
-    fixed_lt_mult: dict[int, float] = {}
-    if isinstance(lt_mult_raw, dict):
-        for k, v in lt_mult_raw.items():
-            try:
-                fixed_lt_mult[int(k)] = float(v)
-            except Exception:
-                pass
-
-    mat_enabled_raw = active.get("material_enabled") or {}
-    fixed_mat_enabled: dict[str, bool] = {}
-    if isinstance(mat_enabled_raw, dict):
-        fixed_mat_enabled = {str(k): bool(v) for k, v in mat_enabled_raw.items()}
-
-    default_lt = active.get("default_lead_time_days")
-    try:
-        fixed_default_lt = int(default_lt) if default_lt is not None else None
-    except Exception:
-        fixed_default_lt = None
-
-    # ---- Apply to live tuning_knobs module used by pricing_engine ----
-    old_ppsi = getattr(cfg, "PRICE_PER_SQ_IN", None)
-    old_th = getattr(cfg, "THICKNESS_ENABLED_BY_MATERIAL", None)
-    old_lt_enabled = getattr(cfg, "LEAD_TIME_ENABLED", None)
-    old_lt_mult = getattr(cfg, "LEAD_TIME_MULTIPLIER", None)
-    old_mat_enabled = getattr(cfg, "MATERIAL_ENABLED", None)
-    old_default_lt = getattr(cfg, "DEFAULT_LEAD_TIME_DAYS", None)
-
-    try:
-        if fixed_ppsi:
-            cfg.PRICE_PER_SQ_IN = fixed_ppsi
-        if fixed_th:
-            cfg.THICKNESS_ENABLED_BY_MATERIAL = fixed_th
-        if fixed_lt_enabled:
-            cfg.LEAD_TIME_ENABLED = fixed_lt_enabled
-        if fixed_lt_mult:
-            cfg.LEAD_TIME_MULTIPLIER = fixed_lt_mult
-        if fixed_mat_enabled:
-            cfg.MATERIAL_ENABLED = fixed_mat_enabled
-        if fixed_default_lt is not None:
-            cfg.DEFAULT_LEAD_TIME_DAYS = fixed_default_lt
-
-        return calculate_quote(inputs)
-
-    finally:
-        if old_ppsi is not None:
-            cfg.PRICE_PER_SQ_IN = old_ppsi
-        if old_th is not None:
-            cfg.THICKNESS_ENABLED_BY_MATERIAL = old_th
-        if old_lt_enabled is not None:
-            cfg.LEAD_TIME_ENABLED = old_lt_enabled
-        if old_lt_mult is not None:
-            cfg.LEAD_TIME_MULTIPLIER = old_lt_mult
-        if old_mat_enabled is not None:
-            cfg.MATERIAL_ENABLED = old_mat_enabled
-        if old_default_lt is not None:
-            cfg.DEFAULT_LEAD_TIME_DAYS = old_default_lt
-
-
-        # lead_time_enabled: {"7": true} -> {7: true}
-        ltmap = active.get("lead_time_enabled") or {}
-        fixed_lt = {}
-        for k, v in ltmap.items():
-            try:
-                fixed_lt[int(k)] = bool(v)
-            except Exception:
-                pass
-        active["lead_time_enabled"] = fixed_lt
-
-        # default_lead_time_days: "21" -> 21
-        try:
-            active["default_lead_time_days"] = int(active.get("default_lead_time_days", 21))
-        except Exception:
-            active["default_lead_time_days"] = 21
-
-        except Exception:
-        # If coercion fails for any reason, just continue — we still want to try quoting
-            pass
 
     with _CFG_LOCK:
         _restore_cfg_baseline()
         _apply_cfg_from_db_config(active)
         try:
-            return calculate_quote(inputs)
+            result = calculate_quote(inputs)
         finally:
             _restore_cfg_baseline()
+
+    result["pricing_config_version"] = version
+    return result
 
 # ----------------------------
 # Request models
 # ----------------------------
 class QuoteRequest(BaseModel):
+    model_config = ConfigDict(allow_inf_nan=False, str_strip_whitespace=True)
+
     quantity: int
     material: str
     thickness: float
@@ -618,12 +517,25 @@ class QuoteRequest(BaseModel):
     chamfer: bool
     ships_in_days: int
 
-    handle_label: str = Field(default="No label")
+    handle_label: str = Field(default="No label", max_length=80)
     chamfer_width: Optional[float] = Field(default=0.062)
+
+    @field_validator("handle_label")
+    @classmethod
+    def validate_handle_label(cls, value: str) -> str:
+        label = value.strip() or "No label"
+        if not re.fullmatch(r"[A-Za-z0-9 .,_/#()+\-:=]+", label):
+            raise ValueError(
+                "Handle marking may use letters, numbers, spaces, and . , _ / # ( ) + - : ="
+            )
+        return label
 
 
 class CheckoutCreateRequest(BaseModel):
     inputs: QuoteRequest
+    configuration_id: Optional[str] = None
+    pricing_config_version: Optional[str] = None
+    idempotency_key: Optional[str] = Field(default=None, min_length=16, max_length=100)
 
 
 class CartCheckoutCreateRequest(BaseModel):
@@ -645,17 +557,27 @@ def get_active_config_public():
     db = SessionLocal()
     try:
         active = _get_or_seed_active_config(db)
+        material_enabled = active.get("material_enabled") or {}
+        thickness_enabled = active.get("thickness_enabled_by_material") or {}
+        lead_time_enabled = active.get("lead_time_enabled") or {}
         return {
             "material_enabled": active.get("material_enabled") or {},
             "thickness_enabled_by_material": active.get("thickness_enabled_by_material") or {},
             "lead_time_enabled": active.get("lead_time_enabled") or {},
             "default_lead_time_days": active.get("default_lead_time_days") or 21,
+            "materials": [name for name, enabled in material_enabled.items() if enabled],
+            "thicknesses_by_material": {
+                material: [float(value) for value, enabled in values.items() if enabled]
+                for material, values in thickness_enabled.items()
+                if material_enabled.get(material, False)
+            },
+            "lead_times_days": [int(days) for days, enabled in lead_time_enabled.items() if enabled],
+            "tolerance_options_in": sorted(cfg.INSPECTION_MINS_BY_TOL.keys()),
+            "configuration_schema_version": "1.0",
         }
     finally:
         db.close()
 
-
-from pydantic import ValidationError  # add near imports if missing
 
 @app.post("/quote", dependencies=[Depends(_require_api_key)])
 async def quote(request: Request):
@@ -672,8 +594,23 @@ async def quote(request: Request):
         payload["chamfer_width"] = None
 
     try:
-        inputs = QuoteInputs(**payload)
-        return _calculate_quote_with_db_knobs(inputs)
+        validated = QuoteRequest(**payload)
+        inputs = QuoteInputs(**validated.model_dump())
+        result = _calculate_quote_with_db_knobs(inputs)
+        calculated_at = datetime.now(timezone.utc).isoformat()
+        return {
+            **result,
+            "configuration_id": str(uuid.uuid4()),
+            "configuration_schema_version": "1.0",
+            "normalized_configuration": inputs.model_dump(),
+            "validation": {"valid": True, "errors": []},
+            "warnings": [],
+            "currency": "USD",
+            "calculated_at": calculated_at,
+            "price_validity": "Revalidated at checkout",
+            "revalidate_at_checkout": True,
+            "shipping_treatment": "Shipping method and final shipping price are selected at checkout.",
+        }
 
     except ValidationError as e:
         # bad types / missing fields
@@ -777,6 +714,16 @@ def checkout_create(
     inputs = QuoteInputs(**req.inputs.model_dump())
     result = _calculate_quote_with_db_knobs(inputs)
 
+    if req.pricing_config_version and req.pricing_config_version != result.get("pricing_config_version"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "pricing_changed",
+                "message": "Pricing changed since this configuration was calculated. Review the updated price before checkout.",
+                "current_pricing_config_version": result.get("pricing_config_version"),
+            },
+        )
+
     total_cents = int(result.get("total_price_cents") or round(float(result["total_price"]) * 100))
 
     shipping = result.get("shipping") or {}
@@ -784,7 +731,7 @@ def checkout_create(
     if missing:
         raise HTTPException(status_code=500, detail=f"Missing shipping fields from pricing engine: {', '.join(missing)}")
 
-    session = stripe.checkout.Session.create(
+    checkout_args = dict(
         mode="payment",
         success_url=f"{APP_BASE_URL}/success?session_id={{CHECKOUT_SESSION_ID}}",
         cancel_url=f"{APP_BASE_URL}/cancel",
@@ -826,10 +773,14 @@ def checkout_create(
             },
         ],
         metadata={
-            "quote_id": str(result.get("quote_id", "")),
+            "configuration_id": req.configuration_id or "",
+            "pricing_config_version": str(result.get("pricing_config_version") or ""),
             "customer_id": customer_user_id or "",
         },
     )
+    if req.idempotency_key:
+        checkout_args["idempotency_key"] = req.idempotency_key
+    session = stripe.checkout.Session.create(**checkout_args)
 
     # Save "pending" order
     if SessionLocal:
