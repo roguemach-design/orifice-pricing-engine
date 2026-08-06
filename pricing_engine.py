@@ -79,6 +79,18 @@ def _ups_rule_shipping_cents(
 def calculate_quote(x: QuoteInputs) -> Dict[str, Any]:
     # ---- Validation ----
     _require(x.quantity >= 1, "quantity must be >= 1")
+    _require(x.thickness > 0, "thickness must be > 0")
+    _require(x.handle_width > 0, "handle_width must be > 0")
+    _require(x.handle_length_from_bore > 0, "handle_length_from_bore must be > 0")
+    _require(x.paddle_dia > 0, "paddle_dia must be > 0")
+    _require(x.bore_dia > 0, "bore_dia must be > 0")
+    _require(x.bore_dia < x.paddle_dia, "bore_dia must be smaller than paddle_dia")
+    _require(
+        x.handle_length_from_bore > (x.paddle_dia / 2),
+        "handle_length_from_bore must be longer than the paddle radius",
+    )
+    if x.chamfer_width is not None:
+        _require(x.chamfer_width > 0, "chamfer_width must be > 0 when provided")
     _require(x.material in cfg.PRICE_PER_SQ_IN, f"unknown material: {x.material}")
     _require(
         x.thickness in cfg.PRICE_PER_SQ_IN[x.material],
@@ -134,7 +146,10 @@ def calculate_quote(x: QuoteInputs) -> Dict[str, Any]:
     unit_price = subtotal * multiplier
     qty_mult = _qty_multiplier(x.quantity)
     unit_price_discounted = unit_price * qty_mult
-    total_price = unit_price_discounted * x.quantity
+    # The customer-visible unit price and extended total must reconcile exactly.
+    # Round the sell price once at the unit level, then extend by quantity.
+    unit_price_rounded = round(unit_price_discounted, 2)
+    total_price = unit_price_rounded * x.quantity
 
     # =========================
     # Shipping (your rules)
@@ -173,7 +188,7 @@ def calculate_quote(x: QuoteInputs) -> Dict[str, Any]:
         "lead_time_multiplier": multiplier,
         "unit_price_pre_qty_discount": round(unit_price, 2),
         "qty_discount_multiplier": qty_mult,
-        "unit_price": round(unit_price_discounted, 2),
+        "unit_price": unit_price_rounded,
         "quantity": x.quantity,
         "total_price": round(total_price, 2),
 
