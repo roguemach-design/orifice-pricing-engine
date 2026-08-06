@@ -18,7 +18,7 @@ def valid_payload(**overrides):
         "bore_dia": 1.0,
         "bore_tolerance": 0.005,
         "chamfer": True,
-        "chamfer_width": 0.062,
+        "chamfer_width": None,
         "handle_label": "UPSTREAM 1.000 BORE",
         "ships_in_days": 14,
     }
@@ -60,7 +60,7 @@ def test_quote_request_rejects_non_finite_numbers(value):
 
 @pytest.mark.parametrize(
     "label",
-    ["<script>alert(1)</script>", "A" * 81, "MARK\nSECOND LINE"],
+    ["<script>alert(1)</script>", "MARK\nSECOND LINE"],
 )
 def test_quote_request_rejects_unsafe_handle_marking(label):
     with pytest.raises(ValidationError):
@@ -79,3 +79,33 @@ def test_active_config_disables_unavailable_lead_time():
             assert sorted(api_app.cfg.LEAD_TIME_MULTIPLIER) == [14, 21]
         finally:
             api_app._restore_cfg_baseline()
+
+
+def test_default_active_config_exposes_owner_manufacturing_limits():
+    active = api_app._default_knobs_config()
+
+    assert active["max_paddle_dia_in"] == 48.0
+    assert active["max_bore_dia_in"] == 19.0
+    assert active["max_handle_label_chars"] == 40
+    assert active["lead_time_enabled"] == {"7": False, "14": True, "21": True}
+    assert active["default_lead_time_days"] == 14
+
+
+def test_quote_normalization_does_not_invent_chamfer_width(monkeypatch):
+    def fake_calculation(inputs):
+        assert inputs.chamfer is True
+        assert inputs.chamfer_width is None
+        return {
+            "unit_price": 100.0,
+            "total_price": 200.0,
+            "quantity": inputs.quantity,
+            "pricing_config_version": "test",
+        }
+
+    monkeypatch.setattr(api_app, "_calculate_quote_with_db_knobs", fake_calculation)
+    payload = valid_payload(chamfer=True)
+    payload.pop("chamfer_width")
+    response = TestClient(api_app.app).post("/quote", json=payload)
+
+    assert response.status_code == 200
+    assert response.json()["normalized_configuration"]["chamfer_width"] is None

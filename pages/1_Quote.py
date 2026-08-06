@@ -370,6 +370,9 @@ lead_time_options = active_config.get("lead_times_days") or [
     for days, enabled in active_config.get("lead_time_enabled", {}).items()
     if enabled
 ]
+max_paddle_dia = float(active_config["max_paddle_dia_in"])
+max_bore_dia = float(active_config["max_bore_dia_in"])
+max_handle_label_chars = int(active_config["max_handle_label_chars"])
 
 
 # -----------------------------
@@ -441,7 +444,7 @@ with right:
             paddle_dia = st.number_input(
                 "Plate outside diameter (in.)",
                 min_value=0.01,
-                max_value=48.0,
+                max_value=max_paddle_dia,
                 value=3.000,
                 step=0.001,
                 format="%.3f",
@@ -450,6 +453,7 @@ with right:
             bore_dia = st.number_input(
                 "Bore diameter (in.)",
                 min_value=0.01,
+                max_value=max_bore_dia,
                 value=1.000,
                 step=0.001,
                 format="%.3f",
@@ -468,25 +472,27 @@ with right:
             "Handle marking (optional)",
             value="",
             placeholder="UPSTREAM x.xxx BORE x.xxx BETA",
-            max_chars=80,
-            help="Letters, numbers, spaces, and standard shop-marking punctuation only.",
+            max_chars=max_handle_label_chars,
+            help=f"Maximum {max_handle_label_chars} characters. Letters, numbers, spaces, and standard shop-marking punctuation only.",
         )
 
         chamfer = st.checkbox(
-            "Standard bore chamfer",
-            value=True,
-            help="Applies the current standard chamfer. Special edge requirements require manual review.",
+            "Add bore chamfer operation",
+            value=False,
+            help="Chamfer details will be confirmed during order review.",
         )
-        chamfer_width: Optional[float] = 0.062 if chamfer else None
+        if chamfer:
+            st.caption("Chamfer details will be confirmed during order review.")
 
         st.caption("DELIVERY")
         ships_options = sorted(lead_time_options)
         default_ship = int(active_config.get("default_lead_time_days") or ships_options[-1])
         ships_in_days = st.selectbox(
-            "Estimated ships in (days)",
+            "Estimated shipping time",
             options=ships_options,
             index=ships_options.index(default_ship) if default_ship in ships_options else 0,
-            help="Current selectable production lead time. Final shipping method is selected at checkout.",
+            format_func=lambda days: f"Estimated to ship within {days} calendar days.",
+            help="Timing is estimated and subject to material availability and order-specific review.",
         )
 
 
@@ -521,7 +527,6 @@ payload_inputs = {
     "bore_dia": float(bore_dia),
     "bore_tolerance": float(bore_tolerance),
     "chamfer": bool(chamfer),
-    "chamfer_width": float(chamfer_width) if chamfer and chamfer_width is not None else None,
     "handle_label": (handle_label or "").strip() or "No label",
     "ships_in_days": int(ships_in_days),
 }
@@ -561,7 +566,7 @@ with left:
         st.caption(f"Configuration ID: `{result.get('configuration_id', '')}`")
         st.caption(
             f"{material} · {float(thickness):.3f} in. · Qty {int(quantity)} · "
-            f"Estimated ships in {int(ships_in_days)} days"
+            f"Estimated to ship within {int(ships_in_days)} calendar days."
         )
     else:
         st.warning("A verified price is not currently available.")

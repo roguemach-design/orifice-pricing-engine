@@ -5,6 +5,13 @@ TUNING KNOBS (EDIT THIS FILE)
 This is the ONLY file you should need to edit to tune pricing + availability.
 """
 
+# Customer-configurable manufacturing limits. These defaults seed the active
+# database-backed business configuration; the API applies the active DB values
+# before every quote and checkout calculation.
+MAX_PADDLE_DIA_IN = 48.0
+MAX_BORE_DIA_IN = 19.0
+MAX_HANDLE_LABEL_CHARS = 40
+
 # ============================================================
 # 1) MATERIAL + THICKNESS PRICING ($/sq in)
 # ============================================================
@@ -113,7 +120,7 @@ INSPECTION_MINS_BY_TOL = {
 # ============================================================
 # 5) LEAD TIMES (multiplier-based) + TOGGLES
 # ============================================================
-LEAD_TIME_PRESET = "normal"  # "normal", "no_rush", "rush_only"
+LEAD_TIME_PRESET = "no_rush"  # "normal", "no_rush", "rush_only"
 
 LEAD_TIME_MULTIPLIER_MASTER = {
     7: 2.3,
@@ -135,7 +142,7 @@ LEAD_TIME_MULTIPLIER = {
     if LEAD_TIME_ENABLED.get(days, False)
 }
 
-DEFAULT_LEAD_TIME_DAYS = 21
+DEFAULT_LEAD_TIME_DAYS = 14
 
 # ============================================================
 # 6) QUANTITY DISCOUNTS

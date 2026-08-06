@@ -15,7 +15,7 @@ def valid_inputs(**overrides) -> QuoteInputs:
         "bore_dia": 1.0,
         "bore_tolerance": 0.005,
         "chamfer": True,
-        "chamfer_width": 0.062,
+        "chamfer_width": None,
         "handle_label": "No label",
         "ships_in_days": 21,
     }
@@ -107,3 +107,70 @@ def test_chamfer_can_be_disabled():
     assert with_chamfer["chamfer_bore_cost"] > 0
     assert without_chamfer["chamfer_bore_cost"] == 0
     assert without_chamfer["unit_price"] < with_chamfer["unit_price"]
+
+
+@pytest.mark.parametrize("paddle_dia", [47.999, 48.0])
+def test_paddle_diameter_at_or_below_maximum_is_accepted(paddle_dia):
+    result = calculate_quote(
+        valid_inputs(paddle_dia=paddle_dia, handle_length_from_bore=25.0)
+    )
+    assert result["unit_price"] > 0
+
+
+def test_paddle_diameter_above_maximum_is_rejected():
+    with pytest.raises(
+        ValueError,
+        match=r"Maximum configurable plate outside diameter is 48 in\.",
+    ):
+        calculate_quote(
+            valid_inputs(paddle_dia=48.001, handle_length_from_bore=25.0)
+        )
+
+
+@pytest.mark.parametrize("bore_dia", [18.999, 19.0])
+def test_bore_diameter_at_or_below_maximum_is_accepted(bore_dia):
+    result = calculate_quote(
+        valid_inputs(
+            paddle_dia=24.0,
+            bore_dia=bore_dia,
+            handle_length_from_bore=13.0,
+        )
+    )
+    assert result["unit_price"] > 0
+
+
+def test_bore_diameter_above_maximum_is_rejected():
+    with pytest.raises(
+        ValueError,
+        match=r"Maximum configurable bore diameter is 19 in\.",
+    ):
+        calculate_quote(
+            valid_inputs(
+                paddle_dia=24.0,
+                bore_dia=19.001,
+                handle_length_from_bore=13.0,
+            )
+        )
+
+
+@pytest.mark.parametrize("bore_dia", [3.0, 3.001])
+def test_bore_equal_to_or_greater_than_paddle_is_rejected(bore_dia):
+    with pytest.raises(ValueError, match="bore_dia must be smaller than paddle_dia"):
+        calculate_quote(valid_inputs(paddle_dia=3.0, bore_dia=bore_dia))
+
+
+@pytest.mark.parametrize("length", [39, 40])
+def test_handle_marking_at_or_below_limit_is_accepted(length):
+    result = calculate_quote(valid_inputs(handle_label="A" * length))
+    assert result["handle_label"] == "A" * length
+
+
+def test_handle_marking_above_limit_is_rejected():
+    with pytest.raises(ValueError, match="Handle marking must be 40 characters or fewer"):
+        calculate_quote(valid_inputs(handle_label="A" * 41))
+
+
+def test_chamfer_operation_does_not_require_or_invent_width():
+    result = calculate_quote(valid_inputs(chamfer=True, chamfer_width=None))
+    assert result["chamfer_bore_cost"] > 0
+    assert result["chamfer_width"] is None

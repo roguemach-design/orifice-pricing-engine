@@ -92,6 +92,9 @@ _CFG_BASELINE = {
     "DEFAULT_LEAD_TIME_DAYS": getattr(cfg, "DEFAULT_LEAD_TIME_DAYS", 21),
     "WEIGHT_MULTIPLIER_BY_MATERIAL": copy.deepcopy(getattr(cfg, "WEIGHT_MULTIPLIER_BY_MATERIAL", {})),
     "DENSITY_LB_PER_IN3": copy.deepcopy(getattr(cfg, "DENSITY_LB_PER_IN3", {})),
+    "MAX_PADDLE_DIA_IN": getattr(cfg, "MAX_PADDLE_DIA_IN", 48.0),
+    "MAX_BORE_DIA_IN": getattr(cfg, "MAX_BORE_DIA_IN", 19.0),
+    "MAX_HANDLE_LABEL_CHARS": getattr(cfg, "MAX_HANDLE_LABEL_CHARS", 40),
 }
 
 
@@ -343,6 +346,9 @@ def _default_knobs_config() -> dict:
         "thickness_enabled_by_material": th_by_mat_str,
         "lead_time_enabled": lt_enabled_str,
         "default_lead_time_days": int(_CFG_BASELINE.get("DEFAULT_LEAD_TIME_DAYS") or 21),
+        "max_paddle_dia_in": float(_CFG_BASELINE["MAX_PADDLE_DIA_IN"]),
+        "max_bore_dia_in": float(_CFG_BASELINE["MAX_BORE_DIA_IN"]),
+        "max_handle_label_chars": int(_CFG_BASELINE["MAX_HANDLE_LABEL_CHARS"]),
         "price_per_sq_in": ppsi_str,
         "weight_multiplier_by_material": {str(k): float(v) for k, v in (_CFG_BASELINE.get("WEIGHT_MULTIPLIER_BY_MATERIAL") or {}).items()},
         "density_lb_per_in3": {str(k): float(v) for k, v in (_CFG_BASELINE.get("DENSITY_LB_PER_IN3") or {}).items()},
@@ -357,7 +363,25 @@ def _get_or_seed_active_config(db) -> dict:
         db.add(row)
         db.commit()
         db.refresh(row)
-    return row.config_json if isinstance(row.config_json, dict) else _default_knobs_config()
+    active = row.config_json if isinstance(row.config_json, dict) else _default_knobs_config()
+    # Additive compatibility upgrade for existing active configuration rows.
+    # No schema migration or destructive replacement is required.
+    defaults = _default_knobs_config()
+    required_business_keys = (
+        "max_paddle_dia_in",
+        "max_bore_dia_in",
+        "max_handle_label_chars",
+    )
+    missing = [key for key in required_business_keys if key not in active]
+    if missing:
+        active = copy.deepcopy(active)
+        for key in missing:
+            active[key] = defaults[key]
+        row.config_json = active
+        row.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(row)
+    return active
 
 
 def _restore_cfg_baseline() -> None:
@@ -369,6 +393,9 @@ def _restore_cfg_baseline() -> None:
     cfg.DEFAULT_LEAD_TIME_DAYS = _CFG_BASELINE["DEFAULT_LEAD_TIME_DAYS"]
     cfg.WEIGHT_MULTIPLIER_BY_MATERIAL = copy.deepcopy(_CFG_BASELINE["WEIGHT_MULTIPLIER_BY_MATERIAL"])
     cfg.DENSITY_LB_PER_IN3 = copy.deepcopy(_CFG_BASELINE["DENSITY_LB_PER_IN3"])
+    cfg.MAX_PADDLE_DIA_IN = _CFG_BASELINE["MAX_PADDLE_DIA_IN"]
+    cfg.MAX_BORE_DIA_IN = _CFG_BASELINE["MAX_BORE_DIA_IN"]
+    cfg.MAX_HANDLE_LABEL_CHARS = _CFG_BASELINE["MAX_HANDLE_LABEL_CHARS"]
 
 
 def _apply_cfg_from_db_config(config_json: dict) -> None:
@@ -383,6 +410,9 @@ def _apply_cfg_from_db_config(config_json: dict) -> None:
     th_enabled_by_mat = config_json.get("thickness_enabled_by_material") or {}
     lt_enabled = config_json.get("lead_time_enabled") or {}
     default_lt = config_json.get("default_lead_time_days")
+    cfg.MAX_PADDLE_DIA_IN = float(config_json.get("max_paddle_dia_in", _CFG_BASELINE["MAX_PADDLE_DIA_IN"]))
+    cfg.MAX_BORE_DIA_IN = float(config_json.get("max_bore_dia_in", _CFG_BASELINE["MAX_BORE_DIA_IN"]))
+    cfg.MAX_HANDLE_LABEL_CHARS = int(config_json.get("max_handle_label_chars", _CFG_BASELINE["MAX_HANDLE_LABEL_CHARS"]))
 
     # Optional tables
     ppsi = config_json.get("price_per_sq_in") or {}
@@ -480,11 +510,8 @@ def _calculate_quote_with_db_knobs(inputs: QuoteInputs) -> dict:
     _db_required()
     db = SessionLocal()
     try:
+        active = _get_or_seed_active_config(db)
         row = db.query(AppConfig).filter(AppConfig.id == "active").first()
-        if not row:
-            _get_or_seed_active_config(db)
-            row = db.query(AppConfig).filter(AppConfig.id == "active").first()
-        active = row.config_json if row and isinstance(row.config_json, dict) else _default_knobs_config()
         version = row.updated_at.isoformat() if row and row.updated_at else "active-unversioned"
     finally:
         db.close()
@@ -517,8 +544,10 @@ class QuoteRequest(BaseModel):
     chamfer: bool
     ships_in_days: int
 
-    handle_label: str = Field(default="No label", max_length=80)
-    chamfer_width: Optional[float] = Field(default=0.062)
+    handle_label: str = Field(default="No label")
+    # Legacy compatibility field only. New customer configuration does not
+    # request, infer, or populate a chamfer dimension.
+    chamfer_width: Optional[float] = Field(default=None)
 
     @field_validator("handle_label")
     @classmethod
@@ -565,6 +594,9 @@ def get_active_config_public():
             "thickness_enabled_by_material": active.get("thickness_enabled_by_material") or {},
             "lead_time_enabled": active.get("lead_time_enabled") or {},
             "default_lead_time_days": active.get("default_lead_time_days") or 21,
+            "max_paddle_dia_in": float(active["max_paddle_dia_in"]),
+            "max_bore_dia_in": float(active["max_bore_dia_in"]),
+            "max_handle_label_chars": int(active["max_handle_label_chars"]),
             "materials": [name for name, enabled in material_enabled.items() if enabled],
             "thicknesses_by_material": {
                 material: [float(value) for value, enabled in values.items() if enabled]
@@ -586,11 +618,7 @@ async def quote(request: Request):
     # ---- Normalize optional fields ----
     payload["handle_label"] = (payload.get("handle_label") or "").strip() or "No label"
 
-    if payload.get("chamfer"):
-        cw = payload.get("chamfer_width")
-        if cw is None or cw == "":
-            payload["chamfer_width"] = 0.062
-    else:
+    if not payload.get("chamfer"):
         payload["chamfer_width"] = None
 
     try:
@@ -657,6 +685,18 @@ async def admin_put_config(request: Request):
             payload["default_lead_time_days"] = int(payload["default_lead_time_days"])
         except Exception:
             raise HTTPException(status_code=400, detail="default_lead_time_days must be an integer")
+
+    for key in ("max_paddle_dia_in", "max_bore_dia_in"):
+        if key in payload:
+            try:
+                payload[key] = float(payload[key])
+            except Exception:
+                raise HTTPException(status_code=400, detail=f"{key} must be numeric")
+    if "max_handle_label_chars" in payload:
+        try:
+            payload["max_handle_label_chars"] = int(payload["max_handle_label_chars"])
+        except Exception:
+            raise HTTPException(status_code=400, detail="max_handle_label_chars must be an integer")
 
     payload["updated_at"] = datetime.now(timezone.utc).isoformat()
 
