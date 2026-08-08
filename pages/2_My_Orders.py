@@ -12,7 +12,7 @@ from auth import render_auth_sidebar, require_login, api_get
 # ----------------------------
 # Shared sidebar + guardrail
 # ----------------------------
-render_auth_sidebar(show_debug=True)   # flip to False after testing
+render_auth_sidebar(show_debug=False)
 require_login("Log in in the sidebar to view your orders.")
 
 

@@ -215,6 +215,13 @@ def api_get(path: str, *, params: dict | None = None, timeout: int = 30) -> requ
 # ----------------------------
 # Sidebar UI
 # ----------------------------
+def _render_connection_debug() -> None:
+    st.subheader("Connection")
+    st.code(API_BASE)
+    st.caption("Supabase URL:")
+    st.code(SUPABASE_URL or "(missing)")
+
+
 def render_auth_sidebar(*, show_debug: bool = True) -> None:
     # ✅ IMPORTANT: restore BEFORE widgets
     _ensure_auth_state()
@@ -222,14 +229,11 @@ def render_auth_sidebar(*, show_debug: bool = True) -> None:
     _refresh_session_if_needed()
 
     with st.sidebar:
-        st.subheader("Connection")
-        st.code(API_BASE)
+        if show_debug:
+            _render_connection_debug()
+            st.divider()
 
-        st.caption("Supabase URL:")
-        st.code(SUPABASE_URL or "(missing)")
-
-        st.divider()
-        st.subheader("Login")
+        st.subheader("Account")
 
         if not is_logged_in():
             email = st.text_input("Email", value=st.session_state.auth.get("email") or "").strip()
