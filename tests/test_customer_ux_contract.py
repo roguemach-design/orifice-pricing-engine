@@ -58,3 +58,23 @@ def test_quote_keeps_engineering_workflow_and_prominent_summary():
     assert 'c1.metric("Unit price"' in quote_source
     assert 'c2.metric("Total price"' in quote_source
     assert "calendar days" in quote_source
+
+
+def test_quote_keeps_lean_owner_approved_controls():
+    quote_source = (ROOT / "pages" / "1_Quote.py").read_text()
+
+    assert '"Plate style"' not in quote_source
+    assert 'st.checkbox("Chamfer", value=False)' in quote_source
+    assert '"Chamfer Width (in.)"' in quote_source
+    assert 'value=None' in quote_source
+    assert '"Lead time"' in quote_source
+    assert 'format_func=lambda days: f"{days} calendar days"' in quote_source
+    assert quote_source.count("Estimated to ship within") == 1
+
+
+def test_success_page_allows_guest_confirmation():
+    success_source = (ROOT / "pages" / "4_Success.py").read_text()
+
+    assert "require_login" not in success_source
+    assert 'order.get("status") != "completed"' in success_source
+    assert 'st.title("Payment received ✅")' in success_source

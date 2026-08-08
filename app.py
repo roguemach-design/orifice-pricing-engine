@@ -14,9 +14,7 @@ if isinstance(session_id, list):
     session_id = session_id[0] if session_id else None
 
 if session_id:
-    # Prevent redirect loop by clearing the param after switch
-    st.query_params.clear()
-    st.switch_page("pages/1_Quote.py")
+    st.switch_page("pages/4_Success.py")
 
 # The marketing site and any legacy root links should enter the configurator
 # directly. Account and quote-cart capabilities remain available from there.
