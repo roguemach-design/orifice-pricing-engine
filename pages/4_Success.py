@@ -3,15 +3,17 @@ import os
 import requests
 import streamlit as st
 
-from auth import is_logged_in, render_auth_sidebar
+from auth import auth_headers, is_logged_in, render_auth_sidebar
 
 
 st.set_page_config(page_title="O-Plates Order Confirmation", layout="centered")
 render_auth_sidebar(show_debug=False)
 
-API_BASE = os.environ.get(
-    "API_BASE", "https://orifice-pricing-api.onrender.com"
-).rstrip("/")
+API_BASE = (os.environ.get("API_BASE") or "").strip().rstrip("/")
+
+if not API_BASE:
+    st.error("The O-Plates pricing service is not configured.")
+    st.stop()
 
 
 def _format_address(address: object) -> str:
@@ -49,6 +51,7 @@ if not session_id:
 try:
     response = requests.get(
         f"{API_BASE}/orders/by-session/{session_id}",
+        headers=auth_headers(),
         timeout=30,
     )
 except requests.RequestException:

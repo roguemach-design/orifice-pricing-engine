@@ -1,3 +1,4 @@
+import inspect
 import math
 
 import pytest
@@ -5,6 +6,14 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 import api_app
+
+
+QUOTE_HEADERS = {"x-api-key": "test-quote-key"}
+
+
+@pytest.fixture(autouse=True)
+def configured_quote_api_key(monkeypatch):
+    monkeypatch.setattr(api_app, "API_KEY", "test-quote-key")
 
 
 def valid_payload(**overrides):
@@ -38,7 +47,7 @@ def test_quote_contract_contains_authority_metadata(monkeypatch):
 
     monkeypatch.setattr(api_app, "_calculate_quote_with_db_knobs", fake_calculation)
     client = TestClient(api_app.app)
-    response = client.post("/quote", json=valid_payload())
+    response = client.post("/quote", json=valid_payload(), headers=QUOTE_HEADERS)
 
     assert response.status_code == 200
     body = response.json()
@@ -105,7 +114,9 @@ def test_quote_normalization_does_not_invent_chamfer_width(monkeypatch):
     monkeypatch.setattr(api_app, "_calculate_quote_with_db_knobs", fake_calculation)
     payload = valid_payload(chamfer=True)
     payload.pop("chamfer_width")
-    response = TestClient(api_app.app).post("/quote", json=payload)
+    response = TestClient(api_app.app).post(
+        "/quote", json=payload, headers=QUOTE_HEADERS
+    )
 
     assert response.status_code == 200
     assert response.json()["normalized_configuration"]["chamfer_width"] is None
@@ -126,7 +137,30 @@ def test_quote_preserves_customer_entered_chamfer_width(monkeypatch):
     response = TestClient(api_app.app).post(
         "/quote",
         json=valid_payload(chamfer=True, chamfer_width=0.062),
+        headers=QUOTE_HEADERS,
     )
 
     assert response.status_code == 200
     assert response.json()["normalized_configuration"]["chamfer_width"] == 0.062
+
+
+def test_order_lifecycle_startup_migration_is_additive_and_idempotent():
+    source = inspect.getsource(api_app.init_db).upper()
+
+    assert "ADD COLUMN IF NOT EXISTS STATUS" in source
+    assert "ADD COLUMN IF NOT EXISTS PAID_AT" in source
+    assert "ADD COLUMN IF NOT EXISTS LAST_STRIPE_EVENT_ID" in source
+    assert "CREATE INDEX IF NOT EXISTS IX_ORDERS_STATUS" in source
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS IX_ORDERS_LAST_STRIPE_EVENT_ID" in source
+    assert "DROP TABLE" not in source
+    assert "DROP COLUMN" not in source
+    assert "ALTER COLUMN" not in source
+
+
+def test_quote_api_key_fails_closed_when_server_key_is_missing(monkeypatch):
+    monkeypatch.setattr(api_app, "API_KEY", "")
+
+    response = TestClient(api_app.app).post("/quote", json=valid_payload())
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Unauthorized"
