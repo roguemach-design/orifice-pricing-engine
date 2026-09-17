@@ -67,7 +67,8 @@ _jwk_client: Optional[PyJWKClient] = PyJWKClient(SUPABASE_JWKS_URL) if SUPABASE_
 # Stripe config
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
-APP_BASE_URL = os.environ.get("APP_BASE_URL", "https://quote.o-plates.com")
+APP_BASE_URL = os.environ.get("APP_BASE_URL", "https://quote.o-plates.com").rstrip("/")
+APP_ENV = (os.environ.get("APP_ENV") or "production").strip().lower()
 
 # DB config
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -115,6 +116,9 @@ class Order(Base):
 
     stripe_session_id = Column(String, unique=True, index=True)
     stripe_payment_intent = Column(String, nullable=True)
+    status = Column(String, default="pending", nullable=False, index=True)
+    paid_at = Column(DateTime, nullable=True)
+    last_stripe_event_id = Column(String, nullable=True, unique=True)
 
     customer_email = Column(String, nullable=True)
 
@@ -152,6 +156,23 @@ def init_db() -> None:
         conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_id VARCHAR"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_customer_id ON orders(customer_id)"))
 
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS status VARCHAR NOT NULL DEFAULT 'pending'"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(status)"))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP WITH TIME ZONE"))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS last_stripe_event_id VARCHAR"))
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_orders_last_stripe_event_id "
+                "ON orders(last_stripe_event_id) WHERE last_stripe_event_id IS NOT NULL"
+            )
+        )
+        conn.execute(
+            text(
+                "UPDATE orders SET status = 'completed', paid_at = COALESCE(paid_at, created_at) "
+                "WHERE stripe_payment_intent IS NOT NULL AND status = 'pending'"
+            )
+        )
+
         conn.execute(
             text(
                 """
@@ -176,6 +197,20 @@ def _db_required() -> None:
         raise HTTPException(status_code=500, detail="DB not configured (missing DATABASE_URL).")
 
 
+def _stripe_checkout_required() -> None:
+    secret_key = str(stripe.api_key or "")
+    if not secret_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Stripe is not configured (missing STRIPE_SECRET_KEY).",
+        )
+    if APP_ENV in {"staging", "preview", "test"} and not secret_key.startswith("sk_test_"):
+        raise HTTPException(
+            status_code=500,
+            detail="Staging checkout requires Stripe test mode.",
+        )
+
+
 def _require_api_key(x_api_key: Optional[str] = Header(default=None, alias="x-api-key")) -> None:
     expected = (API_KEY or "").strip()
     provided = (x_api_key or "").strip()
@@ -186,7 +221,7 @@ def _require_api_key(x_api_key: Optional[str] = Header(default=None, alias="x-ap
 def _require_admin_key(x_api_key: Optional[str] = Header(default=None, alias="x-api-key")) -> None:
     expected = (ADMIN_API_KEY or API_KEY or "").strip()
     provided = (x_api_key or "").strip()
-    if expected and (not provided or provided != expected):
+    if not expected or not provided or provided != expected:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
@@ -219,6 +254,47 @@ def _assign_order_number(db, o: Order) -> None:
             o.order_number = None
 
     raise HTTPException(status_code=500, detail="Could not assign order number (please retry).")
+
+
+def _persist_pending_order(
+    *,
+    stripe_session_id: str,
+    quote_payload: dict,
+    customer_user_id: Optional[str],
+) -> Order:
+    """Persist the checkout attempt before its URL is returned to the customer."""
+    _db_required()
+    db = SessionLocal()
+    try:
+        order = db.query(Order).filter(Order.stripe_session_id == stripe_session_id).first()
+        if not order:
+            order = Order(
+                id=str(uuid.uuid4()),
+                stripe_session_id=stripe_session_id,
+                quote_payload=quote_payload,
+                customer_id=customer_user_id,
+                status="pending",
+            )
+            db.add(order)
+        elif not order.customer_id and customer_user_id:
+            # A valid server-verified identity may claim its own in-flight
+            # checkout; browser payloads never supply this value.
+            order.customer_id = customer_user_id
+
+        db.commit()
+        db.refresh(order)
+        return order
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Checkout could not be initialized. Please try again.",
+        ) from exc
+    finally:
+        db.close()
 
 
 def _decode_supabase_user_id_from_bearer(authorization: Optional[str]) -> Optional[str]:
@@ -561,6 +637,8 @@ class QuoteRequest(BaseModel):
 
 
 class CheckoutCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     inputs: QuoteRequest
     configuration_id: Optional[str] = None
     pricing_config_version: Optional[str] = None
@@ -568,7 +646,11 @@ class CheckoutCreateRequest(BaseModel):
 
 
 class CartCheckoutCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     items: List[QuoteRequest]
+    pricing_config_version: Optional[str] = None
+    idempotency_key: Optional[str] = Field(default=None, min_length=16, max_length=100)
 
 
 # ----------------------------
@@ -748,8 +830,8 @@ def checkout_create(
     req: CheckoutCreateRequest,
     customer_user_id: Optional[str] = Depends(_api_key_or_customer_user_id),
 ):
-    if not stripe.api_key:
-        raise HTTPException(status_code=500, detail="Stripe is not configured (missing STRIPE_SECRET_KEY).")
+    _stripe_checkout_required()
+    _db_required()
 
     inputs = QuoteInputs(**req.inputs.model_dump())
     result = _calculate_quote_with_db_knobs(inputs)
@@ -773,8 +855,8 @@ def checkout_create(
 
     checkout_args = dict(
         mode="payment",
-        success_url=f"{APP_BASE_URL}/success?session_id={{CHECKOUT_SESSION_ID}}",
-        cancel_url=f"{APP_BASE_URL}/cancel",
+        success_url=f"{APP_BASE_URL}/Success?session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=f"{APP_BASE_URL}/Quote?checkout=cancelled",
         shipping_address_collection={"allowed_countries": ["US"]},
         line_items=[
             {
@@ -822,22 +904,11 @@ def checkout_create(
         checkout_args["idempotency_key"] = req.idempotency_key
     session = stripe.checkout.Session.create(**checkout_args)
 
-    # Save "pending" order
-    if SessionLocal:
-        db = SessionLocal()
-        try:
-            existing = db.query(Order).filter(Order.stripe_session_id == session.id).first()
-            if not existing:
-                o = Order(
-                    id=str(uuid.uuid4()),
-                    stripe_session_id=session.id,
-                    quote_payload=req.inputs.model_dump(),
-                    customer_id=customer_user_id,
-                )
-                db.add(o)
-                db.commit()
-        finally:
-            db.close()
+    _persist_pending_order(
+        stripe_session_id=session.id,
+        quote_payload=req.inputs.model_dump(),
+        customer_user_id=customer_user_id,
+    )
 
     return {"checkout_url": session.url, "session_id": session.id}
 
@@ -847,8 +918,8 @@ def checkout_cart_create(
     req: CartCheckoutCreateRequest,
     customer_user_id: str = Depends(_require_customer_user_id),
 ):
-    if not stripe.api_key:
-        raise HTTPException(status_code=500, detail="Stripe is not configured (missing STRIPE_SECRET_KEY).")
+    _stripe_checkout_required()
+    _db_required()
 
     if not req.items:
         raise HTTPException(status_code=400, detail="Cart is empty")
@@ -864,6 +935,21 @@ def checkout_cart_create(
         inputs = QuoteInputs(**it.model_dump())
         res = _calculate_quote_with_db_knobs(inputs)
 
+        if (
+            req.pricing_config_version
+            and req.pricing_config_version != res.get("pricing_config_version")
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "pricing_changed",
+                    "message": "Pricing changed since this cart was calculated. Review the updated price before checkout.",
+                    "current_pricing_config_version": res.get(
+                        "pricing_config_version"
+                    ),
+                },
+            )
+
         line_cents = int(res.get("total_price_cents") or round(float(res["total_price"]) * 100))
         total_items_cents += line_cents
 
@@ -874,10 +960,10 @@ def checkout_cart_create(
 
         normalized_items.append(it.model_dump())
 
-    session = stripe.checkout.Session.create(
+    checkout_args = dict(
         mode="payment",
-        success_url=f"{APP_BASE_URL}/success?session_id={{CHECKOUT_SESSION_ID}}",
-        cancel_url=f"{APP_BASE_URL}/cancel",
+        success_url=f"{APP_BASE_URL}/Success?session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=f"{APP_BASE_URL}/Quote_Cart?checkout=cancelled",
         shipping_address_collection={"allowed_countries": ["US"]},
         line_items=[
             {
@@ -919,31 +1005,24 @@ def checkout_cart_create(
             "customer_id": customer_user_id,
             "is_cart": "true",
             "cart_count": str(len(req.items)),
+            "pricing_config_version": req.pricing_config_version or "",
         },
     )
+    if req.idempotency_key:
+        checkout_args["idempotency_key"] = req.idempotency_key
+    session = stripe.checkout.Session.create(**checkout_args)
 
-    # Save "pending" order (cart payload)
-    if SessionLocal:
-        db = SessionLocal()
-        try:
-            existing = db.query(Order).filter(Order.stripe_session_id == session.id).first()
-            if not existing:
-                o = Order(
-                    id=str(uuid.uuid4()),
-                    stripe_session_id=session.id,
-                    quote_payload={"cart_items": normalized_items},
-                    customer_id=customer_user_id,
-                )
-                db.add(o)
-                db.commit()
-        finally:
-            db.close()
+    _persist_pending_order(
+        stripe_session_id=session.id,
+        quote_payload={"cart_items": normalized_items},
+        customer_user_id=customer_user_id,
+    )
 
     return {"checkout_url": session.url, "session_id": session.id}
 
 
 # ----------------------------
-# Orders endpoints + webhook (unchanged below)
+# Orders endpoints + webhook
 # ----------------------------
 @app.get("/orders/by-session/{session_id}")
 def get_order_by_session(session_id: str):
@@ -956,6 +1035,7 @@ def get_order_by_session(session_id: str):
 
         return {
             "id": o.id,
+            "status": o.status,
             "order_number": o.order_number,
             "order_number_display": _format_order_number(o.order_number),
             "customer_email": o.customer_email,
@@ -966,6 +1046,7 @@ def get_order_by_session(session_id: str):
             "shipping_name": o.shipping_name,
             "shipping_address": o.shipping_address,
             "created_at": o.created_at.isoformat() if o.created_at else None,
+            "paid_at": o.paid_at.isoformat() if o.paid_at else None,
         }
     finally:
         db.close()
@@ -980,7 +1061,10 @@ def me_orders(customer_user_id: str = Depends(_require_customer_user_id), limit:
     try:
         orders = (
             db.query(Order)
-            .filter(Order.customer_id == customer_user_id)
+            .filter(
+                Order.customer_id == customer_user_id,
+                Order.status == "completed",
+            )
             .order_by(Order.created_at.desc())
             .limit(limit)
             .all()
@@ -989,6 +1073,7 @@ def me_orders(customer_user_id: str = Depends(_require_customer_user_id), limit:
         return [
             {
                 "id": o.id,
+                "status": o.status,
                 "order_number_display": _format_order_number(o.order_number),
                 "created_at": o.created_at.isoformat() if o.created_at else None,
                 "customer_email": o.customer_email,
@@ -1007,12 +1092,21 @@ def me_order_detail(order_id: str, customer_user_id: str = Depends(_require_cust
     _db_required()
     db = SessionLocal()
     try:
-        o = db.query(Order).filter(Order.id == order_id, Order.customer_id == customer_user_id).first()
+        o = (
+            db.query(Order)
+            .filter(
+                Order.id == order_id,
+                Order.customer_id == customer_user_id,
+                Order.status == "completed",
+            )
+            .first()
+        )
         if not o:
             raise HTTPException(status_code=404, detail="Order not found")
 
         return {
             "id": o.id,
+            "status": o.status,
             "order_number_display": _format_order_number(o.order_number),
             "created_at": o.created_at.isoformat() if o.created_at else None,
             "stripe_session_id": o.stripe_session_id,
@@ -1053,6 +1147,7 @@ def admin_list_orders(q: Optional[str] = None, limit: int = 50):
         return [
             {
                 "id": o.id,
+                "status": o.status,
                 "order_number_display": _format_order_number(o.order_number),
                 "created_at": o.created_at.isoformat() if o.created_at else None,
                 "customer_email": o.customer_email,
@@ -1068,7 +1163,7 @@ def admin_list_orders(q: Optional[str] = None, limit: int = 50):
         db.close()
 
 
-@app.get("/debug/whoami")
+@app.get("/debug/whoami", dependencies=[Depends(_require_admin_key)])
 def debug_whoami(
     authorization: Optional[str] = Header(default=None, alias="authorization"),
 ):
@@ -1095,6 +1190,7 @@ def admin_get_order(order_id: str):
 
         return {
             "id": o.id,
+            "status": o.status,
             "order_number_display": _format_order_number(o.order_number),
             "created_at": o.created_at.isoformat() if o.created_at else None,
             "stripe_session_id": o.stripe_session_id,
@@ -1126,82 +1222,118 @@ async def stripe_webhook(request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid Stripe signature")
 
-    if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"] or {}
+    if event["type"] not in {
+        "checkout.session.completed",
+        "checkout.session.async_payment_succeeded",
+    }:
+        return {"ok": True, "status": "ignored"}
 
-        # Refresh from Stripe to ensure full details
-        try:
-            session = stripe.checkout.Session.retrieve(
-                session.get("id"),
-                expand=["shipping_cost.shipping_rate", "customer_details", "shipping_details"],
-            )
-        except Exception:
-            pass
+    session = event["data"]["object"] or {}
 
-        stripe_session_id = session.get("id")
-        payment_intent = session.get("payment_intent")
+    # Refresh from Stripe when possible so address, shipping, and payment
+    # fields reflect Stripe's authoritative Checkout object.
+    try:
+        session = stripe.checkout.Session.retrieve(
+            session.get("id"),
+            expand=["shipping_cost.shipping_rate", "customer_details", "shipping_details"],
+        )
+    except Exception:
+        pass
 
-        customer_details = session.get("customer_details") or {}
-        customer_email = customer_details.get("email")
+    if session.get("payment_status") not in {"paid", "no_payment_required"}:
+        return {"ok": True, "status": "pending_payment"}
 
-        amount_total = session.get("amount_total")
-        amount_subtotal = session.get("amount_subtotal")
-        amount_shipping = ((session.get("shipping_cost") or {}).get("amount_total"))
+    stripe_session_id = session.get("id")
+    if not stripe_session_id:
+        raise HTTPException(status_code=400, detail="Stripe session is missing an ID")
 
+    payment_intent = session.get("payment_intent")
+    customer_details = session.get("customer_details") or {}
+    customer_email = customer_details.get("email")
+    amount_total = session.get("amount_total")
+    amount_subtotal = session.get("amount_subtotal")
+    amount_shipping = (session.get("shipping_cost") or {}).get("amount_total")
+
+    shipping_service = None
+    try:
+        shipping_cost = session.get("shipping_cost") or {}
+        shipping_rate = shipping_cost.get("shipping_rate")
+        if isinstance(shipping_rate, dict):
+            shipping_service = (shipping_rate.get("metadata") or {}).get(
+                "service"
+            ) or shipping_rate.get("display_name")
+        elif shipping_rate:
+            retrieved_rate = stripe.ShippingRate.retrieve(shipping_rate)
+            shipping_service = (retrieved_rate.get("metadata") or {}).get(
+                "service"
+            ) or retrieved_rate.get("display_name")
+    except Exception:
         shipping_service = None
-        try:
-            shipping_cost = session.get("shipping_cost") or {}
-            sr = shipping_cost.get("shipping_rate")
-            if isinstance(sr, dict):
-                shipping_service = (sr.get("metadata") or {}).get("service") or sr.get("display_name")
-            else:
-                shipping_rate_id = shipping_cost.get("shipping_rate")
-                if shipping_rate_id:
-                    sr2 = stripe.ShippingRate.retrieve(shipping_rate_id)
-                    shipping_service = (sr2.get("metadata") or {}).get("service") or sr2.get("display_name")
-        except Exception:
-            shipping_service = None
 
-        shipping_details = session.get("shipping_details") or {}
-        shipping_name = shipping_details.get("name") or customer_details.get("name")
-        shipping_address = shipping_details.get("address") or customer_details.get("address")
+    shipping_details = session.get("shipping_details") or {}
+    shipping_name = shipping_details.get("name") or customer_details.get("name")
+    shipping_address = shipping_details.get("address") or customer_details.get("address")
+    customer_id = (session.get("metadata") or {}).get("customer_id") or None
+    event_id = event.get("id")
 
-        # Pull customer_id from metadata if present (fallback)
-        customer_id = (session.get("metadata") or {}).get("customer_id") or None
+    _db_required()
+    db = SessionLocal()
+    processed = False
+    try:
+        order = (
+            db.query(Order)
+            .filter(Order.stripe_session_id == stripe_session_id)
+            .with_for_update()
+            .first()
+        )
+        if not order:
+            raise HTTPException(
+                status_code=503,
+                detail="Pending order is not available yet; retry this webhook.",
+            )
 
-        if SessionLocal:
-            db = SessionLocal()
-            try:
-                o = db.query(Order).filter(Order.stripe_session_id == stripe_session_id).first()
-                if not o:
-                    o = Order(id=str(uuid.uuid4()), stripe_session_id=stripe_session_id)
-                    db.add(o)
-                    db.commit()
-                    db.refresh(o)
-
-                if not o.customer_id and customer_id:
-                    o.customer_id = customer_id
-
-                o.stripe_payment_intent = payment_intent
-                o.customer_email = customer_email
-                o.amount_total_cents = amount_total
-                o.amount_subtotal_cents = amount_subtotal
-                o.amount_shipping_cents = amount_shipping
-                o.shipping_name = shipping_name
-                o.shipping_address = shipping_address
-                o.shipping_service = shipping_service
-
-                db.commit()
-                db.refresh(o)
-
-                _assign_order_number(db, o)
-                order_display = _format_order_number(o.order_number) or "OP-????"
-            finally:
-                db.close()
+        if order.status == "completed":
+            order_display = _format_order_number(order.order_number) or "OP-????"
         else:
-            order_display = "OP-????"
+            if not order.customer_id and customer_id:
+                order.customer_id = customer_id
 
-        if customer_email:
+            order.stripe_payment_intent = payment_intent
+            order.customer_email = customer_email
+            order.amount_total_cents = amount_total
+            order.amount_subtotal_cents = amount_subtotal
+            order.amount_shipping_cents = amount_shipping
+            order.shipping_name = shipping_name
+            order.shipping_address = shipping_address
+            order.shipping_service = shipping_service
+            order.status = "completed"
+            order.paid_at = datetime.now(timezone.utc)
+            order.last_stripe_event_id = event_id
+
+            if order.order_number:
+                db.commit()
+                db.refresh(order)
+            else:
+                _assign_order_number(db, order)
+
+            order_display = _format_order_number(order.order_number) or "OP-????"
+            processed = True
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=503,
+            detail="Order completion is temporarily unavailable; Stripe will retry.",
+        ) from exc
+    finally:
+        db.close()
+
+    # Customer email is a post-commit, best-effort side effect. Replayed
+    # webhooks see the completed row and do not send it again.
+    if processed and customer_email:
+        try:
             _send_email(
                 to_email=customer_email,
                 subject=f"O-Plates order received ({order_display})",
@@ -1212,5 +1344,10 @@ async def stripe_webhook(request: Request):
                 <p>We’ll email your approval drawing next.</p>
                 """,
             )
+        except Exception:
+            pass
 
-    return {"ok": True}
+    return {
+        "ok": True,
+        "status": "completed" if processed else "already_completed",
+    }

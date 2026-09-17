@@ -25,7 +25,7 @@ def test_svg_contains_customer_dimensions_and_drawing_disclaimer():
     assert "t = 0.125 in." in svg
     assert "&#177; 0.005 in." in svg
     assert "UPSTREAM" in svg
-    assert "YES &#8212; DETAILS AT REVIEW" in svg
+    assert "YES &#8212; WIDTH NOT ENTERED" in svg
     assert "Configuration preview" in svg
     assert "Not an approved manufacturing drawing" in svg
     assert "CONFIGURATION DRAWING &#183; NTS" in svg
@@ -79,7 +79,7 @@ def test_svg_is_valid_for_small_default_and_maximum_configurations(
     assert "0.500 in." in svg
 
 
-def test_material_thickness_and_chamfer_update_title_block_without_width():
+def test_material_thickness_and_chamfer_update_title_block_with_customer_width():
     common = dict(
         paddle_dia=6,
         bore_dia=2,
@@ -88,7 +88,13 @@ def test_material_thickness_and_chamfer_update_title_block_without_width():
     )
 
     stainless = render_plate_svg(material="304", thickness=0.125, chamfer=False, **common)
-    carbon = render_plate_svg(material="Carbon Steel", thickness=0.5, chamfer=True, **common)
+    carbon = render_plate_svg(
+        material="Carbon Steel",
+        thickness=0.5,
+        chamfer=True,
+        chamfer_width=0.062,
+        **common,
+    )
 
     assert stainless != carbon
     assert "304" in stainless
@@ -96,6 +102,4 @@ def test_material_thickness_and_chamfer_update_title_block_without_width():
     assert "Carbon Steel" in carbon
     assert "0.500 in." in carbon
     assert "CHAMFER" in carbon
-    assert "YES &#8212; DETAILS AT REVIEW" in carbon
-    assert "0.062" not in carbon
-    assert "chamfer width" not in carbon.lower()
+    assert "YES &#8212; 0.062 in." in carbon

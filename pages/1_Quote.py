@@ -1,5 +1,7 @@
 # pages/1_Quote.py
 import os
+import hashlib
+import json
 from typing import Dict, Optional
 
 import requests
@@ -124,127 +126,16 @@ def _qp_get(name: str) -> Optional[str]:
     return v
 
 
-def _fmt_usd(x) -> str:
-    try:
-        if x is None:
-            return ""
-        return f"${float(x):.2f}"
-    except Exception:
-        return str(x)
-
-
-def _pretty_shipping_service(code: str | None) -> str:
-    if not code:
-        return "(finalizing...)"
-    mapping = {
-        "ups_ground": "UPS Ground",
-        "ups_2day": "UPS 2nd Day Air",
-        "ups_nextday": "UPS Next Day Air",
-    }
-    return mapping.get(code, code.replace("_", " ").title())
-
-
-def _format_order_number(order: dict) -> str:
-    disp = (order.get("order_number_display") or "").strip()
-    if disp:
-        return disp
-
-    n = order.get("order_number")
-    try:
-        if n is not None:
-            return f"OP-{int(n):04d}"
-    except Exception:
-        pass
-
-    return "(finalizing...)"
-
-
-def _format_address(addr: object) -> str:
-    if not isinstance(addr, dict):
-        return ""
-
-    line1 = (addr.get("line1") or "").strip()
-    line2 = (addr.get("line2") or "").strip()
-    city = (addr.get("city") or "").strip()
-    state = (addr.get("state") or "").strip()
-    postal = (addr.get("postal_code") or "").strip()
-    country = (addr.get("country") or "").strip()
-
-    lines = []
-    if line1:
-        lines.append(line1)
-    if line2:
-        lines.append(line2)
-
-    city_state = ", ".join([p for p in [city, state] if p]).strip()
-    if city_state and postal:
-        lines.append(f"{city_state} {postal}".strip())
-    elif city_state:
-        lines.append(city_state)
-    elif postal:
-        lines.append(postal)
-
-    if country:
-        lines.append(country)
-
-    return "\n".join([ln for ln in lines if ln.strip()])
-
 # -----------------------------
 # Success page (session_id in query params)
 # -----------------------------
 session_id = _qp_get("session_id")
 if session_id:
-    st.title("Payment received ✅")
-    st.write("Thanks — we received your payment. We’re preparing your order now.")
+    st.switch_page("pages/4_Success.py")
 
-    refresh_status = st.button("🔄 Refresh order status")
-
-    try:
-        r = requests.get(f"{API_BASE}/orders/by-session/{session_id}", timeout=30)
-        if r.status_code == 200:
-            order = r.json()
-
-            st.subheader("Order summary")
-            st.write(f"Order #: **{_format_order_number(order)}**")
-            st.write(f"Email: **{order.get('customer_email','')}**")
-
-            total = order.get("amount_total_usd")
-            ship = order.get("amount_shipping_usd")
-            service = order.get("shipping_service")
-
-            st.write(f"Total paid: **{_fmt_usd(total)}**")
-            st.write(f"Shipping cost: **{_fmt_usd(ship)}**")
-            st.write(f"Shipping option: **{_pretty_shipping_service(service)}**")
-
-            ship_name = (order.get("shipping_name") or "").strip()
-            ship_addr = order.get("shipping_address")
-            addr_text = _format_address(ship_addr)
-
-            if ship_name or addr_text:
-                st.subheader("Ship to")
-                if ship_name:
-                    st.write(f"**{ship_name}**")
-                if addr_text:
-                    st.code(addr_text)
-                else:
-                    st.write("(Address not available yet)")
-
-            st.write("We’ll email your confirmation and approval drawing next.")
-
-            if _format_order_number(order) == "(finalizing...)" or not service or (not ship_name and not addr_text):
-                st.info(
-                    "If this page shows “finalizing…” or is missing address/shipping option, "
-                    "Stripe’s webhook may still be saving details. Click **Refresh order status** in a moment."
-                )
-        else:
-            st.info("Payment confirmed. Finalizing your order details… (refresh in a moment)")
-    except Exception:
-        st.info("Payment confirmed. Finalizing your order details… (refresh in a moment)")
-
-    if refresh_status:
-        st.rerun()
-
-    st.stop()
+if _qp_get("checkout") == "cancelled":
+    st.session_state.pop("checkout_attempt", None)
+    st.info("Checkout was canceled. Your configuration is still available below.")
 
 
 # -----------------------------
@@ -291,12 +182,32 @@ def _render_product_image() -> None:
 # Checkout
 # -----------------------------
 def start_checkout(payload_inputs: dict, priced_configuration: dict) -> None:
-    idempotency_key = st.session_state.setdefault("checkout_idempotency_key", str(uuid.uuid4()))
+    customer_context = st.session_state.auth.get("email") if is_logged_in() else "guest"
+    fingerprint = hashlib.sha256(
+        json.dumps(
+            {
+                "inputs": payload_inputs,
+                "pricing_config_version": priced_configuration.get("pricing_config_version"),
+                "customer_context": customer_context,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    checkout_attempt = st.session_state.get("checkout_attempt")
+    if not isinstance(checkout_attempt, dict) or checkout_attempt.get("fingerprint") != fingerprint:
+        checkout_attempt = {
+            "fingerprint": fingerprint,
+            "idempotency_key": str(uuid.uuid4()),
+            "configuration_id": priced_configuration.get("configuration_id"),
+        }
+        st.session_state.checkout_attempt = checkout_attempt
+
     body = {
         "inputs": payload_inputs,
-        "configuration_id": priced_configuration.get("configuration_id"),
+        "configuration_id": checkout_attempt.get("configuration_id"),
         "pricing_config_version": priced_configuration.get("pricing_config_version"),
-        "idempotency_key": idempotency_key,
+        "idempotency_key": checkout_attempt["idempotency_key"],
     }
 
     headers: Dict[str, str] = {}
@@ -309,14 +220,27 @@ def start_checkout(payload_inputs: dict, priced_configuration: dict) -> None:
         if API_KEY:
             headers["x-api-key"] = API_KEY
 
-    r = requests.post(f"{API_BASE}/checkout/create", json=body, headers=headers, timeout=30)
+    try:
+        r = requests.post(
+            f"{API_BASE}/checkout/create",
+            json=body,
+            headers=headers,
+            timeout=30,
+        )
+    except requests.RequestException:
+        st.error("Checkout is temporarily unavailable. Please try again.")
+        st.stop()
 
     if r.status_code != 200:
-        st.error(f"Checkout API error: {r.status_code}")
         try:
-            st.json(r.json())
+            detail = r.json().get("detail")
         except Exception:
-            st.code(r.text)
+            detail = None
+        if isinstance(detail, dict):
+            message = detail.get("message")
+        else:
+            message = str(detail or "")
+        st.error(message or "Checkout couldn’t be started. Please try again.")
         st.stop()
 
     resp = r.json()
@@ -410,7 +334,6 @@ with right:
 
     with form_col:
         st.caption("PRODUCT")
-        st.text_input("Plate style", value="Handled Orifice Plate", disabled=True)
         r1c1, r1c2 = st.columns([1, 2])
         with r1c1:
             quantity = st.number_input("Quantity", min_value=1, value=1, step=1)
@@ -491,22 +414,27 @@ with right:
             help=f"Maximum {max_handle_label_chars} characters. Letters, numbers, spaces, and standard shop-marking punctuation only.",
         )
 
-        chamfer = st.checkbox(
-            "Add bore chamfer operation",
-            value=False,
-            help="Chamfer details will be confirmed during order review.",
-        )
+        chamfer = st.checkbox("Chamfer", value=False)
+        chamfer_width = None
         if chamfer:
-            st.caption("Chamfer details will be confirmed during order review.")
+            chamfer_width = st.number_input(
+                "Chamfer Width (in.)",
+                min_value=0.001,
+                value=None,
+                step=0.001,
+                format="%.3f",
+                placeholder="Enter width",
+                help="No width is assumed. Enter the required chamfer width.",
+            )
 
         st.caption("DELIVERY")
         ships_options = sorted(lead_time_options)
         default_ship = int(active_config.get("default_lead_time_days") or ships_options[-1])
         ships_in_days = st.selectbox(
-            "Estimated shipping time",
+            "Lead time",
             options=ships_options,
             index=ships_options.index(default_ship) if default_ship in ships_options else 0,
-            format_func=lambda days: f"Estimated to ship within {days} calendar days.",
+            format_func=lambda days: f"{days} calendar days",
             help="Timing is estimated and subject to material availability and order-specific review.",
         )
 
@@ -542,6 +470,7 @@ payload_inputs = {
     "bore_dia": float(bore_dia),
     "bore_tolerance": float(bore_tolerance),
     "chamfer": bool(chamfer),
+    "chamfer_width": float(chamfer_width) if chamfer_width is not None else None,
     "handle_label": (handle_label or "").strip() or "No label",
     "ships_in_days": int(ships_in_days),
 }
@@ -573,6 +502,7 @@ with left:
             bore_tolerance=float(bore_tolerance),
             handle_label=(handle_label or "").strip() or "No label",
             chamfer=bool(chamfer),
+            chamfer_width=float(chamfer_width) if chamfer_width is not None else None,
         ),
         height=430,
         scrolling=False,
@@ -583,16 +513,10 @@ with left:
             c1, c2 = st.columns(2)
             c1.metric("Unit price", f"${result['unit_price']:,.2f}")
             c2.metric("Total price", f"${result['total_price']:,.2f}")
-            st.markdown(
-                f"**Configuration:** {material}, {float(thickness):.3f} in. thick  "
-                f"  \n**Dimensions:** Ø {float(paddle_dia):.3f} in. OD × "
-                f"Ø {float(bore_dia):.3f} in. bore  "
-                f"  \n**Handle:** {float(handle_width):.3f} in. wide × "
-                f"{float(handle_length):.3f} in. C/L to end  "
-                f"  \n**Requirements:** ± {float(bore_tolerance):.3f} in. bore tolerance · "
-                f"Marking: {(handle_label or '').strip() or 'None'} · "
-                f"Chamfer: {'Yes — details at review' if chamfer else 'No'}  "
-                f"  \n**Quantity:** {int(quantity)}"
+            st.caption(
+                f"{material} · {float(thickness):.3f} in. thick · "
+                f"Ø {float(paddle_dia):.3f} OD / Ø {float(bore_dia):.3f} bore · "
+                f"Qty {int(quantity)}"
             )
             st.success(f"Estimated to ship within {int(ships_in_days)} calendar days.")
             st.caption(
@@ -610,7 +534,6 @@ with left:
         s1, s2 = st.columns(2)
         s1.metric("Estimated total weight", f"{weight_lb:.2f} lb")
         s2.metric("Estimated package", f"{pkg['length']} × {pkg['width']} × {pkg['height']} in.")
-        st.caption(result.get("shipping_treatment", "Shipping is selected at checkout."))
 
 
 # -----------------------------
@@ -645,7 +568,7 @@ with right:
         else:
             st.info("Checkout as guest — log in from the sidebar to save orders to your account.")
 
-        st.caption("The live price is revalidated before checkout. Shipping is selected during checkout.")
+        st.caption("Price is revalidated before checkout; shipping is selected there.")
 
         left_pad = max(0.0, (1.0 - PAY_BUTTON_WIDTH_RATIO) / 2.0)
         btn_cols = st.columns([left_pad, PAY_BUTTON_WIDTH_RATIO, left_pad])

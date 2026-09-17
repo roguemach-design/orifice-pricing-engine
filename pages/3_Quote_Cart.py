@@ -4,6 +4,8 @@ from __future__ import annotations
 import io
 import os
 import uuid
+import hashlib
+import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List
 
@@ -11,9 +13,6 @@ import streamlit as st
 import requests
 
 from auth import render_auth_sidebar, require_login, auth_headers
-from pricing_engine import QuoteInputs, calculate_quote
-
-
 render_auth_sidebar(show_debug=False)
 require_login("Log in in the sidebar to manage quote carts.")
 
@@ -25,6 +24,17 @@ if "cart" not in st.session_state or not isinstance(st.session_state.cart, list)
     st.session_state.cart = []
 
 cart: List[Dict[str, Any]] = st.session_state.cart
+API_BASE = os.environ.get(
+    "API_BASE", "https://orifice-pricing-api.onrender.com"
+).rstrip("/")
+API_KEY = (os.environ.get("API_KEY") or "").strip()
+
+checkout_return = st.query_params.get("checkout")
+if isinstance(checkout_return, list):
+    checkout_return = checkout_return[0] if checkout_return else None
+if checkout_return == "cancelled":
+    st.session_state.pop("cart_checkout_attempt", None)
+    st.info("Checkout was canceled. Your quote cart is unchanged.")
 
 
 # ----------------------------
@@ -97,13 +107,20 @@ def _usd(x: float | int | None) -> str:
 
 
 def _calc_line(inputs: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Recalculate pricing live based on current qty, using pricing_engine locally.
-    This keeps cart prices accurate even after editing qty.
-    """
-    qi = QuoteInputs(**inputs)
-    res = calculate_quote(qi)
-    return res
+    """Recalculate each cart line through the authoritative pricing API."""
+    headers = {"x-api-key": API_KEY} if API_KEY else {}
+    try:
+        response = requests.post(
+            f"{API_BASE}/quote",
+            json=inputs,
+            headers=headers,
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        raise RuntimeError("Live cart pricing is temporarily unavailable.") from exc
+    if response.status_code != 200:
+        raise RuntimeError("This cart contains a configuration that cannot be priced.")
+    return response.json()
 
 
 def _make_pdf_quote(lines: List[Dict[str, Any]], *, customer: Dict[str, Any] | None = None) -> bytes:
@@ -378,7 +395,12 @@ for idx, item in enumerate(cart):
             item["inputs"] = inputs  # persist edit in session
 
         # Live pricing
-        res = _calc_line(inputs)
+        try:
+            res = _calc_line(inputs)
+        except RuntimeError as exc:
+            st.error(str(exc))
+            st.caption("Checkout is disabled until every cart line has a verified live price.")
+            st.stop()
         unit_price = float(res.get("unit_price") or 0.0)
         line_total = float(res.get("total_price") or 0.0)
 
@@ -404,8 +426,19 @@ for idx, item in enumerate(cart):
             "inputs": inputs,
             "unit_price": unit_price,
             "line_total": line_total,
+            "pricing_config_version": res.get("pricing_config_version"),
         }
     )
+
+pricing_versions = {
+    line["pricing_config_version"]
+    for line in line_views
+    if line.get("pricing_config_version")
+}
+if len(pricing_versions) != 1:
+    st.warning("Cart pricing changed while loading. Refresh before checkout.")
+    st.stop()
+cart_pricing_config_version = next(iter(pricing_versions))
 
 st.divider()
 
@@ -436,20 +469,52 @@ with c1:
     st.caption("Downloads a PDF summary of the current cart.")
 
 with c2:
-    st.caption("Creates a Stripe checkout for the entire cart.")
+    st.caption("Prices are revalidated before Stripe checkout.")
     if st.button("💳 Checkout All Items", use_container_width=True):
-        API_BASE = os.environ.get("API_BASE", "https://orifice-pricing-api.onrender.com").rstrip("/")
+        cart_items = [lv["inputs"] for lv in line_views]
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                {
+                    "items": cart_items,
+                    "pricing_config_version": cart_pricing_config_version,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        checkout_attempt = st.session_state.get("cart_checkout_attempt")
+        if not isinstance(checkout_attempt, dict) or checkout_attempt.get("fingerprint") != fingerprint:
+            checkout_attempt = {
+                "fingerprint": fingerprint,
+                "idempotency_key": str(uuid.uuid4()),
+            }
+            st.session_state.cart_checkout_attempt = checkout_attempt
 
-        r = requests.post(
-            f"{API_BASE}/checkout/cart/create",
-            json={"items": [lv["inputs"] for lv in line_views]},
-            headers=auth_headers(),
-            timeout=30,
-        )
+        try:
+            r = requests.post(
+                f"{API_BASE}/checkout/cart/create",
+                json={
+                    "items": cart_items,
+                    "pricing_config_version": cart_pricing_config_version,
+                    "idempotency_key": checkout_attempt["idempotency_key"],
+                },
+                headers=auth_headers(),
+                timeout=30,
+            )
+        except requests.RequestException:
+            st.error("Checkout is temporarily unavailable. Please try again.")
+            st.stop()
 
         if r.status_code != 200:
-            st.error(f"Cart checkout API error: {r.status_code}")
-            st.code(r.text)
+            try:
+                detail = r.json().get("detail")
+            except Exception:
+                detail = None
+            if isinstance(detail, dict):
+                message = detail.get("message")
+            else:
+                message = str(detail or "")
+            st.error(message or "Checkout couldn’t be started. Please try again.")
             st.stop()
 
         resp = r.json()

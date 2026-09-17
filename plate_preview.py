@@ -17,6 +17,7 @@ def render_plate_svg(
     bore_tolerance: float | None = None,
     handle_label: str = "No label",
     chamfer: bool = False,
+    chamfer_width: float | None = None,
     units: str = "in.",
 ) -> str:
     """Return a responsive configuration drawing for a handled orifice plate.
@@ -56,7 +57,12 @@ def render_plate_svg(
         if bore_tolerance is not None
         else "Not specified"
     )
-    chamfer_text = "YES &#8212; DETAILS AT REVIEW" if chamfer else "NO"
+    if chamfer and chamfer_width is not None:
+        chamfer_text = f"YES &#8212; {float(chamfer_width):.3f} {unit_text}"
+    elif chamfer:
+        chamfer_text = "YES &#8212; WIDTH NOT ENTERED"
+    else:
+        chamfer_text = "NO"
     profile_height = _clamp(7.0 + nominal_thickness * 34.0, 8.0, 24.0)
     title_value_x = 464
 

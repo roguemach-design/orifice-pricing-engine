@@ -109,3 +109,24 @@ def test_quote_normalization_does_not_invent_chamfer_width(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["normalized_configuration"]["chamfer_width"] is None
+
+
+def test_quote_preserves_customer_entered_chamfer_width(monkeypatch):
+    def fake_calculation(inputs):
+        assert inputs.chamfer is True
+        assert inputs.chamfer_width == 0.062
+        return {
+            "unit_price": 100.0,
+            "total_price": 200.0,
+            "quantity": inputs.quantity,
+            "pricing_config_version": "test",
+        }
+
+    monkeypatch.setattr(api_app, "_calculate_quote_with_db_knobs", fake_calculation)
+    response = TestClient(api_app.app).post(
+        "/quote",
+        json=valid_payload(chamfer=True, chamfer_width=0.062),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["normalized_configuration"]["chamfer_width"] == 0.062

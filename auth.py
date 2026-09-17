@@ -42,12 +42,22 @@ def _ensure_auth_state() -> None:
         }
 
 
+def _clear_local_auth() -> None:
+    st.session_state.auth = {
+        "access_token": None,
+        "refresh_token": None,
+        "user": None,
+        "email": None,
+    }
+    _cookie_clear()
+
+
 # ----------------------------
 # Supabase client
 # ----------------------------
 def sb() -> Client:
     if not SUPABASE_URL or not SUPABASE_ANON_KEY:
-        st.error("Missing SUPABASE_URL / SUPABASE_ANON_KEY env vars on this Streamlit service.")
+        st.error("Account sign-in is temporarily unavailable.")
         st.stop()
     return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
 
@@ -86,18 +96,24 @@ def _cookie_set(payload: dict) -> None:
     # ✅ CookieManager expects datetime (not float)
     expires_dt = datetime.now(timezone.utc) + timedelta(days=COOKIE_TTL_DAYS)
 
-    cm.set(
-        COOKIE_NAME,
-        json.dumps(payload),
-        expires_at=expires_dt,
-    )
+    try:
+        cm.set(
+            COOKIE_NAME,
+            json.dumps(payload),
+            expires_at=expires_dt,
+        )
+    except Exception:
+        pass
 
 
 def _cookie_clear() -> None:
     cm = _cookie_mgr()
     if cm is None:
         return
-    cm.delete(COOKIE_NAME)
+    try:
+        cm.delete(COOKIE_NAME)
+    except Exception:
+        pass
 
 
 def _restore_auth_from_cookie_if_needed() -> None:
@@ -139,13 +155,28 @@ def _token_expires_soon(token: str) -> bool:
     return (pl["exp"] - int(time.time())) <= REFRESH_SKEW_SECONDS
 
 
+def _token_is_expired(token: str) -> bool:
+    payload = _jwt_payload(token)
+    return bool(payload and payload.get("exp") is not None and payload["exp"] <= int(time.time()))
+
+
+def _session_value(session: object, name: str):
+    if isinstance(session, dict):
+        return session.get(name)
+    return getattr(session, name, None)
+
+
 def _refresh_session_if_needed() -> None:
     _ensure_auth_state()
 
     access_token = st.session_state.auth.get("access_token")
     refresh_token = st.session_state.auth.get("refresh_token")
 
-    if not access_token or not refresh_token:
+    if not access_token:
+        return
+    if not refresh_token:
+        if _token_is_expired(access_token):
+            _clear_local_auth()
         return
 
     if not _token_expires_soon(access_token):
@@ -156,13 +187,18 @@ def _refresh_session_if_needed() -> None:
         session = getattr(resp, "session", None) or (resp.get("session") if isinstance(resp, dict) else None)
 
         if not session:
+            if _token_is_expired(access_token):
+                _clear_local_auth()
             return
 
-        new_access = getattr(session, "access_token", None) or session.get("access_token")
-        new_refresh = getattr(session, "refresh_token", None) or session.get("refresh_token")
+        new_access = _session_value(session, "access_token")
+        new_refresh = _session_value(session, "refresh_token")
 
         if new_access:
             st.session_state.auth["access_token"] = new_access
+        elif _token_is_expired(access_token):
+            _clear_local_auth()
+            return
         if new_refresh:
             st.session_state.auth["refresh_token"] = new_refresh
 
@@ -175,7 +211,8 @@ def _refresh_session_if_needed() -> None:
         )
 
     except Exception:
-        return
+        if _token_is_expired(access_token):
+            _clear_local_auth()
 
 
 # ----------------------------
@@ -190,8 +227,7 @@ def is_logged_in() -> bool:
 
 def logout() -> None:
     _ensure_auth_state()
-    st.session_state.auth = {"access_token": None, "refresh_token": None, "user": None, "email": None}
-    _cookie_clear()
+    _clear_local_auth()
     st.rerun()
 
 
@@ -222,7 +258,7 @@ def _render_connection_debug() -> None:
     st.code(SUPABASE_URL or "(missing)")
 
 
-def render_auth_sidebar(*, show_debug: bool = True) -> None:
+def render_auth_sidebar(*, show_debug: bool = False) -> None:
     # ✅ IMPORTANT: restore BEFORE widgets
     _ensure_auth_state()
     _restore_auth_from_cookie_if_needed()
@@ -248,34 +284,51 @@ def render_auth_sidebar(*, show_debug: bool = True) -> None:
                 if not email:
                     st.error("Enter your email first.")
                 else:
-                    sb().auth.sign_in_with_otp({"email": email})
-                    st.session_state.auth["email"] = email
-                    st.success("Code sent.")
+                    try:
+                        sb().auth.sign_in_with_otp(
+                            {
+                                "email": email,
+                                "options": {"should_create_user": True},
+                            }
+                        )
+                        st.session_state.auth["email"] = email
+                        st.success("Check your email for the sign-in code.")
+                    except Exception:
+                        st.error("We couldn’t send a sign-in code. Please try again.")
 
             if verify_code:
                 if not email or not otp_code:
                     st.error("Enter email + OTP code.")
                 else:
-                    resp = sb().auth.verify_otp({"email": email, "token": otp_code, "type": "email"})
-                    session = getattr(resp, "session", None) or (resp.get("session") if isinstance(resp, dict) else None)
+                    try:
+                        resp = sb().auth.verify_otp(
+                            {"email": email, "token": otp_code, "type": "email"}
+                        )
+                        session = _session_value(resp, "session")
+                        access = _session_value(session, "access_token")
+                        refresh = _session_value(session, "refresh_token")
 
-                    access = getattr(session, "access_token", None) if not isinstance(session, dict) else session.get("access_token")
-                    refresh = getattr(session, "refresh_token", None) if not isinstance(session, dict) else session.get("refresh_token")
+                        if not access:
+                            raise ValueError("Supabase did not return a session")
 
-                    if not access:
-                        st.error("No access token returned. Check Supabase OTP settings.")
-                        st.stop()
+                        st.session_state.auth = {
+                            "access_token": access,
+                            "refresh_token": refresh,
+                            "user": _session_value(resp, "user"),
+                            "email": email,
+                        }
 
-                    st.session_state.auth = {
-                        "access_token": access,
-                        "refresh_token": refresh,
-                        "user": None,
-                        "email": email,
-                    }
-
-                    _cookie_set({"access_token": access, "refresh_token": refresh, "email": email})
-                    st.success("Logged in.")
-                    st.rerun()
+                        _cookie_set(
+                            {
+                                "access_token": access,
+                                "refresh_token": refresh,
+                                "email": email,
+                            }
+                        )
+                        st.success("You’re logged in.")
+                        st.rerun()
+                    except Exception:
+                        st.error("That sign-in code is invalid or expired. Request a new code.")
 
         else:
             st.success(f"Logged in as {st.session_state.auth.get('email')}")
