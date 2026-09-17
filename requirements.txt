@@ -16,3 +16,4 @@ supabase
 black
 reportlab
 extra-streamlit-components
+pytest
