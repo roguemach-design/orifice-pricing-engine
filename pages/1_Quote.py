@@ -4,6 +4,7 @@ from typing import Dict, Optional
 
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 
 from auth import render_auth_sidebar, auth_headers, is_logged_in
 from plate_preview import render_plate_svg
@@ -88,6 +89,12 @@ if "cart" not in st.session_state or not isinstance(st.session_state.cart, list)
     st.session_state.cart = []
 
 st.markdown("<h1>Orifice Plate Instant Quote</h1>", unsafe_allow_html=True)
+st.markdown(
+    "<p style='text-align:center;color:#526174;margin-top:-0.25rem'>"
+    "Configure a handled orifice plate, see the verified price, and proceed to checkout."
+    "</p>",
+    unsafe_allow_html=True,
+)
 
 
 # -----------------------------
@@ -378,7 +385,7 @@ max_handle_label_chars = int(active_config["max_handle_label_chars"])
 # -----------------------------
 # Two-column layout
 # -----------------------------
-left, right = st.columns([1.0, 1.45], gap="large")
+left, right = st.columns([1.12, 1.38], gap="large")
 
 # -----------------------------
 # LEFT: image + summary (tight)
@@ -386,6 +393,7 @@ left, right = st.columns([1.0, 1.45], gap="large")
 with left:
     st.markdown(f"<div style='height:{IMAGE_TOP_SPACER_PX}px'></div>", unsafe_allow_html=True)
     st.subheader("Configuration Preview")
+    st.caption("Updates automatically as you change dimensions, material, or thickness.")
 
 # -----------------------------
 # RIGHT: inputs (narrowed) + Pay button bottom-center
@@ -547,7 +555,7 @@ pkg = result.get("estimated_package_in") if result else None
 # LEFT: Quote summary + shipping estimates (tight)
 # -----------------------------
 with left:
-    st.markdown(
+    components.html(
         render_plate_svg(
             paddle_dia=paddle_dia,
             bore_dia=bore_dia,
@@ -556,7 +564,8 @@ with left:
             thickness=float(thickness),
             material=material,
         ),
-        unsafe_allow_html=True,
+        height=430,
+        scrolling=False,
     )
     st.subheader("Quote Summary")
     if result:
@@ -566,8 +575,10 @@ with left:
         st.caption(f"Configuration ID: `{result.get('configuration_id', '')}`")
         st.caption(
             f"{material} · {float(thickness):.3f} in. · Qty {int(quantity)} · "
-            f"Estimated to ship within {int(ships_in_days)} calendar days."
+            f"Selected lead time: {int(ships_in_days)} calendar days"
         )
+        st.success(f"Estimated to ship within {int(ships_in_days)} calendar days.")
+        st.caption("Verified using the active pricing and availability configuration.")
     else:
         st.warning("A verified price is not currently available.")
 
@@ -620,7 +631,7 @@ with right:
         btn_cols = st.columns([left_pad, PAY_BUTTON_WIDTH_RATIO, left_pad])
 
         with btn_cols[1]:
-            if st.button("Buy this configuration", disabled=result is None):
+            if st.button("Continue to secure checkout", disabled=result is None):
                 start_checkout(payload_inputs, result)
 
             # Under your existing "Place Order & Pay" button block:
