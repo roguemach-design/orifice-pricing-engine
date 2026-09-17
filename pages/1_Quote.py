@@ -32,6 +32,13 @@ st.markdown(
     section[data-testid="stMain"] > div {
         padding-top: 0.5rem;
     }
+
+    @media (max-width: 768px) {
+        .block-container {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -91,7 +98,7 @@ if "cart" not in st.session_state or not isinstance(st.session_state.cart, list)
 st.markdown("<h1>Orifice Plate Instant Quote</h1>", unsafe_allow_html=True)
 st.markdown(
     "<p style='text-align:center;color:#526174;margin-top:-0.25rem'>"
-    "Configure a handled orifice plate, see the verified price, and proceed to checkout."
+    "Enter the part dimensions shown in the drawing. Your verified price updates automatically."
     "</p>",
     unsafe_allow_html=True,
 )
@@ -392,8 +399,8 @@ left, right = st.columns([1.12, 1.38], gap="large")
 # -----------------------------
 with left:
     st.markdown(f"<div style='height:{IMAGE_TOP_SPACER_PX}px'></div>", unsafe_allow_html=True)
-    st.subheader("Configuration Preview")
-    st.caption("Updates automatically as you change dimensions, material, or thickness.")
+    st.subheader("Configuration Drawing")
+    st.caption("Entered dimensions are reflected below. Drawing is not to scale (NTS).")
 
 # -----------------------------
 # RIGHT: inputs (narrowed) + Pay button bottom-center
@@ -429,26 +436,6 @@ with right:
         st.caption("DIMENSIONS")
         r2c1, r2c2 = st.columns(2)
         with r2c1:
-            handle_width = st.number_input(
-                "Handle width (in.)",
-                min_value=0.0,
-                value=1.500,
-                step=0.001,
-                format="%.3f",
-                help="Width of the rectangular handle.",
-            )
-        with r2c2:
-            handle_length = st.number_input(
-                "Handle length from bore center (in.)",
-                min_value=0.0,
-                value=9.000,
-                step=0.001,
-                format="%.3f",
-                help="Distance from the bore center to the end of the handle.",
-            )
-
-        r3c1, r3c2 = st.columns(2)
-        with r3c1:
             paddle_dia = st.number_input(
                 "Plate outside diameter (in.)",
                 min_value=0.01,
@@ -457,7 +444,7 @@ with right:
                 step=0.001,
                 format="%.3f",
             )
-        with r3c2:
+        with r2c2:
             bore_dia = st.number_input(
                 "Bore diameter (in.)",
                 min_value=0.01,
@@ -465,6 +452,26 @@ with right:
                 value=1.000,
                 step=0.001,
                 format="%.3f",
+            )
+
+        r3c1, r3c2 = st.columns(2)
+        with r3c1:
+            handle_width = st.number_input(
+                "Handle width (in.)",
+                min_value=0.0,
+                value=1.500,
+                step=0.001,
+                format="%.3f",
+                help="Width of the rectangular handle.",
+            )
+        with r3c2:
+            handle_length = st.number_input(
+                "Handle length from bore center (in.)",
+                min_value=0.0,
+                value=9.000,
+                step=0.001,
+                format="%.3f",
+                help="Distance from the bore center to the end of the handle.",
             )
 
         st.caption("REQUIREMENTS")
@@ -563,24 +570,37 @@ with left:
             handle_length_from_bore=handle_length,
             thickness=float(thickness),
             material=material,
+            bore_tolerance=float(bore_tolerance),
+            handle_label=(handle_label or "").strip() or "No label",
+            chamfer=bool(chamfer),
         ),
         height=430,
         scrolling=False,
     )
-    st.subheader("Quote Summary")
-    if result:
-        c1, c2 = st.columns(2)
-        c1.metric("Unit price", f"${result['unit_price']:,.2f}")
-        c2.metric("Total", f"${result['total_price']:,.2f}")
-        st.caption(f"Configuration ID: `{result.get('configuration_id', '')}`")
-        st.caption(
-            f"{material} · {float(thickness):.3f} in. · Qty {int(quantity)} · "
-            f"Selected lead time: {int(ships_in_days)} calendar days"
-        )
-        st.success(f"Estimated to ship within {int(ships_in_days)} calendar days.")
-        st.caption("Verified using the active pricing and availability configuration.")
-    else:
-        st.warning("A verified price is not currently available.")
+    with st.container(border=True):
+        st.subheader("Quote Summary")
+        if result:
+            c1, c2 = st.columns(2)
+            c1.metric("Unit price", f"${result['unit_price']:,.2f}")
+            c2.metric("Total price", f"${result['total_price']:,.2f}")
+            st.markdown(
+                f"**Configuration:** {material}, {float(thickness):.3f} in. thick  "
+                f"  \n**Dimensions:** Ø {float(paddle_dia):.3f} in. OD × "
+                f"Ø {float(bore_dia):.3f} in. bore  "
+                f"  \n**Handle:** {float(handle_width):.3f} in. wide × "
+                f"{float(handle_length):.3f} in. C/L to end  "
+                f"  \n**Requirements:** ± {float(bore_tolerance):.3f} in. bore tolerance · "
+                f"Marking: {(handle_label or '').strip() or 'None'} · "
+                f"Chamfer: {'Yes — details at review' if chamfer else 'No'}  "
+                f"  \n**Quantity:** {int(quantity)}"
+            )
+            st.success(f"Estimated to ship within {int(ships_in_days)} calendar days.")
+            st.caption(
+                f"Quote reference: {result.get('configuration_id', '')} · "
+                "Verified using the active pricing and availability configuration."
+            )
+        else:
+            st.warning("A verified price is not currently available.")
 
     if not LEFT_TIGHTEN:
         st.divider()
