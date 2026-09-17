@@ -84,6 +84,14 @@ def calculate_quote(x: QuoteInputs) -> Dict[str, Any]:
     _require(x.handle_length_from_bore > 0, "handle_length_from_bore must be > 0")
     _require(x.paddle_dia > 0, "paddle_dia must be > 0")
     _require(x.bore_dia > 0, "bore_dia must be > 0")
+    _require(
+        x.paddle_dia <= cfg.MAX_PADDLE_DIA_IN,
+        f"Maximum configurable plate outside diameter is {cfg.MAX_PADDLE_DIA_IN:g} in.",
+    )
+    _require(
+        x.bore_dia <= cfg.MAX_BORE_DIA_IN,
+        f"Maximum configurable bore diameter is {cfg.MAX_BORE_DIA_IN:g} in.",
+    )
     _require(x.bore_dia < x.paddle_dia, "bore_dia must be smaller than paddle_dia")
     _require(
         x.handle_length_from_bore > (x.paddle_dia / 2),
@@ -91,6 +99,10 @@ def calculate_quote(x: QuoteInputs) -> Dict[str, Any]:
     )
     if x.chamfer_width is not None:
         _require(x.chamfer_width > 0, "chamfer_width must be > 0 when provided")
+    _require(
+        len(x.handle_label) <= cfg.MAX_HANDLE_LABEL_CHARS,
+        f"Handle marking must be {cfg.MAX_HANDLE_LABEL_CHARS} characters or fewer.",
+    )
     _require(x.material in cfg.PRICE_PER_SQ_IN, f"unknown material: {x.material}")
     _require(
         x.thickness in cfg.PRICE_PER_SQ_IN[x.material],
