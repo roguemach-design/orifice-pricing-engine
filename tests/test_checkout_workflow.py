@@ -510,15 +510,20 @@ def test_completed_webhook_accepts_stripe_session_objects(
         def to_dict_recursive(self):
             return self.values
 
+    class StripeEventObject(StripeSessionObject):
+        pass
+
     monkeypatch.setattr(api_app, "WEBHOOK_SECRET", "whsec_test")
     monkeypatch.setattr(
         api_app.stripe.Webhook,
         "construct_event",
-        lambda payload, signature, secret: {
-            "id": "evt_test_stripe_object",
-            "type": "checkout.session.completed",
-            "data": {"object": StripeSessionObject({"id": session_id})},
-        },
+        lambda payload, signature, secret: StripeEventObject(
+            {
+                "id": "evt_test_stripe_object",
+                "type": "checkout.session.completed",
+                "data": {"object": StripeSessionObject({"id": session_id})},
+            }
+        ),
     )
     monkeypatch.setattr(
         api_app.stripe.checkout.Session,

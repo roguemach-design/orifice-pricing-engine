@@ -1250,6 +1250,13 @@ async def stripe_webhook(request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid Stripe signature")
 
+    if not isinstance(event, dict):
+        to_dict = getattr(event, "to_dict_recursive", None) or getattr(
+            event, "to_dict", None
+        )
+        if callable(to_dict):
+            event = to_dict()
+
     if event["type"] not in {
         "checkout.session.completed",
         "checkout.session.async_payment_succeeded",
