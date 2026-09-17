@@ -1257,6 +1257,12 @@ async def stripe_webhook(request: Request):
         return {"ok": True, "status": "ignored"}
 
     session = event["data"]["object"] or {}
+    if not isinstance(session, dict):
+        to_dict = getattr(session, "to_dict_recursive", None) or getattr(
+            session, "to_dict", None
+        )
+        if callable(to_dict):
+            session = to_dict()
 
     # Refresh from Stripe when possible so address, shipping, and payment
     # fields reflect Stripe's authoritative Checkout object.
@@ -1265,6 +1271,12 @@ async def stripe_webhook(request: Request):
             session.get("id"),
             expand=["shipping_cost.shipping_rate", "customer_details", "shipping_details"],
         )
+        if not isinstance(session, dict):
+            to_dict = getattr(session, "to_dict_recursive", None) or getattr(
+                session, "to_dict", None
+            )
+            if callable(to_dict):
+                session = to_dict()
     except Exception:
         pass
 

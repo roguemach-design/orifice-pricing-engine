@@ -492,6 +492,59 @@ def test_completed_webhook_updates_once_and_replay_does_not_duplicate(
         db.close()
 
 
+def test_completed_webhook_accepts_stripe_session_objects(
+    monkeypatch, checkout_client, database
+):
+    install_idempotent_stripe(monkeypatch)
+    checkout_response = checkout_client.post(
+        "/checkout/create",
+        json=checkout_body(),
+        headers={"x-api-key": "test-ui-key"},
+    )
+    session_id = checkout_response.json()["session_id"]
+
+    class StripeSessionObject:
+        def __init__(self, values):
+            self.values = values
+
+        def to_dict_recursive(self):
+            return self.values
+
+    monkeypatch.setattr(api_app, "WEBHOOK_SECRET", "whsec_test")
+    monkeypatch.setattr(
+        api_app.stripe.Webhook,
+        "construct_event",
+        lambda payload, signature, secret: {
+            "id": "evt_test_stripe_object",
+            "type": "checkout.session.completed",
+            "data": {"object": StripeSessionObject({"id": session_id})},
+        },
+    )
+    monkeypatch.setattr(
+        api_app.stripe.checkout.Session,
+        "retrieve",
+        lambda *args, **kwargs: StripeSessionObject(completed_session(session_id)),
+    )
+    monkeypatch.setattr(api_app, "_send_email", lambda *args, **kwargs: None)
+
+    response = checkout_client.post(
+        "/stripe/webhook",
+        content=b"{}",
+        headers={"stripe-signature": "valid"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "completed"
+
+    db = database()
+    try:
+        order = db.query(api_app.Order).one()
+        assert order.status == "completed"
+        assert order.last_stripe_event_id == "evt_test_stripe_object"
+    finally:
+        db.close()
+
+
 def test_invalid_webhook_signature_is_rejected(monkeypatch, checkout_client):
     monkeypatch.setattr(api_app, "WEBHOOK_SECRET", "whsec_test")
 
