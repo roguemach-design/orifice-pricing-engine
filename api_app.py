@@ -67,8 +67,8 @@ _jwk_client: Optional[PyJWKClient] = PyJWKClient(SUPABASE_JWKS_URL) if SUPABASE_
 # Stripe config
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
-APP_BASE_URL = os.environ.get("APP_BASE_URL", "https://quote.o-plates.com").rstrip("/")
-APP_ENV = (os.environ.get("APP_ENV") or "production").strip().lower()
+APP_BASE_URL = (os.environ.get("APP_BASE_URL") or "").strip().rstrip("/")
+APP_ENV = (os.environ.get("APP_ENV") or "unset").strip().lower()
 
 # DB config
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
@@ -148,7 +148,8 @@ def init_db() -> None:
 
     Base.metadata.create_all(bind=engine)
 
-    # Lightweight “auto-migration” (best-effort)
+    # Lightweight additive startup migration. Any failure intentionally aborts
+    # startup so the API cannot run against a partially compatible schema.
     with engine.begin() as conn:
         conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS order_number INTEGER"))
         conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_orders_order_number ON orders(order_number)"))
@@ -199,12 +200,24 @@ def _db_required() -> None:
 
 def _stripe_checkout_required() -> None:
     secret_key = str(stripe.api_key or "")
+    if APP_ENV not in {"production", "staging", "preview", "test"}:
+        raise HTTPException(
+            status_code=500,
+            detail="Checkout environment is not configured (set APP_ENV).",
+        )
+    if not APP_BASE_URL or not APP_BASE_URL.startswith("https://"):
+        raise HTTPException(
+            status_code=500,
+            detail="Checkout return URL is not configured (set APP_BASE_URL to an HTTPS URL).",
+        )
     if not secret_key:
         raise HTTPException(
             status_code=500,
             detail="Stripe is not configured (missing STRIPE_SECRET_KEY).",
         )
-    if APP_ENV in {"staging", "preview", "test"} and not secret_key.startswith("sk_test_"):
+    if APP_ENV in {"staging", "preview", "test"} and not secret_key.startswith(
+        ("sk_test_", "rk_test_")
+    ):
         raise HTTPException(
             status_code=500,
             detail="Staging checkout requires Stripe test mode.",
@@ -214,12 +227,12 @@ def _stripe_checkout_required() -> None:
 def _require_api_key(x_api_key: Optional[str] = Header(default=None, alias="x-api-key")) -> None:
     expected = (API_KEY or "").strip()
     provided = (x_api_key or "").strip()
-    if expected and (not provided or provided != expected):
+    if not expected or not provided or provided != expected:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 def _require_admin_key(x_api_key: Optional[str] = Header(default=None, alias="x-api-key")) -> None:
-    expected = (ADMIN_API_KEY or API_KEY or "").strip()
+    expected = (ADMIN_API_KEY or "").strip()
     provided = (x_api_key or "").strip()
     if not expected or not provided or provided != expected:
         raise HTTPException(status_code=401, detail="Unauthorized")
@@ -358,14 +371,19 @@ def _api_key_or_customer_user_id(
     Returns customer_user_id if bearer is valid, else None.
     Raises 401 if neither is valid.
     """
+    # If a bearer credential is present, it is authoritative. Never silently
+    # downgrade an invalid customer session to guest merely because the same
+    # request also contains the UI API key.
+    if authorization:
+        user_id = _decode_supabase_user_id_from_bearer(authorization)
+        if user_id:
+            return user_id
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
     expected = (API_KEY or "").strip()
     provided = (x_api_key or "").strip()
     if expected and provided == expected:
         return None
-
-    user_id = _decode_supabase_user_id_from_bearer(authorization)
-    if user_id:
-        return user_id
 
     raise HTTPException(status_code=401, detail="Unauthorized")
 
@@ -621,8 +639,8 @@ class QuoteRequest(BaseModel):
     ships_in_days: int
 
     handle_label: str = Field(default="No label")
-    # Legacy compatibility field only. New customer configuration does not
-    # request, infer, or populate a chamfer dimension.
+    # Backward-compatible optional field. The final customer UI reveals this
+    # only after Chamfer is selected and never assigns a default width.
     chamfer_width: Optional[float] = Field(default=None)
 
     @field_validator("handle_label")
@@ -1025,7 +1043,10 @@ def checkout_cart_create(
 # Orders endpoints + webhook
 # ----------------------------
 @app.get("/orders/by-session/{session_id}")
-def get_order_by_session(session_id: str):
+def get_order_by_session(
+    session_id: str,
+    authorization: Optional[str] = Header(default=None, alias="authorization"),
+):
     _db_required()
     db = SessionLocal()
     try:
@@ -1033,21 +1054,28 @@ def get_order_by_session(session_id: str):
         if not o:
             raise HTTPException(status_code=404, detail="Order not found yet")
 
-        return {
+        response = {
             "id": o.id,
             "status": o.status,
             "order_number": o.order_number,
             "order_number_display": _format_order_number(o.order_number),
-            "customer_email": o.customer_email,
             "amount_total_usd": (o.amount_total_cents or 0) / 100.0,
             "amount_subtotal_usd": (o.amount_subtotal_cents or 0) / 100.0,
             "amount_shipping_usd": (o.amount_shipping_cents or 0) / 100.0,
             "shipping_service": o.shipping_service,
-            "shipping_name": o.shipping_name,
-            "shipping_address": o.shipping_address,
             "created_at": o.created_at.isoformat() if o.created_at else None,
             "paid_at": o.paid_at.isoformat() if o.paid_at else None,
         }
+        requester_id = _decode_supabase_user_id_from_bearer(authorization)
+        if o.customer_id and requester_id == o.customer_id:
+            response.update(
+                {
+                    "customer_email": o.customer_email,
+                    "shipping_name": o.shipping_name,
+                    "shipping_address": o.shipping_address,
+                }
+            )
+        return response
     finally:
         db.close()
 
@@ -1222,6 +1250,13 @@ async def stripe_webhook(request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid Stripe signature")
 
+    if not isinstance(event, dict):
+        to_dict = getattr(event, "to_dict_recursive", None) or getattr(
+            event, "to_dict", None
+        )
+        if callable(to_dict):
+            event = to_dict()
+
     if event["type"] not in {
         "checkout.session.completed",
         "checkout.session.async_payment_succeeded",
@@ -1229,6 +1264,12 @@ async def stripe_webhook(request: Request):
         return {"ok": True, "status": "ignored"}
 
     session = event["data"]["object"] or {}
+    if not isinstance(session, dict):
+        to_dict = getattr(session, "to_dict_recursive", None) or getattr(
+            session, "to_dict", None
+        )
+        if callable(to_dict):
+            session = to_dict()
 
     # Refresh from Stripe when possible so address, shipping, and payment
     # fields reflect Stripe's authoritative Checkout object.
@@ -1237,6 +1278,12 @@ async def stripe_webhook(request: Request):
             session.get("id"),
             expand=["shipping_cost.shipping_rate", "customer_details", "shipping_details"],
         )
+        if not isinstance(session, dict):
+            to_dict = getattr(session, "to_dict_recursive", None) or getattr(
+                session, "to_dict", None
+            )
+            if callable(to_dict):
+                session = to_dict()
     except Exception:
         pass
 

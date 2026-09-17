@@ -128,6 +128,18 @@ def test_admin_debug_endpoint_fails_closed_without_admin_key(monkeypatch):
     assert response.json()["detail"] == "Unauthorized"
 
 
+def test_admin_routes_do_not_fall_back_to_customer_ui_api_key(monkeypatch):
+    monkeypatch.setattr(api_app, "ADMIN_API_KEY", "")
+    monkeypatch.setattr(api_app, "API_KEY", "customer-ui-key")
+
+    response = TestClient(api_app.app).get(
+        "/debug/whoami", headers={"x-api-key": "customer-ui-key"}
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Unauthorized"
+
+
 def test_refresh_updates_access_and_refresh_tokens_without_clearing_page_state(
     monkeypatch,
 ):
@@ -191,6 +203,53 @@ def test_failed_refresh_clears_an_expired_local_session(monkeypatch):
             auth=SimpleNamespace(refresh_session=fail_refresh)
         ),
     )
+
+    auth._refresh_session_if_needed()
+
+    assert page_state.auth["access_token"] is None
+    assert page_state.auth["refresh_token"] is None
+
+
+def test_malformed_cached_token_is_refreshed_or_cleared(monkeypatch):
+    page_state = AttrDict(
+        auth={
+            "access_token": "not-a-jwt",
+            "refresh_token": "stale-refresh",
+            "user": None,
+            "email": "buyer@example.com",
+        }
+    )
+    monkeypatch.setattr(auth, "st", SimpleNamespace(session_state=page_state))
+    monkeypatch.setattr(auth, "_cookie_clear", lambda: None)
+
+    def fail_refresh(token):
+        raise RuntimeError("invalid refresh token")
+
+    monkeypatch.setattr(
+        auth,
+        "sb",
+        lambda: SimpleNamespace(
+            auth=SimpleNamespace(refresh_session=fail_refresh)
+        ),
+    )
+
+    auth._refresh_session_if_needed()
+
+    assert page_state.auth["access_token"] is None
+    assert page_state.auth["refresh_token"] is None
+
+
+def test_malformed_token_without_refresh_is_not_treated_as_logged_in(monkeypatch):
+    page_state = AttrDict(
+        auth={
+            "access_token": "not-a-jwt",
+            "refresh_token": None,
+            "user": None,
+            "email": "buyer@example.com",
+        }
+    )
+    monkeypatch.setattr(auth, "st", SimpleNamespace(session_state=page_state))
+    monkeypatch.setattr(auth, "_cookie_clear", lambda: None)
 
     auth._refresh_session_if_needed()
 

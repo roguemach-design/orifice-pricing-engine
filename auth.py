@@ -20,7 +20,7 @@ except Exception:
 # ----------------------------
 # Env
 # ----------------------------
-API_BASE = os.environ.get("API_BASE", "https://orifice-pricing-api.onrender.com").rstrip("/")
+API_BASE = (os.environ.get("API_BASE") or "").strip().rstrip("/")
 SUPABASE_URL = (os.environ.get("SUPABASE_URL") or "").strip()
 SUPABASE_ANON_KEY = (os.environ.get("SUPABASE_ANON_KEY") or "").strip()
 
@@ -151,13 +151,21 @@ def _jwt_payload(token: str) -> Optional[dict]:
 def _token_expires_soon(token: str) -> bool:
     pl = _jwt_payload(token)
     if not pl or "exp" not in pl:
-        return False
-    return (pl["exp"] - int(time.time())) <= REFRESH_SKEW_SECONDS
+        return True
+    try:
+        return (int(pl["exp"]) - int(time.time())) <= REFRESH_SKEW_SECONDS
+    except (TypeError, ValueError):
+        return True
 
 
 def _token_is_expired(token: str) -> bool:
     payload = _jwt_payload(token)
-    return bool(payload and payload.get("exp") is not None and payload["exp"] <= int(time.time()))
+    if not payload or payload.get("exp") is None:
+        return True
+    try:
+        return int(payload["exp"]) <= int(time.time())
+    except (TypeError, ValueError):
+        return True
 
 
 def _session_value(session: object, name: str):
@@ -245,6 +253,9 @@ def require_login(message: str = "Log in in the sidebar to continue.") -> None:
 
 
 def api_get(path: str, *, params: dict | None = None, timeout: int = 30) -> requests.Response:
+    if not API_BASE:
+        st.error("The O-Plates pricing service is not configured.")
+        st.stop()
     return requests.get(f"{API_BASE}{path}", headers=auth_headers(), params=params, timeout=timeout)
 
 

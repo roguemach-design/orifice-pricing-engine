@@ -16,8 +16,15 @@ st.caption("View recent orders stored in Postgres via the Orifice Pricing API.")
 # ----------------------------
 # Config
 # ----------------------------
-API_BASE = os.environ.get("API_BASE", "https://orifice-pricing-api.onrender.com").rstrip("/")
-admin_key = (os.environ.get("ADMIN_API_KEY") or os.environ.get("API_KEY") or "").strip()
+API_BASE = (os.environ.get("API_BASE") or "").strip().rstrip("/")
+admin_key = (os.environ.get("ADMIN_API_KEY") or "").strip()
+
+if not API_BASE:
+    st.error("The O-Plates pricing service is not configured.")
+    st.stop()
+if not admin_key:
+    st.error("The O-Plates admin credential is not configured.")
+    st.stop()
 
 # ----------------------------
 # Helpers

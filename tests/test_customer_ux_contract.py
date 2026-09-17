@@ -78,3 +78,32 @@ def test_success_page_allows_guest_confirmation():
     assert "require_login" not in success_source
     assert 'order.get("status") != "completed"' in success_source
     assert 'st.title("Payment received ✅")' in success_source
+
+
+def test_customer_entrypoints_do_not_fall_back_to_production_api():
+    customer_files = [
+        ROOT / "auth.py",
+        ROOT / "pages" / "1_Quote.py",
+        ROOT / "pages" / "3_Quote_Cart.py",
+        ROOT / "pages" / "4_Success.py",
+    ]
+
+    for path in customer_files:
+        source = path.read_text()
+        assert "https://orifice-pricing-api.onrender.com" not in source
+
+
+def test_legacy_entrypoints_are_routing_only_compatibility_shims():
+    expected_routes = {
+        "ui_app.py": 'st.switch_page("pages/1_Quote.py")',
+        "customer_portal.py": 'st.switch_page("pages/2_My_Orders.py")',
+        "my_orders_app.py": 'st.switch_page("pages/2_My_Orders.py")',
+        "quote_cart_app.py": 'st.switch_page("pages/3_Quote_Cart.py")',
+    }
+
+    for filename, route in expected_routes.items():
+        source = (ROOT / filename).read_text()
+        assert route in source
+        assert "calculate_quote" not in source
+        assert "0.062" not in source
+        assert "SUPABASE_URL" not in source

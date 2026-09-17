@@ -109,11 +109,15 @@ st.markdown(
 # -----------------------------
 # Config
 # -----------------------------
-API_BASE = os.environ.get("API_BASE", "https://orifice-pricing-api.onrender.com").rstrip("/")
+API_BASE = (os.environ.get("API_BASE") or "").strip().rstrip("/")
 API_KEY = (os.environ.get("API_KEY") or "").strip()
 
 LOCAL_IMAGE_PATH = os.environ.get("PRODUCT_IMAGE_PATH", "oplatetemp.png")
 PRODUCT_IMAGE_URL = (os.environ.get("PRODUCT_IMAGE_URL") or "").strip()
+
+if not API_BASE:
+    st.error("The O-Plates pricing service is not configured.")
+    st.stop()
 
 
 def _qp_get(name: str) -> Optional[str]:

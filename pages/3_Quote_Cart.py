@@ -24,10 +24,12 @@ if "cart" not in st.session_state or not isinstance(st.session_state.cart, list)
     st.session_state.cart = []
 
 cart: List[Dict[str, Any]] = st.session_state.cart
-API_BASE = os.environ.get(
-    "API_BASE", "https://orifice-pricing-api.onrender.com"
-).rstrip("/")
+API_BASE = (os.environ.get("API_BASE") or "").strip().rstrip("/")
 API_KEY = (os.environ.get("API_KEY") or "").strip()
+
+if not API_BASE:
+    st.error("The O-Plates pricing service is not configured.")
+    st.stop()
 
 checkout_return = st.query_params.get("checkout")
 if isinstance(checkout_return, list):
