@@ -4,6 +4,9 @@ import uuid
 import copy
 import threading
 import re
+import secrets
+import time
+from collections import deque
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
@@ -82,6 +85,44 @@ FROM_EMAIL = os.environ.get("FROM_EMAIL", "orders@o-plates.com")
 
 # Serialize dynamic config apply/restore during pricing (avoids cross-request bleed)
 _CFG_LOCK = threading.Lock()
+
+# Render terminates TLS in front of this service. The current Uvicorn command
+# only trusts forwarded headers from loopback, while Render reaches the process
+# from a private-network peer. Do not derive security controls from an arbitrary
+# X-Forwarded-For value. For this single-instance MVP, rate-limit the verified
+# API/customer/admin principal instead.
+RATE_LIMIT_WINDOW_SECONDS = 60
+CHECKOUT_RATE_LIMIT_REQUESTS = 30
+ADMIN_RATE_LIMIT_REQUESTS = 60
+
+
+class _InMemoryRateLimiter:
+    def __init__(self) -> None:
+        self._events: dict[str, deque[float]] = {}
+        self._lock = threading.Lock()
+
+    def check(self, key: str, limit: int, window_seconds: int) -> None:
+        now = time.monotonic()
+        cutoff = now - window_seconds
+        with self._lock:
+            events = self._events.setdefault(key, deque())
+            while events and events[0] <= cutoff:
+                events.popleft()
+            if len(events) >= limit:
+                retry_after = max(1, int(events[0] + window_seconds - now) + 1)
+                raise HTTPException(
+                    status_code=429,
+                    detail="Too many requests",
+                    headers={"Retry-After": str(retry_after)},
+                )
+            events.append(now)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._events.clear()
+
+
+_RATE_LIMITER = _InMemoryRateLimiter()
 
 # Snapshot of file-based defaults so we can restore after applying DB overrides
 _CFG_BASELINE = {
@@ -227,15 +268,27 @@ def _stripe_checkout_required() -> None:
 def _require_api_key(x_api_key: Optional[str] = Header(default=None, alias="x-api-key")) -> None:
     expected = (API_KEY or "").strip()
     provided = (x_api_key or "").strip()
-    if not expected or not provided or provided != expected:
+    if not expected or not provided or not secrets.compare_digest(
+        provided.encode("utf-8"), expected.encode("utf-8")
+    ):
         raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 def _require_admin_key(x_api_key: Optional[str] = Header(default=None, alias="x-api-key")) -> None:
     expected = (ADMIN_API_KEY or "").strip()
     provided = (x_api_key or "").strip()
-    if not expected or not provided or provided != expected:
+    if not expected or not provided or not secrets.compare_digest(
+        provided.encode("utf-8"), expected.encode("utf-8")
+    ):
         raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+def _rate_limit_admin(_: None = Depends(_require_admin_key)) -> None:
+    _RATE_LIMITER.check(
+        "admin:verified-key",
+        ADMIN_RATE_LIMIT_REQUESTS,
+        RATE_LIMIT_WINDOW_SECONDS,
+    )
 
 
 def _send_email(to_email: str, subject: str, html: str) -> None:
@@ -382,7 +435,9 @@ def _api_key_or_customer_user_id(
 
     expected = (API_KEY or "").strip()
     provided = (x_api_key or "").strip()
-    if expected and provided == expected:
+    if expected and provided and secrets.compare_digest(
+        provided.encode("utf-8"), expected.encode("utf-8")
+    ):
         return None
 
     raise HTTPException(status_code=401, detail="Unauthorized")
@@ -757,7 +812,7 @@ async def quote(request: Request):
 # ----------------------------
 # Admin config endpoints
 # ----------------------------
-@app.get("/admin/config", dependencies=[Depends(_require_admin_key)])
+@app.get("/admin/config", dependencies=[Depends(_rate_limit_admin)])
 def admin_get_config():
     _db_required()
     db = SessionLocal()
@@ -768,7 +823,7 @@ def admin_get_config():
         db.close()
 
 
-@app.put("/admin/config", dependencies=[Depends(_require_admin_key)])
+@app.put("/admin/config", dependencies=[Depends(_rate_limit_admin)])
 async def admin_put_config(request: Request):
     _db_required()
     payload = await request.json()
@@ -816,7 +871,7 @@ async def admin_put_config(request: Request):
         db.close()
 
 
-@app.post("/admin/config/reset", dependencies=[Depends(_require_admin_key)])
+@app.post("/admin/config/reset", dependencies=[Depends(_rate_limit_admin)])
 def admin_reset_config():
     """
     Reset the DB 'active' config to the current file defaults (tuning_knobs.py baseline).
@@ -848,6 +903,12 @@ def checkout_create(
     req: CheckoutCreateRequest,
     customer_user_id: Optional[str] = Depends(_api_key_or_customer_user_id),
 ):
+    principal = f"customer:{customer_user_id}" if customer_user_id else "verified-ui-key"
+    _RATE_LIMITER.check(
+        f"checkout:{principal}",
+        CHECKOUT_RATE_LIMIT_REQUESTS,
+        RATE_LIMIT_WINDOW_SECONDS,
+    )
     _stripe_checkout_required()
     _db_required()
 
@@ -1152,7 +1213,7 @@ def me_order_detail(order_id: str, customer_user_id: str = Depends(_require_cust
         db.close()
 
 
-@app.get("/admin/orders", dependencies=[Depends(_require_admin_key)])
+@app.get("/admin/orders", dependencies=[Depends(_rate_limit_admin)])
 def admin_list_orders(q: Optional[str] = None, limit: int = 50):
     _db_required()
     limit = max(1, min(int(limit), 200))
@@ -1207,7 +1268,7 @@ def debug_whoami(
     }
 
 
-@app.get("/admin/orders/{order_id}", dependencies=[Depends(_require_admin_key)])
+@app.get("/admin/orders/{order_id}", dependencies=[Depends(_rate_limit_admin)])
 def admin_get_order(order_id: str):
     _db_required()
     db = SessionLocal()

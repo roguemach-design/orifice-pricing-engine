@@ -179,6 +179,27 @@ def test_guest_checkout_reprices_persists_pending_and_is_idempotent(
         db.close()
 
 
+def test_checkout_rate_limit_allows_requests_below_limit_then_enforces(
+    monkeypatch, checkout_client
+):
+    install_idempotent_stripe(monkeypatch)
+    monkeypatch.setattr(api_app, "CHECKOUT_RATE_LIMIT_REQUESTS", 2)
+    api_app._RATE_LIMITER.clear()
+    headers = {"x-api-key": "test-ui-key"}
+
+    try:
+        first = checkout_client.post("/checkout/create", json=checkout_body(), headers=headers)
+        second = checkout_client.post("/checkout/create", json=checkout_body(), headers=headers)
+        limited = checkout_client.post("/checkout/create", json=checkout_body(), headers=headers)
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert limited.status_code == 429
+        assert limited.headers["retry-after"]
+    finally:
+        api_app._RATE_LIMITER.clear()
+
+
 def test_checkout_rejects_stale_pricing_before_stripe(
     monkeypatch, checkout_client
 ):
