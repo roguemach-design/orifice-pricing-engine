@@ -1,6 +1,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -138,6 +139,84 @@ def test_admin_routes_do_not_fall_back_to_customer_ui_api_key(monkeypatch):
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Unauthorized"
+
+
+def test_admin_key_accepts_valid_key_and_rejects_invalid_key(monkeypatch):
+    monkeypatch.setattr(api_app, "ADMIN_API_KEY", "admin-test-key")
+    comparisons = []
+    real_compare_digest = api_app.secrets.compare_digest
+
+    def observed_compare_digest(provided, expected):
+        comparisons.append((provided, expected))
+        return real_compare_digest(provided, expected)
+
+    monkeypatch.setattr(api_app.secrets, "compare_digest", observed_compare_digest)
+
+    api_app._require_admin_key("admin-test-key")
+    with pytest.raises(api_app.HTTPException) as exc_info:
+        api_app._require_admin_key("wrong-key")
+
+    assert exc_info.value.status_code == 401
+    assert comparisons == [
+        (b"admin-test-key", b"admin-test-key"),
+        (b"wrong-key", b"admin-test-key"),
+    ]
+
+
+def test_authenticated_customer_identity_behavior_is_unchanged(monkeypatch):
+    monkeypatch.setattr(
+        api_app,
+        "_decode_supabase_user_id_from_bearer",
+        lambda authorization: "verified-user" if authorization == "Bearer valid" else None,
+    )
+
+    assert (
+        api_app._api_key_or_customer_user_id(
+            x_api_key=None,
+            authorization="Bearer valid",
+        )
+        == "verified-user"
+    )
+    with pytest.raises(api_app.HTTPException) as exc_info:
+        api_app._api_key_or_customer_user_id(
+            x_api_key="customer-ui-key",
+            authorization="Bearer invalid",
+        )
+
+    assert exc_info.value.status_code == 401
+
+
+def test_admin_rate_limit_is_shared_across_all_admin_routes(monkeypatch):
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    api_app.Base.metadata.create_all(bind=engine)
+    factory = sessionmaker(bind=engine)
+    monkeypatch.setattr(api_app, "SessionLocal", factory)
+    monkeypatch.setattr(api_app, "ADMIN_API_KEY", "admin-test-key")
+    monkeypatch.setattr(api_app, "ADMIN_RATE_LIMIT_REQUESTS", 2)
+    api_app._RATE_LIMITER.clear()
+
+    try:
+        client = TestClient(api_app.app)
+        headers = {"x-api-key": "admin-test-key"}
+
+        invalid = client.get("/admin/config", headers={"x-api-key": "wrong-key"})
+        first = client.get("/admin/config", headers=headers)
+        second = client.get("/admin/orders", headers=headers)
+        limited = client.get("/admin/config", headers=headers)
+
+        assert invalid.status_code == 401
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert limited.status_code == 429
+        assert limited.headers["retry-after"]
+    finally:
+        api_app._RATE_LIMITER.clear()
+        api_app.Base.metadata.drop_all(bind=engine)
+        engine.dispose()
 
 
 def test_refresh_updates_access_and_refresh_tokens_without_clearing_page_state(

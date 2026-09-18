@@ -164,3 +164,24 @@ def test_quote_api_key_fails_closed_when_server_key_is_missing(monkeypatch):
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Unauthorized"
+
+
+def test_quote_api_key_accepts_valid_key_and_rejects_invalid_key(monkeypatch):
+    comparisons = []
+    real_compare_digest = api_app.secrets.compare_digest
+
+    def observed_compare_digest(provided, expected):
+        comparisons.append((provided, expected))
+        return real_compare_digest(provided, expected)
+
+    monkeypatch.setattr(api_app.secrets, "compare_digest", observed_compare_digest)
+
+    api_app._require_api_key("test-quote-key")
+    with pytest.raises(api_app.HTTPException) as exc_info:
+        api_app._require_api_key("wrong-key")
+
+    assert exc_info.value.status_code == 401
+    assert comparisons == [
+        (b"test-quote-key", b"test-quote-key"),
+        (b"wrong-key", b"test-quote-key"),
+    ]

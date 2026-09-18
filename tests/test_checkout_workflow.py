@@ -179,6 +179,110 @@ def test_guest_checkout_reprices_persists_pending_and_is_idempotent(
         db.close()
 
 
+def test_checkout_rate_limit_allows_requests_below_limit_then_enforces(
+    monkeypatch, checkout_client
+):
+    install_idempotent_stripe(monkeypatch)
+    monkeypatch.setattr(api_app, "CHECKOUT_RATE_LIMIT_REQUESTS", 2)
+    api_app._RATE_LIMITER.clear()
+    headers = {"x-api-key": "test-ui-key"}
+
+    try:
+        first = checkout_client.post("/checkout/create", json=checkout_body(), headers=headers)
+        second = checkout_client.post("/checkout/create", json=checkout_body(), headers=headers)
+        limited = checkout_client.post("/checkout/create", json=checkout_body(), headers=headers)
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert limited.status_code == 429
+        assert limited.headers["retry-after"]
+    finally:
+        api_app._RATE_LIMITER.clear()
+
+
+def test_signed_jwt_is_authoritative_over_valid_ui_key(
+    monkeypatch, checkout_client, database
+):
+    from datetime import datetime, timedelta, timezone
+
+    from cryptography.hazmat.primitives.asymmetric import rsa
+
+    calls = install_idempotent_stripe(monkeypatch)
+    monkeypatch.setattr(api_app, "_RATE_LIMITER", api_app._InMemoryRateLimiter())
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    monkeypatch.setattr(
+        api_app,
+        "_jwk_client",
+        SimpleNamespace(
+            get_signing_key_from_jwt=lambda token: SimpleNamespace(
+                key=private_key.public_key()
+            )
+        ),
+    )
+    issuer = "https://auth.example.test/v1"
+    monkeypatch.setattr(api_app, "SUPABASE_JWT_ISSUER", issuer)
+    monkeypatch.setattr(api_app, "SUPABASE_JWT_AUD", "authenticated")
+    now = datetime.now(timezone.utc)
+    claims = {"sub": "signed-customer", "iss": issuer, "aud": "authenticated"}
+    expired = api_app.jwt.encode(
+        {**claims, "exp": now - timedelta(hours=1)}, private_key, algorithm="RS256"
+    )
+    valid = api_app.jwt.encode(
+        {**claims, "exp": now + timedelta(hours=1)}, private_key, algorithm="RS256"
+    )
+
+    rejected = checkout_client.post(
+        "/checkout/create",
+        json=checkout_body(),
+        headers={"Authorization": f"Bearer {expired}", "x-api-key": "test-ui-key"},
+    )
+    assert rejected.status_code == 401
+    assert calls == []
+    with database() as db:
+        assert db.query(api_app.Order).count() == 0
+
+    accepted = checkout_client.post(
+        "/checkout/create",
+        json=checkout_body(),
+        headers={"Authorization": f"Bearer {valid}", "x-api-key": "test-ui-key"},
+    )
+    assert accepted.status_code == 200
+    assert calls[0]["metadata"]["customer_id"] == "signed-customer"
+    with database() as db:
+        assert db.query(api_app.Order).one().customer_id == "signed-customer"
+
+
+def test_checkout_rate_limit_isolates_customer_principals(monkeypatch, checkout_client):
+    install_idempotent_stripe(monkeypatch)
+    monkeypatch.setattr(api_app, "_RATE_LIMITER", api_app._InMemoryRateLimiter())
+    monkeypatch.setattr(api_app, "CHECKOUT_RATE_LIMIT_REQUESTS", 2)
+    monkeypatch.setattr(
+        api_app,
+        "_decode_supabase_user_id_from_bearer",
+        lambda authorization: {
+            "Bearer customer-a": "customer-a",
+            "Bearer customer-b": "customer-b",
+        }.get(authorization),
+    )
+    headers_a = {"Authorization": "Bearer customer-a", "x-api-key": "test-ui-key"}
+    headers_b = {"Authorization": "Bearer customer-b", "x-api-key": "test-ui-key"}
+    body_a = checkout_body()
+    body_b = checkout_body(idempotency_key="00000000-0000-4000-8000-000000000002")
+
+    def request(body, headers):
+        return checkout_client.post("/checkout/create", json=body, headers=headers)
+
+    assert request(body_a, headers_a).status_code == 200
+    assert request(body_a, headers_a).status_code == 200
+    limited_a = request(body_a, headers_a)
+    assert limited_a.status_code == 429
+    assert limited_a.headers["retry-after"]
+    assert request(body_b, headers_b).status_code == 200
+    assert request(body_b, headers_b).status_code == 200
+    assert request(body_b, headers_b).status_code == 429
+    assert request(body_a, headers_a).status_code == 429
+
+
 def test_checkout_rejects_stale_pricing_before_stripe(
     monkeypatch, checkout_client
 ):
