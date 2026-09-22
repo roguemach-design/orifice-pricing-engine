@@ -21,6 +21,9 @@ except Exception:
 # Env
 # ----------------------------
 API_BASE = (os.environ.get("API_BASE") or "").strip().rstrip("/")
+if API_BASE and "://" not in API_BASE:
+    # Render private-service host:port values intentionally have no URL scheme.
+    API_BASE = f"http://{API_BASE}"
 SUPABASE_URL = (os.environ.get("SUPABASE_URL") or "").strip()
 SUPABASE_ANON_KEY = (os.environ.get("SUPABASE_ANON_KEY") or "").strip()
 
@@ -244,6 +247,22 @@ def auth_headers() -> Dict[str, str]:
     _refresh_session_if_needed()
     tok = st.session_state.auth.get("access_token")
     return {"Authorization": f"Bearer {tok}"} if tok else {}
+
+
+def current_user_id_hint() -> Optional[str]:
+    """Return the JWT subject for UI visibility only.
+
+    This client-side decode is never an authorization decision. Internal
+    drawing access is independently verified by the pricing API using the
+    configured Supabase JWKS, issuer, audience, and server-side allowlist.
+    """
+
+    if not is_logged_in():
+        return None
+    token = st.session_state.auth.get("access_token")
+    payload = _jwt_payload(token) if token else None
+    subject = payload.get("sub") if payload else None
+    return str(subject) if subject else None
 
 
 def require_login(message: str = "Log in in the sidebar to continue.") -> None:

@@ -94,6 +94,7 @@ _CFG_LOCK = threading.Lock()
 RATE_LIMIT_WINDOW_SECONDS = 60
 CHECKOUT_RATE_LIMIT_REQUESTS = 30
 ADMIN_RATE_LIMIT_REQUESTS = 60
+DRAWING_ACCESS_RATE_LIMIT_REQUESTS = 60
 
 
 class _InMemoryRateLimiter:
@@ -410,6 +411,45 @@ def _require_customer_user_id(
     user_id = _decode_supabase_user_id_from_bearer(authorization)
     if not user_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    return user_id
+
+
+def _drawing_assisted_feature_enabled() -> bool:
+    return (os.environ.get("OPLATES_DRAWING_ASSISTED_ENABLED") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _drawing_assisted_allowed_user_ids() -> frozenset[str]:
+    return frozenset(
+        value.strip()
+        for value in (
+            os.environ.get("OPLATES_DRAWING_ASSISTED_ALLOWED_USER_IDS") or ""
+        ).split(",")
+        if value.strip()
+    )
+
+
+def _require_internal_drawing_user_id(
+    authorization: Optional[str] = Header(default=None, alias="authorization"),
+) -> str:
+    # Hide an entirely disabled internal capability instead of advertising it.
+    if not _drawing_assisted_feature_enabled():
+        raise HTTPException(status_code=404, detail="Not found")
+    user_id = _decode_supabase_user_id_from_bearer(authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    allowed = _drawing_assisted_allowed_user_ids()
+    if not allowed or user_id not in allowed:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    _RATE_LIMITER.check(
+        f"drawing-access:{user_id}",
+        DRAWING_ACCESS_RATE_LIMIT_REQUESTS,
+        RATE_LIMIT_WINDOW_SECONDS,
+    )
     return user_id
 
 
@@ -732,6 +772,19 @@ class CartCheckoutCreateRequest(BaseModel):
 @app.get("/health")
 def health():
     return {"ok": True}
+
+
+@app.get("/internal/drawing-intake/access")
+def internal_drawing_intake_access(
+    user_id: str = Depends(_require_internal_drawing_user_id),
+):
+    """Server-verified gate for the internal-only Streamlit integration.
+
+    Drawing bytes are not accepted by this endpoint. Local OCR remains inside
+    the customer UI server process and only runs after this gate succeeds.
+    """
+
+    return {"enabled": True, "authorized": True, "user_id": user_id}
 
 
 # Public: UI can fetch what is currently enabled without redeploy

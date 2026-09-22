@@ -1,0 +1,15 @@
+{
+  "corpus_version": "1.0",
+  "document_id": "synthetic-missing-field",
+  "synthetic": true,
+  "categories": ["digital_pdf", "missing_field", "abstention"],
+  "source_document": "missing_field.pdf",
+  "expected_fields": {
+    "outside_diameter": {"status": "detected", "value": 6.0, "unit": "in"},
+    "bore_diameter": {"status": "detected", "value": 1.5, "unit": "in"},
+    "thickness": {"status": "not_detected"},
+    "material": {"status": "detected", "value": "304"},
+    "chamfer_present": {"status": "detected", "value": false}
+  },
+  "expected_validation_codes": []
+}

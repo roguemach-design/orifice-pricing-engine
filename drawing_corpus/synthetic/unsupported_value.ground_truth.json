@@ -1,0 +1,14 @@
+{
+  "corpus_version": "1.0",
+  "document_id": "synthetic-unsupported-value",
+  "synthetic": true,
+  "categories": ["digital_pdf", "unsupported", "out_of_envelope"],
+  "source_document": "unsupported_value.pdf",
+  "expected_fields": {
+    "outside_diameter": {"status": "detected", "value": 60.0, "unit": "in"},
+    "bore_diameter": {"status": "detected", "value": 2.0, "unit": "in"},
+    "thickness": {"status": "detected", "value": 0.25, "unit": "in"},
+    "material": {"status": "detected", "value": "TITANIUM"}
+  },
+  "expected_validation_codes": ["outside_diameter_out_of_envelope", "unsupported_material"]
+}
