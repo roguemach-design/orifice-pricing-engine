@@ -6,6 +6,7 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
+from urllib.parse import unquote
 
 import requests
 import streamlit as st
@@ -71,43 +72,48 @@ def sb() -> Client:
 # ----------------------------
 # Cookie manager
 # ----------------------------
-def _start_cookie_component_run():
-    if stx is None:
-        st.session_state.pop("_cookie_mgr_instance", None)
-        return None
-
-    # CookieManager is a Streamlit component. Its first call in a fresh browser
-    # session returns the Python default while the component reads browser
-    # cookies, then asks Streamlit to rerun with the real value. Reconstructing
-    # it once at the start of every script run lets that second run consume the
-    # component result. Calls later in the same run must reuse this wrapper to
-    # avoid rendering duplicate Streamlit elements with the same key.
-    manager = stx.CookieManager(key="oplates_auth_cookie_reader")
-    st.session_state["_cookie_mgr_instance"] = manager
-    return manager
-
-
 def _cookie_mgr():
     if stx is None:
         return None
 
     manager = st.session_state.get("_cookie_mgr_instance")
     if manager is None:
-        manager = _start_cookie_component_run()
+        manager = stx.CookieManager(key="oplates_auth_cookie_manager")
+        st.session_state["_cookie_mgr_instance"] = manager
     return manager
 
 
 def _cookie_get() -> Optional[dict]:
-    cm = _cookie_mgr()
-    if cm is None:
-        return None
-    raw = cm.get(COOKIE_NAME)
+    # Streamlit exposes cookies from the browser's initial websocket request.
+    # This is synchronous and avoids depending on an asynchronously rendered
+    # component during session restoration. The component remains responsible
+    # only for writing and clearing cookies in the browser.
+    context_available = False
+    raw = None
+    try:
+        cookies = st.context.cookies
+        context_available = True
+        raw = cookies.get(COOKIE_NAME)
+    except (AttributeError, RuntimeError):
+        pass
+
+    # Preserve compatibility with older Streamlit versions and bare unit-test
+    # contexts that do not expose st.context.cookies.
+    if not context_available:
+        cm = _cookie_mgr()
+        if cm is None:
+            return None
+        raw = cm.get(COOKIE_NAME)
+
     if not raw:
         return None
     try:
         return json.loads(raw)
-    except Exception:
-        return None
+    except (TypeError, json.JSONDecodeError):
+        try:
+            return json.loads(unquote(raw))
+        except (TypeError, json.JSONDecodeError):
+            return None
 
 
 def _cookie_set(payload: dict) -> None:
@@ -124,11 +130,13 @@ def _cookie_set(payload: dict) -> None:
             json.dumps(payload),
             expires_at=expires_dt,
         )
+        st.session_state.pop("_auth_cookie_cleared", None)
     except Exception:
         pass
 
 
 def _cookie_clear() -> None:
+    st.session_state["_auth_cookie_cleared"] = True
     cm = _cookie_mgr()
     if cm is None:
         return
@@ -142,6 +150,8 @@ def _restore_auth_from_cookie_if_needed() -> None:
     _ensure_auth_state()
 
     if st.session_state.auth.get("access_token"):
+        return
+    if st.session_state.get("_auth_cookie_cleared"):
         return
 
     data = _cookie_get()
@@ -314,9 +324,6 @@ def _render_connection_debug() -> None:
 
 
 def render_auth_sidebar(*, show_debug: bool = False) -> None:
-    # Refresh the browser-cookie observation once per Streamlit script run.
-    _start_cookie_component_run()
-
     # ✅ IMPORTANT: restore BEFORE widgets
     _ensure_auth_state()
     _restore_auth_from_cookie_if_needed()
