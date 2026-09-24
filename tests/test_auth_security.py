@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -337,51 +338,76 @@ def test_malformed_token_without_refresh_is_not_treated_as_logged_in(monkeypatch
     assert page_state.auth["refresh_token"] is None
 
 
-def test_cookie_manager_is_reconstructed_at_start_of_each_streamlit_run(monkeypatch):
-    created = []
+def test_cookie_get_prefers_synchronous_streamlit_request_cookie(monkeypatch):
+    payload = {
+        "access_token": "request-access",
+        "refresh_token": "request-refresh",
+        "email": "buyer@example.com",
+    }
     page_state = AttrDict()
-
-    class FakeCookieManager:
-        def __init__(self, *, key):
-            created.append(key)
-
-    monkeypatch.setattr(auth, "st", SimpleNamespace(session_state=page_state))
     monkeypatch.setattr(
         auth,
-        "stx",
-        SimpleNamespace(CookieManager=FakeCookieManager),
+        "st",
+        SimpleNamespace(
+            session_state=page_state,
+            context=SimpleNamespace(cookies={auth.COOKIE_NAME: json.dumps(payload)}),
+        ),
     )
-
-    first = auth._start_cookie_component_run()
-    second = auth._start_cookie_component_run()
-
-    assert first is not second
-    assert created == [
-        "oplates_auth_cookie_reader",
-        "oplates_auth_cookie_reader",
-    ]
-
-
-def test_cookie_manager_is_reused_within_one_streamlit_run(monkeypatch):
-    created = []
-    page_state = AttrDict()
-
-    class FakeCookieManager:
-        def __init__(self, *, key):
-            created.append(key)
-
-    monkeypatch.setattr(auth, "st", SimpleNamespace(session_state=page_state))
     monkeypatch.setattr(
         auth,
-        "stx",
-        SimpleNamespace(CookieManager=FakeCookieManager),
+        "_cookie_mgr",
+        lambda: pytest.fail("component reader should not be used"),
     )
 
-    started = auth._start_cookie_component_run()
+    assert auth._cookie_get() == payload
 
-    assert auth._cookie_mgr() is started
-    assert auth._cookie_mgr() is started
-    assert created == ["oplates_auth_cookie_reader"]
+
+def test_cookie_get_decodes_request_cookie_serialized_by_browser(monkeypatch):
+    payload = {
+        "access_token": "request-access",
+        "refresh_token": "request-refresh",
+        "email": "buyer@example.com",
+    }
+    encoded = "%7B%22access_token%22%3A%20%22request-access%22%2C%20%22refresh_token%22%3A%20%22request-refresh%22%2C%20%22email%22%3A%20%22buyer%40example.com%22%7D"
+    monkeypatch.setattr(
+        auth,
+        "st",
+        SimpleNamespace(
+            session_state=AttrDict(),
+            context=SimpleNamespace(cookies={auth.COOKIE_NAME: encoded}),
+        ),
+    )
+
+    assert auth._cookie_get() == payload
+
+
+def test_cleared_cookie_cannot_restore_from_stale_request_context(monkeypatch):
+    page_state = AttrDict(
+        auth={
+            "access_token": None,
+            "refresh_token": None,
+            "user": None,
+            "email": None,
+        },
+        _auth_cookie_cleared=True,
+    )
+    payload = {
+        "access_token": "stale-access",
+        "refresh_token": "stale-refresh",
+        "email": "buyer@example.com",
+    }
+    monkeypatch.setattr(
+        auth,
+        "st",
+        SimpleNamespace(
+            session_state=page_state,
+            context=SimpleNamespace(cookies={auth.COOKIE_NAME: json.dumps(payload)}),
+        ),
+    )
+
+    auth._restore_auth_from_cookie_if_needed()
+
+    assert page_state.auth["access_token"] is None
 
 
 def test_customer_code_contains_no_supabase_service_role_secret():
