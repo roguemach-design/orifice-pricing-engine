@@ -69,16 +69,32 @@ def sb() -> Client:
 
 
 # ----------------------------
-# Cookie manager (singleton, NO caching)
+# Cookie manager
 # ----------------------------
+def _start_cookie_component_run():
+    if stx is None:
+        st.session_state.pop("_cookie_mgr_instance", None)
+        return None
+
+    # CookieManager is a Streamlit component. Its first call in a fresh browser
+    # session returns the Python default while the component reads browser
+    # cookies, then asks Streamlit to rerun with the real value. Reconstructing
+    # it once at the start of every script run lets that second run consume the
+    # component result. Calls later in the same run must reuse this wrapper to
+    # avoid rendering duplicate Streamlit elements with the same key.
+    manager = stx.CookieManager(key="oplates_auth_cookie_reader")
+    st.session_state["_cookie_mgr_instance"] = manager
+    return manager
+
+
 def _cookie_mgr():
     if stx is None:
         return None
 
-    if "_cookie_mgr_instance" not in st.session_state:
-        st.session_state["_cookie_mgr_instance"] = stx.CookieManager()
-
-    return st.session_state["_cookie_mgr_instance"]
+    manager = st.session_state.get("_cookie_mgr_instance")
+    if manager is None:
+        manager = _start_cookie_component_run()
+    return manager
 
 
 def _cookie_get() -> Optional[dict]:
@@ -298,6 +314,9 @@ def _render_connection_debug() -> None:
 
 
 def render_auth_sidebar(*, show_debug: bool = False) -> None:
+    # Refresh the browser-cookie observation once per Streamlit script run.
+    _start_cookie_component_run()
+
     # ✅ IMPORTANT: restore BEFORE widgets
     _ensure_auth_state()
     _restore_auth_from_cookie_if_needed()
