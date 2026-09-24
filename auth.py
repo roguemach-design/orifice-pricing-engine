@@ -1,6 +1,7 @@
 # auth.py
 import base64
 import json
+import logging
 import os
 import time
 from datetime import datetime, timedelta, timezone
@@ -9,6 +10,8 @@ from typing import Dict, Optional
 import requests
 import streamlit as st
 from supabase import Client, create_client
+
+logger = logging.getLogger(__name__)
 
 # Cookie manager (for "stay logged in")
 try:
@@ -195,7 +198,9 @@ def _refresh_session_if_needed() -> None:
 
     try:
         resp = sb().auth.refresh_session(refresh_token)
-        session = getattr(resp, "session", None) or (resp.get("session") if isinstance(resp, dict) else None)
+        session = getattr(resp, "session", None) or (
+            resp.get("session") if isinstance(resp, dict) else None
+        )
 
         if not session:
             if _token_is_expired(access_token):
@@ -271,11 +276,15 @@ def require_login(message: str = "Log in in the sidebar to continue.") -> None:
         st.stop()
 
 
-def api_get(path: str, *, params: dict | None = None, timeout: int = 30) -> requests.Response:
+def api_get(
+    path: str, *, params: dict | None = None, timeout: int = 30
+) -> requests.Response:
     if not API_BASE:
         st.error("The O-Plates pricing service is not configured.")
         st.stop()
-    return requests.get(f"{API_BASE}{path}", headers=auth_headers(), params=params, timeout=timeout)
+    return requests.get(
+        f"{API_BASE}{path}", headers=auth_headers(), params=params, timeout=timeout
+    )
 
 
 # ----------------------------
@@ -302,7 +311,9 @@ def render_auth_sidebar(*, show_debug: bool = False) -> None:
         st.subheader("Account")
 
         if not is_logged_in():
-            email = st.text_input("Email", value=st.session_state.auth.get("email") or "").strip()
+            email = st.text_input(
+                "Email", value=st.session_state.auth.get("email") or ""
+            ).strip()
 
             c1, c2 = st.columns(2)
             send_code = c1.button("Send code")
@@ -323,7 +334,17 @@ def render_auth_sidebar(*, show_debug: bool = False) -> None:
                         )
                         st.session_state.auth["email"] = email
                         st.success("Check your email for the sign-in code.")
-                    except Exception:
+                    except Exception as exc:
+                        # Keep the customer-facing response generic, but retain the
+                        # provider's non-sensitive classification for internal
+                        # owner-acceptance diagnostics. Never log the email, token,
+                        # API key, or exception message here.
+                        logger.warning(
+                            "Supabase OTP send failed: exception=%s status=%s code=%s",
+                            type(exc).__name__,
+                            getattr(exc, "status", None),
+                            getattr(exc, "code", None),
+                        )
                         st.error("We couldn’t send a sign-in code. Please try again.")
 
             if verify_code:
@@ -356,9 +377,10 @@ def render_auth_sidebar(*, show_debug: bool = False) -> None:
                             }
                         )
                         st.success("You’re logged in.")
-                        st.rerun()
                     except Exception:
-                        st.error("That sign-in code is invalid or expired. Request a new code.")
+                        st.error(
+                            "That sign-in code is invalid or expired. Request a new code."
+                        )
 
         else:
             st.success(f"Logged in as {st.session_state.auth.get('email')}")
@@ -367,4 +389,6 @@ def render_auth_sidebar(*, show_debug: bool = False) -> None:
 
         if show_debug:
             st.divider()
-            st.write("Has access token:", bool(st.session_state.auth.get("access_token")))
+            st.write(
+                "Has access token:", bool(st.session_state.auth.get("access_token"))
+            )
