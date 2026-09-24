@@ -10,7 +10,6 @@ from sqlalchemy.pool import StaticPool
 import api_app
 import auth
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -34,7 +33,9 @@ def test_supabase_jwt_is_verified_with_key_issuer_audience_and_expiry(monkeypatc
     monkeypatch.setattr(api_app, "_jwk_client", FakeJwkClient())
     monkeypatch.setattr(api_app, "SUPABASE_JWT_ISSUER", "https://auth.example.test/v1")
     monkeypatch.setattr(api_app, "SUPABASE_JWT_AUD", "authenticated")
-    monkeypatch.setattr(api_app.jwt, "get_unverified_header", lambda token: {"alg": "RS256"})
+    monkeypatch.setattr(
+        api_app.jwt, "get_unverified_header", lambda token: {"alg": "RS256"}
+    )
     monkeypatch.setattr(api_app.jwt, "decode", decode)
 
     user_id = api_app._decode_supabase_user_id_from_bearer("Bearer signed-token")
@@ -50,7 +51,9 @@ def test_supabase_jwt_is_verified_with_key_issuer_audience_and_expiry(monkeypatc
 def test_supabase_jwt_rejects_unapproved_algorithm(monkeypatch):
     monkeypatch.setattr(api_app, "_jwk_client", object())
     monkeypatch.setattr(api_app, "SUPABASE_JWT_ISSUER", "issuer")
-    monkeypatch.setattr(api_app.jwt, "get_unverified_header", lambda token: {"alg": "HS256"})
+    monkeypatch.setattr(
+        api_app.jwt, "get_unverified_header", lambda token: {"alg": "HS256"}
+    )
 
     assert api_app._decode_supabase_user_id_from_bearer("Bearer token") is None
 
@@ -167,7 +170,9 @@ def test_authenticated_customer_identity_behavior_is_unchanged(monkeypatch):
     monkeypatch.setattr(
         api_app,
         "_decode_supabase_user_id_from_bearer",
-        lambda authorization: "verified-user" if authorization == "Bearer valid" else None,
+        lambda authorization: (
+            "verified-user" if authorization == "Bearer valid" else None
+        ),
     )
 
     assert (
@@ -278,9 +283,7 @@ def test_failed_refresh_clears_an_expired_local_session(monkeypatch):
     monkeypatch.setattr(
         auth,
         "sb",
-        lambda: SimpleNamespace(
-            auth=SimpleNamespace(refresh_session=fail_refresh)
-        ),
+        lambda: SimpleNamespace(auth=SimpleNamespace(refresh_session=fail_refresh)),
     )
 
     auth._refresh_session_if_needed()
@@ -307,9 +310,7 @@ def test_malformed_cached_token_is_refreshed_or_cleared(monkeypatch):
     monkeypatch.setattr(
         auth,
         "sb",
-        lambda: SimpleNamespace(
-            auth=SimpleNamespace(refresh_session=fail_refresh)
-        ),
+        lambda: SimpleNamespace(auth=SimpleNamespace(refresh_session=fail_refresh)),
     )
 
     auth._refresh_session_if_needed()
@@ -334,6 +335,53 @@ def test_malformed_token_without_refresh_is_not_treated_as_logged_in(monkeypatch
 
     assert page_state.auth["access_token"] is None
     assert page_state.auth["refresh_token"] is None
+
+
+def test_cookie_manager_is_reconstructed_at_start_of_each_streamlit_run(monkeypatch):
+    created = []
+    page_state = AttrDict()
+
+    class FakeCookieManager:
+        def __init__(self, *, key):
+            created.append(key)
+
+    monkeypatch.setattr(auth, "st", SimpleNamespace(session_state=page_state))
+    monkeypatch.setattr(
+        auth,
+        "stx",
+        SimpleNamespace(CookieManager=FakeCookieManager),
+    )
+
+    first = auth._start_cookie_component_run()
+    second = auth._start_cookie_component_run()
+
+    assert first is not second
+    assert created == [
+        "oplates_auth_cookie_reader",
+        "oplates_auth_cookie_reader",
+    ]
+
+
+def test_cookie_manager_is_reused_within_one_streamlit_run(monkeypatch):
+    created = []
+    page_state = AttrDict()
+
+    class FakeCookieManager:
+        def __init__(self, *, key):
+            created.append(key)
+
+    monkeypatch.setattr(auth, "st", SimpleNamespace(session_state=page_state))
+    monkeypatch.setattr(
+        auth,
+        "stx",
+        SimpleNamespace(CookieManager=FakeCookieManager),
+    )
+
+    started = auth._start_cookie_component_run()
+
+    assert auth._cookie_mgr() is started
+    assert auth._cookie_mgr() is started
+    assert created == ["oplates_auth_cookie_reader"]
 
 
 def test_customer_code_contains_no_supabase_service_role_secret():
