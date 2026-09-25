@@ -621,6 +621,63 @@ def test_real_page_keeps_manual_pricing_and_existing_svg_when_feature_disabled(
     assert "render_plate_svg" in (ROOT / "pages" / "1_Quote.py").read_text()
 
 
+def test_manual_chamfer_waits_for_width_before_requesting_price(
+    monkeypatch, active_config
+):
+    from streamlit.testing.v1 import AppTest
+
+    monkeypatch.setenv("API_BASE", "http://test")
+    monkeypatch.delenv("OPLATES_DRAWING_ASSISTED_ENABLED", raising=False)
+    monkeypatch.setattr(auth, "API_BASE", "http://test")
+    quote_calls = []
+
+    def fake_get(url, **kwargs):
+        assert url.endswith("/config/active")
+        return _Response(active_config)
+
+    def fake_post(url, **kwargs):
+        quote_calls.append(kwargs["json"])
+        return _Response(
+            {
+                "unit_price": 100.0,
+                "total_price": 100.0,
+                "area_sq_in": 10.0,
+                "estimated_total_weight_lb": 5.0,
+                "estimated_package_in": {"length": 10, "width": 10, "height": 2},
+                "configuration_id": "manual-chamfer",
+            }
+        )
+
+    with patch("requests.get", fake_get), patch("requests.post", fake_post):
+        app = AppTest.from_file(str(ROOT / "pages" / "1_Quote.py"), default_timeout=20)
+        app.run()
+        initial_count = len(quote_calls)
+        next(field for field in app.checkbox if field.label == "Chamfer").set_value(
+            True
+        ).run()
+        assert not app.exception
+        assert not app.error
+        assert len(quote_calls) == initial_count
+        assert any("Complete the required fields" in item.value for item in app.info)
+        assert (
+            next(
+                field
+                for field in app.number_input
+                if field.label == "Chamfer Width (in.)"
+            ).value
+            is None
+        )
+
+        next(
+            field for field in app.number_input if field.label == "Chamfer Width (in.)"
+        ).set_value(0.0625).run()
+        assert not app.exception
+        assert not app.error
+        assert len(quote_calls) == initial_count + 1
+        assert quote_calls[-1]["chamfer"] is True
+        assert quote_calls[-1]["chamfer_width"] == 0.0625
+
+
 def test_internal_entry_point_requires_server_verified_access(
     monkeypatch, active_config
 ):
@@ -812,10 +869,9 @@ def test_internal_real_form_upload_populate_complete_confirm_without_pricing(
             button for button in app.button if button.label == "Analyze drawing"
         ).click().run()
         assert not app.exception
-        next(
-            button for button in app.button if button.label == "Apply identified values"
-        ).click().run()
-        assert not app.exception
+        assert not any(
+            button.label == "Apply identified values" for button in app.button
+        )
 
         assert (
             next(
@@ -899,6 +955,47 @@ def test_internal_real_form_upload_populate_complete_confirm_without_pricing(
             == 1.0
         )
         assert len(quote_calls) > price_calls_after_apply
+
+        next(
+            field
+            for field in app.number_input
+            if field.label == "Plate outside diameter (in.)"
+        ).set_value(8.25).run()
+        app.get("file_uploader")[0].set_value(
+            ("internal-test.pdf", source_bytes, "application/pdf")
+        ).run()
+        next(
+            button for button in app.button if button.label == "Analyze drawing"
+        ).click().run()
+        assert not app.exception
+        assert (
+            next(
+                field
+                for field in app.number_input
+                if field.label == "Plate outside diameter (in.)"
+            ).value
+            == 8.25
+        )
+        next(
+            button for button in app.button if button.label == "Apply identified values"
+        ).click().run()
+        assert not app.exception
+        assert (
+            next(
+                field
+                for field in app.number_input
+                if field.label == "Plate outside diameter (in.)"
+            ).value
+            == 8.25
+        )
+        assert (
+            next(
+                field
+                for field in app.number_input
+                if field.label == "Bore diameter (in.)"
+            ).value
+            == 2.0
+        )
 
 
 def test_source_contract_has_no_upload_api_or_drawing_pricing_path():

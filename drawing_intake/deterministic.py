@@ -267,6 +267,32 @@ def _normalized_candidate_value(candidate: _NumericCandidate) -> float:
     return to_inches(candidate.value, candidate.unit)
 
 
+def _target_reading_lost_leading_digit(
+    base: _NumericCandidate, target: _NumericCandidate
+) -> bool:
+    """Identify a tighter OCR crop that clipped the start of the same callout."""
+
+    if base.engine_pass.startswith("target.") or not target.engine_pass.startswith(
+        "target."
+    ):
+        return False
+    base_box, target_box = base.source.bbox, target.source.bbox
+    if (
+        not base_box
+        or not target_box
+        or base.source.page_number != target.source.page_number
+    ):
+        return False
+    base_digits = re.sub(r"\D", "", base.raw_text.split()[0])
+    target_digits = re.sub(r"\D", "", target.raw_text.split()[0])
+    return (
+        len(base_digits) > len(target_digits) >= 2
+        and base_digits.endswith(target_digits)
+        and target_box[0] >= base_box[0] + 3
+        and bbox_distance(base_box, target_box) <= 8
+    )
+
+
 def _resolve_numeric_field(
     field_name: str,
     candidates: list[_NumericCandidate],
@@ -287,6 +313,39 @@ def _resolve_numeric_field(
         )
     competing_values = sorted(grouped)
     resolved_competition = False
+    if len(grouped) > 1:
+        # A targeted crop is derived from the original pixels, not a second
+        # independent observation. If it clips leading digits from one base
+        # callout, retain the two-pass base reading for human confirmation.
+        base_readings = [
+            (value, matches)
+            for value, matches in grouped.items()
+            if len(
+                {
+                    candidate.engine_pass
+                    for candidate in matches
+                    if not candidate.engine_pass.startswith("target.")
+                }
+            )
+            >= 2
+        ]
+        if len(base_readings) == 1:
+            base_value, base_matches = base_readings[0]
+            conflicting = [
+                candidate
+                for value, matches in grouped.items()
+                if value != base_value
+                for candidate in matches
+            ]
+            if conflicting and all(
+                any(
+                    _target_reading_lost_leading_digit(base, target)
+                    for base in base_matches
+                )
+                for target in conflicting
+            ):
+                grouped = {base_value: base_matches}
+                resolved_competition = True
     if len(grouped) > 1:
         scored = []
         for value, matches in grouped.items():
@@ -654,7 +713,7 @@ def _resolve_quantity(lines: list[SpatialTextLine]) -> FieldRecognitionResult:
     for line in lines:
         normalized = normalize_engineering_text(line.normalized_text).normalized_text
         if not re.search(
-            r"\b(?:QTY|QUANTITY|REQD|REQUIRED|NO\.?\s*REQ(?:\.?\s*'?D)?)\b",
+            r"\b(?:QTY|QUANTITY|REQD|REQUIRED|NO[.,]?\s*REQ(?:\.?\s*'?D)?)\b",
             normalized,
         ):
             continue
@@ -807,6 +866,23 @@ def _resolve_marking(lines: list[SpatialTextLine]) -> FieldRecognitionResult:
             abstention_reason="multiple_marking_instruction_readings",
         )
     line = candidates[0]
+    if re.search(r"\bSTAMP\s+WITH\b", line.normalized_text, re.IGNORECASE):
+        return FieldRecognitionResult(
+            field_name="marking_text",
+            raw_text=line.raw_text,
+            status=FieldStatus.AMBIGUOUS,
+            evidence_classification=EvidenceClassification.AMBIGUOUS,
+            evidence=[
+                RecognitionEvidence(
+                    rule_id="marking_instruction_without_bound_literal",
+                    description="A stamping instruction was detected, but its text is not the marking itself.",
+                    source=_line_source(line),
+                    token_ids=line.token_ids,
+                )
+            ],
+            candidate_values=[line.raw_text],
+            abstention_reason="marking_instruction_without_bound_literal",
+        )
     return FieldRecognitionResult(
         field_name="marking_text",
         value=line.raw_text,

@@ -99,6 +99,23 @@ def normalize_engineering_text(
             rules.append("decimal_comma_in_tolerance_context")
 
     if thickness_context:
+        # In compact thickness callouts, OCR occasionally reads the inch mark
+        # following a damaged fraction as a degree sign. Preserve the repair
+        # rule so this remains a proposal requiring customer confirmation.
+        without_fill_lines = re.sub(r"_+", " ", text).strip()
+        if without_fill_lines != text:
+            text = without_fill_lines
+            rules.append("drawing_line_noise_cleanup")
+        repaired = re.sub(
+            r"(?<![A-Z0-9])[¥YV%]{1,2}\s*([248])\s*DEG(?=\s*(?:THK|THICK|$))",
+            r'1/\1"',
+            text,
+        )
+        if repaired != text:
+            text = repaired
+            rules.append(
+                "ocr_compact_fraction_degree_as_inch_mark_in_thickness_context"
+            )
         repaired = re.sub(
             r"(?<![A-Z0-9])[¥YV%]{1,2}\s*([248])(?=\s*(?:\"|IN|THK|THICK|$))",
             r"1/\1",
@@ -117,6 +134,15 @@ def normalize_engineering_text(
             rules.append("ocr_missing_fraction_slash_repair_in_thickness_context")
 
     if numeric_context:
+        if '"' in text:
+            repaired = re.sub(
+                r'(?<!\d)(\d{1,2}),(\d{3})(?=\s*"(?:\s|$))',
+                r"\1.\2",
+                text,
+            )
+            if repaired != text:
+                text = repaired
+                rules.append("ocr_decimal_comma_in_quoted_inch_dimension")
         compact = re.sub(r"[\s\"']", "", text)
         if re.fullmatch(r"[OIL\d.,+\-/]+", compact):
             repaired = text.replace("O", "0").replace("I", "1").replace("L", "1")
@@ -333,6 +359,6 @@ def parse_quantity(raw: str) -> int | None:
     for word, value in _QUANTITY_WORDS.items():
         if re.search(rf"\b{word}\b", text):
             return value
-    label = r"(?:QTY|QUANTITY|REQD|REQUIRED|NO\.?\s*REQ(?:\.?\s*'?D)?)"
+    label = r"(?:QTY|QUANTITY|REQD|REQUIRED|NO[.,]?\s*REQ(?:\.?\s*'?D)?)"
     match = re.search(rf"\b{label}\.?\s*[,;:=]?\s*(\d+)\b", text)
     return int(match.group(1)) if match else None

@@ -560,6 +560,39 @@ def _recognize_candidate(processed, candidate_id: str) -> AssistedQuoteSession:
             )
 
 
+def _apply_assisted_session(selected: AssistedQuoteSession) -> None:
+    merged = integrate_selected_session(
+        selected,
+        current_values=_form_values_from_state(),
+        current_origins=st.session_state.get(_FORM_ORIGINS_KEY, {}),
+        availability=form_availability,
+    )
+    _install_form_integration(merged)
+    owner_run = st.session_state.get(_OWNER_ACCEPTANCE_RUN_KEY)
+    if isinstance(owner_run, OwnerAcceptanceRun):
+        owner_run = record_event(owner_run, AcceptanceEventKind.APPLY_VALUES)
+        st.session_state[_OWNER_ACCEPTANCE_RUN_KEY] = update_run(
+            owner_run,
+            auto_populated_fields=(
+                field
+                for field, origin in merged.origins.items()
+                if origin == FormValueOrigin.DRAWING
+            ),
+        )
+    st.session_state.pop(_DRAWING_PENDING_KEY, None)
+
+
+def _can_prefill_single_plate() -> bool:
+    """Prefill a fresh form only; retain explicit approval for edited forms."""
+
+    origins = st.session_state.get(_FORM_ORIGINS_KEY, {})
+    return (
+        _DRAWING_SESSION_KEY not in st.session_state
+        and all(origin == FormValueOrigin.DEFAULT.value for origin in origins.values())
+        and _form_values_from_state() == st.session_state.get(_FORM_SNAPSHOT_KEY, {})
+    )
+
+
 _initialize_form_state()
 drawing_access_allowed = _internal_drawing_access_allowed()
 
@@ -619,9 +652,16 @@ if drawing_access_allowed:
                 st.session_state.pop("phase1g_candidate_label", None)
                 if len(processed_upload.review.candidates) == 1:
                     only_candidate = processed_upload.review.candidates[0]
-                    st.session_state[_DRAWING_PENDING_KEY] = _recognize_candidate(
+                    recognized = _recognize_candidate(
                         processed_upload, only_candidate.candidate_id
                     )
+                    if (
+                        processed_upload.review.quote_specific
+                        and _can_prefill_single_plate()
+                    ):
+                        _apply_assisted_session(recognized)
+                    else:
+                        st.session_state[_DRAWING_PENDING_KEY] = recognized
                 st.rerun()
             except DrawingUploadValidationError as exc:
                 st.error(str(exc))
@@ -723,30 +763,11 @@ if drawing_access_allowed:
             proposed_count = len(pending_session.configuration)
             st.info(
                 f"Ready to prefill {proposed_count} field{'s' if proposed_count != 1 else ''}. "
+                "Choose Apply identified values to put them in the form. "
                 "Your existing entries will be preserved if they conflict."
             )
             if st.button("Apply identified values", key="phase1g_apply_values"):
-                merged = integrate_selected_session(
-                    pending_session,
-                    current_values=_form_values_from_state(),
-                    current_origins=st.session_state.get(_FORM_ORIGINS_KEY, {}),
-                    availability=form_availability,
-                )
-                _install_form_integration(merged)
-                owner_run = st.session_state.get(_OWNER_ACCEPTANCE_RUN_KEY)
-                if isinstance(owner_run, OwnerAcceptanceRun):
-                    owner_run = record_event(
-                        owner_run, AcceptanceEventKind.APPLY_VALUES
-                    )
-                    st.session_state[_OWNER_ACCEPTANCE_RUN_KEY] = update_run(
-                        owner_run,
-                        auto_populated_fields=(
-                            field
-                            for field, origin in merged.origins.items()
-                            if origin == FormValueOrigin.DRAWING
-                        ),
-                    )
-                st.session_state.pop(_DRAWING_PENDING_KEY, None)
+                _apply_assisted_session(pending_session)
                 st.rerun()
 
         active_assisted_session = st.session_state.get(_DRAWING_SESSION_KEY)
@@ -965,11 +986,15 @@ with right:
                 "Chamfer Width (in.)",
                 "chamfer_width",
                 min_value=0.001,
-                step=0.001,
-                format="%.3f",
+                step=0.0001,
+                format="%.4f",
                 placeholder="Enter width",
                 help="No width is assumed. Enter the required chamfer width.",
             )
+            if chamfer_width is None:
+                st.caption(
+                    "Enter a chamfer width and press Enter or click outside the field to apply it."
+                )
 
         st.caption("DELIVERY")
         ships_in_days = _select_field(
@@ -1205,7 +1230,7 @@ if all(
 result = None
 pricing_error = None
 pricing_boundary = None
-if active_assisted_session is None:
+if active_assisted_session is None and payload_inputs is not None and not errors:
     result, pricing_error = request_authoritative_price(payload_inputs)
     if pricing_error:
         with right:
@@ -1287,6 +1312,8 @@ with left:
             st.info(
                 "Complete and confirm the configuration to make it ready for pricing."
             )
+        elif payload_inputs is None:
+            st.info("Complete the required fields to see a verified price.")
         else:
             st.warning("A verified price is not currently available.")
 

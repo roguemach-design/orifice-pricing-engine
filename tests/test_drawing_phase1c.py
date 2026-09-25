@@ -1,4 +1,5 @@
 import io
+from dataclasses import replace
 
 import pytest
 from PIL import Image, ImageDraw
@@ -11,7 +12,9 @@ from drawing_intake.deterministic import (
     EvidenceClassification,
     FieldRecognitionResult,
     _NumericCandidate,
+    _resolve_marking,
     _resolve_numeric_field,
+    _resolve_quantity,
     _resolve_tolerance,
 )
 from drawing_intake.documents import normalize_document
@@ -102,6 +105,89 @@ def test_compact_fraction_and_quantity_reconstruction_are_context_bound():
     )
     assert parse_quantity("NO. REQ'D, ONE") == 1
     assert parse_quantity("NO. REQ 3") == 3
+
+
+def test_owner_print_ocr_repairs_remain_context_bound_and_reviewable():
+    outside = parse_measurement('3,625"')
+    assert outside.value == pytest.approx(3.625)
+    assert "ocr_decimal_comma_in_quoted_inch_dimension" in outside.normalization_rules
+    assert "ocr_decimal_comma_in_quoted_inch_dimension" not in (
+        parse_measurement("3,625").normalization_rules
+    )
+
+    thickness = parse_measurement("__¥4°__", thickness_context=True)
+    assert thickness.value == pytest.approx(0.25)
+    assert thickness.explicit_unit
+    assert "ocr_compact_fraction_degree_as_inch_mark_in_thickness_context" in (
+        thickness.normalization_rules
+    )
+    assert "ocr_compact_fraction_degree_as_inch_mark_in_thickness_context" not in (
+        parse_measurement("__¥4°__").normalization_rules
+    )
+    assert parse_quantity("NO, REQ. TWO") == 2
+
+
+def test_clipped_targeted_od_observation_does_not_override_base_reading():
+    candidates = [
+        _NumericCandidate(
+            value=3.625,
+            unit=MeasurementUnit.INCH,
+            raw_text='3,625" DIA.',
+            source=SourceEvidence(
+                page_number=1, bbox=(100, 100, 160, 120), extraction_method="synthetic"
+            ),
+            token_ids=(pass_name,),
+            engine_pass=pass_name,
+            normalization_rules=("ocr_decimal_comma_in_quoted_inch_dimension",),
+        )
+        for pass_name in ("psm6", "psm11")
+    ] + [
+        _NumericCandidate(
+            value=625.0,
+            unit=MeasurementUnit.INCH,
+            raw_text='625" DIA.',
+            source=SourceEvidence(
+                page_number=1, bbox=(106, 100, 160, 120), extraction_method="synthetic"
+            ),
+            token_ids=(pass_name,),
+            engine_pass=f"target.outside.raw.{pass_name}",
+            normalization_rules=("targeted_callout_ocr",),
+        )
+        for pass_name in ("psm6", "psm11")
+    ]
+    result = _resolve_numeric_field("outside_diameter", candidates)
+    assert result.value == pytest.approx(3.625)
+    assert result.evidence_classification == "requires_confirmation"
+    assert result.status == "low_confidence"
+
+    conflicting = candidates[:2] + [
+        replace(candidate, raw_text='999" DIA.', value=999.0)
+        for candidate in candidates[2:]
+    ]
+    assert _resolve_numeric_field("outside_diameter", conflicting).status == "ambiguous"
+
+
+def test_quantity_and_generic_stamping_instruction_are_kept_separate():
+    def line(raw):
+        token = _ocr_token("synthetic", raw, 10, 10)
+        return SpatialTextLine(
+            region_id="synthetic",
+            page_number=1,
+            engine_pass="psm11",
+            line_key=token.line_key,
+            raw_text=raw,
+            normalized_text=raw,
+            source_coordinate_unit=CoordinateUnit.PDF_POINT,
+            bbox=token.source_bbox,
+            token_ids=[token.token_id],
+            tokens=[token],
+        )
+
+    assert _resolve_quantity([line("NO, REQ. TWO")]).value == 2
+    marking = _resolve_marking([line('STAMP WITH 1/4" LETTERS')])
+    assert marking.status == "ambiguous"
+    assert marking.value is None
+    assert marking.raw_text == 'STAMP WITH 1/4" LETTERS'
 
 
 def test_incomplete_tolerance_remains_unilateral_and_does_not_invent_symmetry():
