@@ -890,6 +890,50 @@ def test_internal_real_form_upload_populate_complete_confirm_without_pricing(
             == 2.0
         )
         assert any("Handle width" in item.value for item in app.info)
+        assert any(
+            "fields outlined in red" in item.value
+            and "Handle width" in item.value
+            and "Lead time" in item.value
+            for item in app.error
+        )
+        highlight = "\n".join(item.value for item in app.markdown)
+        assert ".st-key-quote_field_handle_width" in highlight
+        assert ".st-key-quote_field_handle_length_from_bore" in highlight
+        assert ".st-key-quote_field_ships_in_days" in highlight
+        assert ".st-key-quote_field_paddle_dia" not in highlight
+        assert ".st-key-quote_field_handle_label" not in highlight
+
+        next(field for field in app.selectbox if field.label == "Chamfer").set_value(
+            True
+        ).run()
+        assert not app.exception
+        assert any(
+            ".st-key-quote_field_chamfer_width" in item.value for item in app.markdown
+        )
+        next(field for field in app.selectbox if field.label == "Chamfer").set_value(
+            False
+        ).run()
+        assert not app.exception
+        assert not any(
+            ".st-key-quote_field_chamfer_width" in item.value for item in app.markdown
+        )
+
+        next(
+            field for field in app.number_input if field.label == "Bore diameter (in.)"
+        ).set_value(9.0).run()
+        assert any(
+            ".st-key-quote_field_bore_dia" in item.value for item in app.markdown
+        )
+        assert any(
+            "Bore diameter" in item.value and "fields outlined in red" in item.value
+            for item in app.error
+        )
+        next(
+            field for field in app.number_input if field.label == "Bore diameter (in.)"
+        ).set_value(2.0).run()
+        assert not any(
+            ".st-key-quote_field_bore_dia" in item.value for item in app.markdown
+        )
         price_calls_after_apply = len(quote_calls)
 
         next(
@@ -905,6 +949,10 @@ def test_internal_real_form_upload_populate_complete_confirm_without_pricing(
         )
         app.run()
         assert not app.exception
+        assert not any("fields outlined in red" in item.value for item in app.error)
+        assert not any(
+            ".st-key-quote_field_handle_width" in item.value for item in app.markdown
+        )
 
         confirmation = next(
             field

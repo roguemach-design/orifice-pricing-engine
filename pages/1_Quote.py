@@ -538,6 +538,23 @@ def _reset_to_manual_defaults() -> None:
     st.session_state[_DRAWING_RESET_UPLOAD_KEY] = True
 
 
+def _required_field_highlights(review) -> tuple[list[str], str]:
+    """Mark only form controls that the canonical assisted review says block completion."""
+
+    needs_attention = set(review.missing_required_fields) | set(review.invalid_fields)
+    fields = [field for field in _FORM_KEYS if field in needs_attention]
+    if not fields:
+        return [], ""
+    selectors = [f".st-key-{_FORM_KEYS[field]}" for field in fields]
+    return fields, (
+        "<style>\n"
+        + ",\n".join(selectors)
+        + " { outline: 2px solid #e02424; outline-offset: 2px; "
+        "border-radius: 0.5rem; background: rgba(224, 36, 36, 0.10); "
+        "padding: 0.35rem 0.5rem; }\n</style>"
+    )
+
+
 def _recognize_candidate(processed, candidate_id: str) -> AssistedQuoteSession:
     limits = upload_limits_from_environment()
     started = time.perf_counter()
@@ -800,6 +817,8 @@ if drawing_access_allowed:
                         state_label = "Prefilled"
                     elif origins.get(canonical) == FormValueOrigin.CUSTOMER.value:
                         state_label = "Customer value retained"
+                    elif canonical == "handle_label":
+                        state_label = "Optional — not populated"
                     else:
                         state_label = "Needs your input"
                     source = (
@@ -884,11 +903,13 @@ def _select_field(label: str, field: str, options, **kwargs):
 
 
 with right:
+    attention_style = st.empty() if drawing_mode else None
     _spacer, form_col = st.columns(
         [1 - RIGHT_FORM_WIDTH, RIGHT_FORM_WIDTH], gap="medium"
     )
 
     with form_col:
+        attention_prompt = st.empty() if drawing_mode else None
         st.caption("PRODUCT")
         r1c1, r1c2 = st.columns([1, 2])
         with r1c1:
@@ -1071,6 +1092,16 @@ if active_assisted_session is not None:
         active_assisted_session,
         availability=form_availability,
     )
+    highlighted_fields, highlight_css = _required_field_highlights(assisted_review)
+    if highlighted_fields:
+        attention_style.markdown(highlight_css, unsafe_allow_html=True)
+        labels = ", ".join(FIELD_LABELS[field] for field in highlighted_fields)
+        attention_prompt.error(
+            f"Complete or correct the fields outlined in red: {labels}."
+        )
+    else:
+        attention_style.empty()
+        attention_prompt.empty()
     owner_run = st.session_state.get(_OWNER_ACCEPTANCE_RUN_KEY)
     if isinstance(owner_run, OwnerAcceptanceRun):
         owner_run = update_run(
