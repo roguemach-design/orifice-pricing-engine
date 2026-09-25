@@ -498,9 +498,11 @@ def _initialize_form_state() -> None:
 def _install_form_integration(result) -> None:
     for field, value in result.values.items():
         key = _FORM_KEYS[field]
-        if value is None:
+        if value is None and field == "handle_label":
             st.session_state.pop(key, None)
         else:
+            # Explicit None clears the previously rendered manual default. Merely
+            # removing the key lets Streamlit restore its old widget value.
             st.session_state[key] = value
     st.session_state[_FORM_ORIGINS_KEY] = {
         field: origin.value if isinstance(origin, FormValueOrigin) else str(origin)
@@ -847,7 +849,10 @@ if drawing_access_allowed:
                                 proposal.extraction_field,
                             )
                             st.session_state[_DRAWING_SESSION_KEY] = rejected
-                            st.session_state.pop(_FORM_KEYS[canonical], None)
+                            if canonical == "handle_label":
+                                st.session_state.pop(_FORM_KEYS[canonical], None)
+                            else:
+                                st.session_state[_FORM_KEYS[canonical]] = None
                             st.session_state[_FORM_ORIGINS_KEY].pop(canonical, None)
                             st.session_state[_FORM_SNAPSHOT_KEY][canonical] = None
                             st.session_state[_DRAWING_CONFIRM_KEY] = False
@@ -889,7 +894,7 @@ drawing_mode = _DRAWING_SESSION_KEY in st.session_state
 
 def _number_field(label: str, field: str, **kwargs):
     key = _FORM_KEYS[field]
-    if key in st.session_state:
+    if st.session_state.get(key) is not None:
         return st.number_input(label, key=key, **kwargs)
     return st.number_input(label, value=None, key=key, **kwargs)
 
@@ -898,7 +903,7 @@ def _select_field(label: str, field: str, options, **kwargs):
     key = _FORM_KEYS[field]
     if key in st.session_state and st.session_state.get(key) in options:
         return st.selectbox(label, options=options, key=key, **kwargs)
-    st.session_state.pop(key, None)
+    st.session_state[key] = None
     return st.selectbox(label, options=options, index=None, key=key, **kwargs)
 
 
@@ -921,7 +926,7 @@ with right:
         existing_thickness = st.session_state.get(_FORM_KEYS["thickness"])
         if existing_thickness not in thickness_options:
             if drawing_mode:
-                st.session_state.pop(_FORM_KEYS["thickness"], None)
+                st.session_state[_FORM_KEYS["thickness"]] = None
             elif thickness_options:
                 st.session_state[_FORM_KEYS["thickness"]] = thickness_options[0]
         thickness = _select_field(

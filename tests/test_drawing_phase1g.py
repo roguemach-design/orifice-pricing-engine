@@ -890,6 +890,20 @@ def test_internal_real_form_upload_populate_complete_confirm_without_pricing(
             == 2.0
         )
         assert any("Handle width" in item.value for item in app.info)
+        assert (
+            next(
+                field
+                for field in app.number_input
+                if field.label == "Handle width (in.)"
+            ).value
+            is None
+        )
+        assert (
+            next(field for field in app.selectbox if field.label == "Lead time").value
+            is None
+        )
+        assert app.session_state["quote_field_handle_width"] is None
+        assert app.session_state["quote_field_ships_in_days"] is None
         assert any(
             "fields outlined in red" in item.value
             and "Handle width" in item.value
