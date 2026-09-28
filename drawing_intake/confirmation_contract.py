@@ -73,12 +73,24 @@ class CustomerConfirmationContract(StrictModel):
     pricing_invoked: bool = False
 
 
+_MANUAL_ONLY_OBSERVATIONS = {
+    "chamfer_present",
+    "chamfer_width",
+    "chamfer_depth",
+    "chamfer_angle",
+}
+
+
 def _workflow_status(
     contract: CustomerConfirmationContract,
 ) -> ConfirmationWorkflowStatus:
     if contract.selection_required:
         return ConfirmationWorkflowStatus.SELECTION_REQUIRED
-    if any(proposal.unsupported for proposal in contract.proposals):
+    if any(
+        proposal.unsupported
+        and proposal.extraction_field not in _MANUAL_ONLY_OBSERVATIONS
+        for proposal in contract.proposals
+    ):
         return ConfirmationWorkflowStatus.BLOCKED
     unresolved_proposals = any(
         proposal.confirmation_required
@@ -118,7 +130,7 @@ def build_customer_confirmation_contract(
             FieldStatus.CONFLICT_DETECTED,
         }
         value_present = extracted.value is not None or bool(result.candidate_values)
-        confirmation_required = (
+        confirmation_required = name not in _MANUAL_ONLY_OBSERVATIONS and (
             name in CRITICAL_FIELDS
             or (
                 value_present
@@ -133,7 +145,11 @@ def build_customer_confirmation_contract(
         proposals.append(
             ConfirmationFieldProposal(
                 extraction_field=name,
-                canonical_field=EXTRACTION_TO_CANONICAL.get(name),
+                canonical_field=(
+                    None
+                    if name in _MANUAL_ONLY_OBSERVATIONS
+                    else EXTRACTION_TO_CANONICAL.get(name)
+                ),
                 proposed_value=extracted.value,
                 normalized_unit=extracted.normalized_unit,
                 raw_text=extracted.raw_text or result.raw_text,

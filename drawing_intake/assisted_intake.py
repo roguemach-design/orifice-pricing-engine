@@ -185,7 +185,11 @@ def _schedule_contract(
         proposals.append(
             ConfirmationFieldProposal(
                 extraction_field=name,
-                canonical_field=EXTRACTION_TO_CANONICAL.get(name),
+                canonical_field=(
+                    None
+                    if name.startswith("chamfer_")
+                    else EXTRACTION_TO_CANONICAL.get(name)
+                ),
                 proposed_value=field.value,
                 normalized_unit=field.normalized_unit,
                 raw_text=field.raw_text,

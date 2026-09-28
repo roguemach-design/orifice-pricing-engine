@@ -437,6 +437,7 @@ def test_unreadable_fields_clear_defaults_and_dynamic_checklist_updates(availabi
     assert set(review.missing_required_fields) == {
         "handle_width",
         "handle_length_from_bore",
+        "chamfer",
         "ships_in_days",
     }
 
@@ -452,6 +453,46 @@ def test_unreadable_fields_clear_defaults_and_dynamic_checklist_updates(availabi
         "handle_width"
         in review_assisted_quote(
             cleared, availability=availability
+        ).missing_required_fields
+    )
+
+
+def test_handle_proposals_prefill_without_overwriting_customer_or_chamfer(availability):
+    contract = _contract(
+        _proposal("handle_width", "handle_width", 1.5, unit=MeasurementUnit.INCH),
+        _proposal(
+            "handle_length_from_bore",
+            "handle_length_from_bore",
+            8.5,
+            unit=MeasurementUnit.INCH,
+        ),
+        _proposal("chamfer_present", None, True),
+        _proposal("chamfer_width", None, 0.0625, unit=MeasurementUnit.INCH),
+    )
+    session = build_assisted_quote_session(contract, availability=availability)
+    assert session.configuration["handle_width"].value == 1.5
+    assert session.configuration["handle_length_from_bore"].value == 8.5
+    assert "chamfer" not in session.configuration
+    assert "chamfer_width" not in session.configuration
+
+    originals = _manual_defaults()
+    originals["handle_width"] = 1.75
+    merged = integrate_selected_session(
+        session,
+        current_values=originals,
+        current_origins={
+            **{name: FormValueOrigin.DEFAULT for name in originals},
+            "handle_width": FormValueOrigin.CUSTOMER,
+        },
+        availability=availability,
+    )
+    assert merged.values["handle_width"] == 1.75
+    assert merged.values["handle_length_from_bore"] == 8.5
+    assert merged.values["chamfer"] is None
+    assert merged.values["ships_in_days"] is None
+    assert {"chamfer", "ships_in_days"}.issubset(
+        review_assisted_quote(
+            merged.session, availability=availability
         ).missing_required_fields
     )
 
@@ -956,7 +997,7 @@ def test_internal_real_form_upload_populate_complete_confirm_without_pricing(
         next(
             field
             for field in app.number_input
-            if field.label == "Handle length from bore center (in.)"
+            if field.label == "Handle Length (From Bore Center) (in.)"
         ).set_value(9.0)
         next(field for field in app.selectbox if field.label == "Lead time").set_value(
             14

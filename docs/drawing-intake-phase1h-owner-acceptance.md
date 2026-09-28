@@ -95,6 +95,23 @@ The downloadable acceptance record contains no filename, file hash, OCR text,
 source coordinates, dimensions, drawing number, or customer identity. It is
 kept only in session memory unless the owner downloads the JSON file.
 
+## Handle callouts and manual choices
+
+Selected-region recognition can propose handle width from a readable labeled
+value or an unlabeled horizontal dimension line bounded by the handle sides.
+It can propose handle length only from a printed number bound to a vertical
+dimension with witness lines at the bore center and handle tip. A local
+270-degree OCR pass reads vertical callouts; provenance maps to the original
+page coordinates. The printed length maps directly to
+`handle_length_from_bore`. It is never calculated from image geometry or OD.
+Compact fractions that OCR does not read unambiguously remain blank. Competing
+readings remain ambiguous. All proposals remain editable and require the
+buyer's final configuration confirmation.
+
+Chamfer callouts may remain in extraction evidence, but neither chamfer choice
+nor chamfer width is copied into the active configuration. The buyer selects
+yes/no and enters width in the ordinary form. Lead time stays manual.
+
 ## Friction measurement definitions
 
 - **Explicit app click:** activation of Analyze, Apply, Confirm, or Reset. The

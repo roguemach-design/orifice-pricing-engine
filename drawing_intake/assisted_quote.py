@@ -110,7 +110,7 @@ FIELD_LABELS = {
     "material": "Material",
     "thickness": "Plate thickness",
     "handle_width": "Handle width",
-    "handle_length_from_bore": "Handle length from bore center",
+    "handle_length_from_bore": "Handle Length (From Bore Center)",
     "paddle_dia": "Plate outside diameter",
     "bore_dia": "Bore diameter",
     "bore_tolerance": "Bore tolerance",
@@ -124,6 +124,8 @@ _DIMENSION_FIELDS = {
     "outside_diameter",
     "bore_diameter",
     "thickness",
+    "handle_width",
+    "handle_length_from_bore",
     "bore_tolerance_plus",
     "bore_tolerance_minus",
     "chamfer_width",
@@ -135,8 +137,8 @@ _DIRECT_EXTRACTION_MAPPING = {
     "thickness": "thickness",
     "material": "material",
     "quantity": "quantity",
-    "chamfer_present": "chamfer",
-    "chamfer_width": "chamfer_width",
+    "handle_width": "handle_width",
+    "handle_length_from_bore": "handle_length_from_bore",
     "marking_text": "handle_label",
 }
 

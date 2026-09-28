@@ -51,15 +51,17 @@ is called.
 | outside diameter | `paddle_dia` | normalize to inches; retain source |
 | bore diameter | `bore_dia` | normalize to inches; retain source |
 | thickness | `thickness` | populate only if representable; otherwise flag unsupported |
+| handle width | `handle_width` | only from a readable labeled callout or a dimension line bound to the selected handle |
+| bore-center-to-handle-tip length | `handle_length_from_bore` | use the printed value directly; never derive from geometry or subtract OD radius |
 | material | `material` | populate only a supported normalized material |
 | quantity | `quantity` | proposed as customer-confirmable input |
 | equal supported tolerance sides | `bore_tolerance` | both sides required; asymmetric/incomplete stays manual |
-| chamfer presence | `chamfer` | explicit observed value only |
-| chamfer width | `chamfer_width` | required dynamically when chamfer is enabled |
+| chamfer presence | `chamfer` | evidence only; buyer selects manually |
+| chamfer width | `chamfer_width` | evidence only; buyer enters manually when chamfer is enabled |
 | marking | `handle_label` | optional; existing character/length rules apply |
 
-`handle_width`, `handle_length_from_bore`, and `ships_in_days` normally remain
-manual. `handle_label` retains the existing `No label` canonical default. No
+Unreadable handle dimensions and `ships_in_days` remain manual. `handle_label`
+retains the existing `No label` canonical default. No
 manufacturing dimension is invented.
 
 ## Dynamic attention model

@@ -93,6 +93,8 @@ def validate_extraction(
         "outside_diameter",
         "bore_diameter",
         "thickness",
+        "handle_width",
+        "handle_length_from_bore",
         "bore_tolerance_plus",
         "bore_tolerance_minus",
         "general_dimensional_tolerance",
@@ -125,6 +127,8 @@ def validate_extraction(
     outside_diameter = _dimension_in(fields.outside_diameter)
     bore_diameter = _dimension_in(fields.bore_diameter)
     thickness = _dimension_in(fields.thickness)
+    handle_width = _dimension_in(fields.handle_width)
+    handle_length = _dimension_in(fields.handle_length_from_bore)
     tolerance_plus = _dimension_in(fields.bore_tolerance_plus)
     tolerance_minus = _dimension_in(fields.bore_tolerance_minus)
 
@@ -149,6 +153,17 @@ def validate_extraction(
             "bore_not_smaller_than_od",
             "Drawing bore must be smaller than drawing OD.",
             ["bore_diameter", "outside_diameter"],
+            outcome=FieldStatus.CONFLICT_DETECTED,
+        )
+    if (
+        handle_length is not None
+        and outside_diameter is not None
+        and handle_length <= outside_diameter / 2.0
+    ):
+        add(
+            "handle_length_not_beyond_plate",
+            "The printed bore-center-to-handle-tip length does not extend beyond the plate radius.",
+            ["handle_length_from_bore"],
             outcome=FieldStatus.CONFLICT_DETECTED,
         )
 
@@ -250,6 +265,16 @@ def validate_extraction(
         "thickness": (
             thickness if thickness is not None and "thickness" not in outcomes else None
         ),
+        "handle_width": (
+            handle_width
+            if handle_width is not None and "handle_width" not in outcomes
+            else None
+        ),
+        "handle_length_from_bore": (
+            handle_length
+            if handle_length is not None and "handle_length_from_bore" not in outcomes
+            else None
+        ),
         "paddle_dia": (
             outside_diameter
             if outside_diameter is not None and "outside_diameter" not in outcomes
@@ -260,16 +285,10 @@ def validate_extraction(
             if bore_diameter is not None and "bore_diameter" not in outcomes
             else None
         ),
-        "chamfer": (
-            bool(fields.chamfer_present.value)
-            if _detected(fields.chamfer_present) and "chamfer_present" not in outcomes
-            else None
-        ),
-        "chamfer_width": (
-            _dimension_in(fields.chamfer_width)
-            if "chamfer_width" not in outcomes
-            else None
-        ),
+        # Chamfer observations remain evidence only. The buyer chooses both
+        # chamfer presence and width through the normal form controls.
+        "chamfer": None,
+        "chamfer_width": None,
         "handle_label": (
             str(fields.marking_text.value)
             if _detected(fields.marking_text) and "marking_text" not in outcomes
@@ -291,11 +310,11 @@ def validate_extraction(
         "quantity": "quantity",
         "material": "material",
         "thickness": "thickness",
+        "handle_width": "handle_width",
+        "handle_length_from_bore": "handle_length_from_bore",
         "paddle_dia": "outside_diameter",
         "bore_dia": "bore_diameter",
         "bore_tolerance": "bore_tolerance_plus+bore_tolerance_minus",
-        "chamfer": "chamfer_present",
-        "chamfer_width": "chamfer_width",
         "handle_label": "marking_text",
     }
     required = (

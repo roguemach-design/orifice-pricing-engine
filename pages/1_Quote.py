@@ -970,7 +970,7 @@ with right:
             )
         with r3c2:
             handle_length = _number_field(
-                "Handle length from bore center (in.)",
+                "Handle Length (From Bore Center) (in.)",
                 "handle_length_from_bore",
                 min_value=0.0,
                 step=0.001,

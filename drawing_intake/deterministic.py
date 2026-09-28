@@ -21,6 +21,11 @@ from .engineering_text import (
     parse_tolerance,
 )
 from .geometry import RegionGeometryEvidence, analyze_region_geometry
+from .handle_dimensions import (
+    HandleObservation,
+    augment_vertical_handle_ocr,
+    detect_handle_observations,
+)
 from .models import (
     BooleanField,
     DocumentReference,
@@ -44,7 +49,7 @@ from .ocr import (
     recover_plus_minus_glyphs,
 )
 from .regions import DerivedDrawingRegion
-from .rendering import render_region_png
+from .rendering import RenderedRegion, render_region_png
 from .spatial import SpatialTextLine, bbox_distance, build_spatial_lines
 from .validation import validate_extraction
 from .value_normalization import to_inches
@@ -458,6 +463,56 @@ def _line_source(line: SpatialTextLine) -> SourceEvidence:
         bbox=line.bbox,
         coordinate_unit=line.source_coordinate_unit,
         extraction_method="tesseract_local+deterministic_rules_v1",
+    )
+
+
+def _resolve_handle_field(
+    field_name: str, observations: list[HandleObservation]
+) -> FieldRecognitionResult:
+    if not observations:
+        return FieldRecognitionResult(
+            field_name=field_name,
+            status=FieldStatus.NOT_DETECTED,
+            evidence_classification=EvidenceClassification.NOT_DETECTED,
+            abstention_reason="no_readable_bound_handle_dimension",
+        )
+    values = sorted({round(item.value_in, 6) for item in observations})
+    evidence = [
+        RecognitionEvidence(
+            rule_id=item.rule_id,
+            description=(
+                "Printed value is bound to a handle dimension label or to the "
+                "selected plate's handle dimension lines."
+            ),
+            source=item.source,
+            token_ids=list(item.token_ids),
+        )
+        for item in observations
+    ]
+    if len(values) != 1:
+        return FieldRecognitionResult(
+            field_name=field_name,
+            status=FieldStatus.AMBIGUOUS,
+            evidence_classification=EvidenceClassification.AMBIGUOUS,
+            evidence=evidence,
+            candidate_values=values,
+            abstention_reason="conflicting_bound_handle_dimensions",
+        )
+    first = observations[0]
+    # These are proposals for buyer review, even when text and geometry agree.
+    # OCR pass agreement is corroboration, not independent measurement.
+    return FieldRecognitionResult(
+        field_name=field_name,
+        value=values[0],
+        normalized_unit=MeasurementUnit.INCH,
+        raw_text=first.raw_text,
+        status=FieldStatus.LOW_CONFIDENCE,
+        evidence_classification=EvidenceClassification.REQUIRES_CONFIRMATION,
+        evidence=evidence,
+        candidate_values=values,
+        normalization_rules=sorted(
+            {rule for item in observations for rule in item.normalization_rules}
+        ),
     )
 
 
@@ -1068,6 +1123,7 @@ def _interpret_region(
     region: DerivedDrawingRegion,
     ocr: LocalOcrResult,
     geometry: RegionGeometryEvidence,
+    rendered: RenderedRegion | None = None,
 ) -> tuple[dict[str, FieldRecognitionResult], DrawingExtractionResult]:
     tokens = [token for token in ocr.tokens if token.region_id == region.region_id]
     base_tokens = [
@@ -1115,6 +1171,21 @@ def _interpret_region(
     )
     material = _resolve_material(base_lines)
     units = _resolve_units(base_tokens)
+    handle_units = (
+        MeasurementUnit(units.value)
+        if units.value in {MeasurementUnit.INCH.value, MeasurementUnit.MILLIMETER.value}
+        and units.status == FieldStatus.DETECTED
+        else None
+    )
+    handle_observations = detect_handle_observations(
+        region, ocr, rendered, handle_units
+    )
+    handle_width = _resolve_handle_field(
+        "handle_width", handle_observations["handle_width"]
+    )
+    handle_length = _resolve_handle_field(
+        "handle_length_from_bore", handle_observations["handle_length_from_bore"]
+    )
     quantity = _resolve_quantity(build_spatial_lines(scoped("quantity")))
     chamfer_present, chamfer_width, chamfer_angle = _resolve_chamfer(base_lines)
     marking = _resolve_marking(base_lines)
@@ -1132,6 +1203,8 @@ def _interpret_region(
             outside,
             bore,
             thickness,
+            handle_width,
+            handle_length,
             material,
             quantity,
             units,
@@ -1155,6 +1228,8 @@ def _interpret_region(
         outside_diameter=_numeric_field(outside),
         bore_diameter=_numeric_field(bore),
         thickness=_numeric_field(thickness),
+        handle_width=_numeric_field(handle_width),
+        handle_length_from_bore=_numeric_field(handle_length),
         material=_string_field(material),
         quantity=IntegerField(
             value=int(quantity.value) if isinstance(quantity.value, int) else None,
@@ -1260,12 +1335,14 @@ class DeterministicRegionRecognizer:
             field_results,
             self.ocr_engine,
         )
-        if targeted_seconds:
-            interpretation_started = time.perf_counter()
-            field_results, extraction = _interpret_region(
-                document, region, ocr, geometry
-            )
-            interpretation_seconds += time.perf_counter() - interpretation_started
+        ocr, handle_seconds = augment_vertical_handle_ocr(
+            document, region, ocr, self.ocr_engine
+        )
+        interpretation_started = time.perf_counter()
+        field_results, extraction = _interpret_region(
+            document, region, ocr, geometry, rendered
+        )
+        interpretation_seconds += time.perf_counter() - interpretation_started
         return DeterministicRecognitionResult(
             region=region,
             rendered_width=rendered.width,
@@ -1280,7 +1357,7 @@ class DeterministicRegionRecognizer:
             timings=RecognitionTimings(
                 rendering_seconds=rendered.render_seconds,
                 ocr_seconds=base_ocr_seconds,
-                targeted_ocr_seconds=targeted_seconds,
+                targeted_ocr_seconds=targeted_seconds + handle_seconds,
                 interpretation_seconds=interpretation_seconds,
                 total_seconds=time.perf_counter() - started,
             ),
@@ -1291,6 +1368,8 @@ def interpret_precomputed_region(
     document: NormalizedDocument,
     region: DerivedDrawingRegion,
     ocr: LocalOcrResult,
+    *,
+    rendered: RenderedRegion | None = None,
 ) -> tuple[dict[str, FieldRecognitionResult], DrawingExtractionResult]:
     """Test/benchmark entry point that keeps OCR independent from interpretation."""
 
@@ -1299,4 +1378,5 @@ def interpret_precomputed_region(
         region,
         ocr,
         analyze_region_geometry(document, region),
+        rendered,
     )

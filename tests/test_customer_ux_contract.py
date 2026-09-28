@@ -1,6 +1,5 @@
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -46,7 +45,7 @@ def test_quote_keeps_engineering_workflow_and_prominent_summary():
         '"Plate outside diameter (in.)"',
         '"Bore diameter (in.)"',
         '"Handle width (in.)"',
-        '"Handle length from bore center (in.)"',
+        '"Handle Length (From Bore Center) (in.)"',
         'st.caption("REQUIREMENTS")',
         'st.caption("DELIVERY")',
     ]
@@ -54,7 +53,10 @@ def test_quote_keeps_engineering_workflow_and_prominent_summary():
 
     assert positions == sorted(positions)
     assert 'st.subheader("Configuration Drawing")' in quote_source
-    assert 'with st.container(border=True):\n        st.subheader("Quote Summary")' in quote_source
+    assert (
+        'with st.container(border=True):\n        st.subheader("Quote Summary")'
+        in quote_source
+    )
     assert 'c1.metric("Unit price"' in quote_source
     assert 'c2.metric("Total price"' in quote_source
     assert "calendar days" in quote_source
@@ -66,7 +68,7 @@ def test_quote_keeps_lean_owner_approved_controls():
     assert '"Plate style"' not in quote_source
     assert 'st.checkbox("Chamfer", value=False)' in quote_source
     assert '"Chamfer Width (in.)"' in quote_source
-    assert 'value=None' in quote_source
+    assert "value=None" in quote_source
     assert '"Lead time"' in quote_source
     assert 'format_func=lambda days: f"{days} calendar days"' in quote_source
     assert quote_source.count("Estimated to ship within") == 1

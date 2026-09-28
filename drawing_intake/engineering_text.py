@@ -85,6 +85,27 @@ def normalize_engineering_text(
         rules.append("unicode_engineering_symbol_normalization")
     text = translated.upper()
 
+    vulgar_fractions = {
+        "¼": "1/4",
+        "½": "1/2",
+        "¾": "3/4",
+        "⅛": "1/8",
+        "⅜": "3/8",
+        "⅝": "5/8",
+        "⅞": "7/8",
+    }
+    expanded = re.sub(
+        r"[¼½¾⅛⅜⅝⅞]",
+        lambda match: (
+            " " if match.start() and text[match.start() - 1].isdigit() else ""
+        )
+        + vulgar_fractions[match.group()],
+        text,
+    )
+    if expanded != text:
+        text = expanded
+        rules.append("unicode_vulgar_fraction_expansion")
+
     if "Ø" in text:
         text = text.replace("Ø", " DIA ")
         rules.append("diameter_symbol_to_dia")

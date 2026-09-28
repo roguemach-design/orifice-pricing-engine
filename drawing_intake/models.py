@@ -118,6 +118,8 @@ class DrawingFields(StrictModel):
     outside_diameter: NumericField = Field(default_factory=NumericField)
     bore_diameter: NumericField = Field(default_factory=NumericField)
     thickness: NumericField = Field(default_factory=NumericField)
+    handle_width: NumericField = Field(default_factory=NumericField)
+    handle_length_from_bore: NumericField = Field(default_factory=NumericField)
     material: StringField = Field(default_factory=StringField)
     quantity: IntegerField = Field(default_factory=IntegerField)
     global_units: UnitField = Field(default_factory=UnitField)
