@@ -116,6 +116,26 @@ def derive_candidate_regions(
 
     for page_number, candidates in sorted(by_page.items()):
         page = document.pages[page_number - 1]
+        if (
+            len(structure.candidate_regions) == 1
+            and len(candidates) == 1
+            and candidates[0].detection_method
+            == "raster_two_concentric_perimeters_without_centerline_v1"
+        ):
+            candidate = candidates[0]
+            output.append(
+                DerivedDrawingRegion(
+                    region_id=f"p{page_number}-r1-c1",
+                    source_group_id=source_group_id,
+                    source_filename=document.filename,
+                    page_number=page_number,
+                    source_bbox=(0, 0, page.width, page.height),
+                    candidate_bbox=candidate.bbox,
+                    coordinate_unit=candidate.coordinate_unit,
+                    derivation_method="single_quote_specific_raster_page_v1",
+                )
+            )
+            continue
         rows = _cluster_rows(candidates)
         for row_index, row in enumerate(rows):
             top, bottom = _vertical_bounds(rows, row_index, page)

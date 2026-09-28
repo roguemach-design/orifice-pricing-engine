@@ -447,6 +447,13 @@ def parse_plate_schedule(
             "bore_tolerance",
         )
     )
+    if not quote_schedule_columns:
+        return TableScheduleResult(
+            grid=grid,
+            document_warnings=[
+                "Ruled cells do not establish a multi-row plate schedule."
+            ],
+        )
     targeted_engine = (
         ocr_engine or TesseractLocalOcrEngine()
         if document is not None and quote_schedule_columns

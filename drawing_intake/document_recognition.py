@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import re
 
 from pydantic import Field
 
@@ -12,6 +13,7 @@ from .page_observations import observe_page_locally
 from .raster_structure import detect_raster_plate_structure
 from .structure import assess_document_structure
 from .table_schedule import TableScheduleResult, parse_plate_schedule
+from .spatial import build_spatial_lines
 
 
 class DocumentRecognitionTimings(StrictModel):
@@ -30,6 +32,47 @@ class DeterministicDocumentRecognitionResult(StrictModel):
     ocr_token_count: int = Field(ge=0)
     canonical_candidate_created: bool = False
     timings: DocumentRecognitionTimings
+
+
+_IDENTIFIER_LABEL = re.compile(
+    r"\b(?:DRAWING|DWG|PART|CONTRACT)\s*(?:NO\.?|NUMBER)\b|\bTEST\s*ID\b",
+    re.IGNORECASE,
+)
+
+
+def _labeled_document_identifier(ocr) -> bool:
+    """Require an identifier value bound to a generic drawing/part label."""
+
+    for engine_pass in {token.engine_pass for token in ocr.tokens}:
+        lines = build_spatial_lines(
+            [token for token in ocr.tokens if token.engine_pass == engine_pass]
+        )
+        for label in lines:
+            match = _IDENTIFIER_LABEL.search(label.raw_text)
+            if not match:
+                continue
+            value_lines = [label, *lines]
+            for value_line in value_lines:
+                if value_line is label:
+                    value = label.raw_text[match.end() :].strip()
+                else:
+                    label_height = max(1, label.bbox[3] - label.bbox[1])
+                    x_gap = value_line.bbox[0] - label.bbox[2]
+                    vertical_gap = abs(
+                        (value_line.bbox[1] + value_line.bbox[3]) / 2
+                        - (label.bbox[1] + label.bbox[3]) / 2
+                    )
+                    if not (
+                        -label_height <= x_gap <= label_height * 6
+                        and vertical_gap <= label_height * 2
+                    ):
+                        continue
+                    value = value_line.raw_text.strip()
+                if re.fullmatch(
+                    r"[A-Z0-9][A-Z0-9._/-]{2,39}", value, re.IGNORECASE
+                ) and any(char.isdigit() for char in value):
+                    return True
+    return False
 
 
 def recognize_document_structure(
@@ -65,6 +108,7 @@ def recognize_document_structure(
         structure,
         observed_text=observed_text,
         detected_table_rows=len(schedule.candidates),
+        labeled_document_identifier=_labeled_document_identifier(ocr),
     )
     classification_seconds = time.perf_counter() - classification_started
     if classification.document_class not in {

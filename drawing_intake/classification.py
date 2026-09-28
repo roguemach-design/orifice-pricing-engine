@@ -32,10 +32,13 @@ def classify_drawing_document(
     *,
     observed_text: str = "",
     detected_table_rows: int = 0,
+    labeled_document_identifier: bool = False,
 ) -> DocumentClassificationResult:
     """Classify from document structure and generic engineering phrases.
 
-    Company names and drawing identifiers are intentionally not inputs.
+    No company name, identifier value, or catalog dimension is a rule.
+    A labeled identifier is only evidence that a raster detail is for one
+    specified part, rather than a generic product illustration.
     """
 
     text = " ".join(
@@ -63,7 +66,7 @@ def classify_drawing_document(
     if catalog_language:
         rules.append("catalog_or_ordering_language")
     if (product_headings >= 2 and variable_legend) or (
-        variable_legend and catalog_language and detected_table_rows >= 2
+        catalog_language and detected_table_rows >= 2
     ):
         return DocumentClassificationResult(
             document_class=DrawingDocumentClass.REFERENCE_VENDOR_DATASHEET,
@@ -98,6 +101,59 @@ def classify_drawing_document(
             reason="Multiple dimensioned plate-like profile regions require selection.",
         )
     if structure.status == "single_candidate":
+        raster_without_centerline = any(
+            region.detection_method
+            == "raster_two_concentric_perimeters_without_centerline_v1"
+            for region in structure.candidate_regions
+        )
+        if raster_without_centerline:
+            if catalog_language:
+                return DocumentClassificationResult(
+                    document_class=DrawingDocumentClass.REFERENCE_VENDOR_DATASHEET,
+                    quote_specific=False,
+                    candidate_count=None,
+                    evidence_rules=[
+                        "single_raster_concentric_plate_profile",
+                        "catalog_or_ordering_language",
+                    ],
+                    reason="Catalog/selection information is not a unique plate order.",
+                )
+            required = {
+                "labeled_document_identifier": labeled_document_identifier,
+                "outside_diameter_label": "OUTSIDE DIAMETER" in text,
+                "bore_diameter_label": "BORE DIAMETER" in text,
+                "plate_thickness_label": "PLATE THICKNESS" in text,
+                "material_label": "MATERIAL" in text,
+                "quantity_label": "QUANTITY" in text or "NO REQ" in text,
+            }
+            missing = [name for name, detected in required.items() if not detected]
+            if missing:
+                return DocumentClassificationResult(
+                    document_class=DrawingDocumentClass.AMBIGUOUS_DOCUMENT,
+                    quote_specific=False,
+                    candidate_count=1,
+                    evidence_rules=[
+                        "single_raster_concentric_plate_profile",
+                        *[f"missing_{name}" for name in missing],
+                    ],
+                    reason=(
+                        "One plate-like raster profile was found, but the document "
+                        "does not establish one labeled, quote-specific specification set."
+                    ),
+                )
+            return DocumentClassificationResult(
+                document_class=DrawingDocumentClass.SINGLE_PLATE_DRAWING,
+                quote_specific=True,
+                candidate_count=1,
+                evidence_rules=[
+                    "single_raster_concentric_plate_profile",
+                    *required,
+                ],
+                reason=(
+                    "One raster plate profile has a labeled identifier and one "
+                    "associated dimensional/material/quantity specification set."
+                ),
+            )
         return DocumentClassificationResult(
             document_class=DrawingDocumentClass.SINGLE_PLATE_DRAWING,
             quote_specific=True,

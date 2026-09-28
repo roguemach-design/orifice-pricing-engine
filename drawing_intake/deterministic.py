@@ -178,6 +178,22 @@ def _adjacent_numeric_candidates(
     for label in tokens:
         if _normalized_label(label.interpreted_text) not in labels:
             continue
+        if "BORE" in labels and _normalized_label(label.interpreted_text) == "BORE":
+            same_callout = [
+                token
+                for token in tokens
+                if token.region_id == label.region_id
+                and token.page_number == label.page_number
+                and token.engine_pass == label.engine_pass
+                and token.line_key == label.line_key
+            ]
+            if any(
+                _normalized_label(token.interpreted_text) in {"CENTER", "CENTRE"}
+                for token in same_callout
+            ):
+                # "FROM BORE CENTER TO HANDLE TIP" describes a handle
+                # dimension, not the plate's bore diameter.
+                continue
         nearby = _nearby_tokens(label, tokens)
         sign_tokens = [
             token
@@ -268,6 +284,125 @@ def _adjacent_numeric_candidates(
     return candidates
 
 
+_SPEC_ROW_LABELS = {
+    "outside_diameter": {"OUTSIDE DIAMETER", "OUTER DIAMETER", "PLATE OD"},
+    "bore_diameter": {"BORE DIAMETER", "ORIFICE DIAMETER", "BORE DIA"},
+    "thickness": {"PLATE THICKNESS", "THICKNESS", "PLATE THK"},
+    "handle_width": {"HANDLE WIDTH", "STEM WIDTH"},
+    "handle_length_from_bore": {
+        "HANDLE LENGTH",
+        "LENGTH FROM BORE CENTER",
+        "LENGTH FROM BORE CENTRE",
+    },
+}
+
+
+def _specification_row_candidates(
+    tokens: list[OcrTokenObservation],
+) -> dict[str, list[_NumericCandidate]]:
+    """Bind explicitly labeled key/value rows in a single-part specification block.
+
+    This is deliberately separate from the multi-row plate schedule parser.
+    A value must be right of its label on the same visual row, and several
+    different manufacturing labels must share one aligned value column.
+    """
+
+    lines = build_spatial_lines(
+        [token for token in tokens if token.engine_pass == "psm11"]
+    )
+    rows: list[tuple[str, SpatialTextLine, SpatialTextLine]] = []
+    for label in lines:
+        normalized = re.sub(r"[^A-Z ]", "", label.normalized_text.upper())
+        normalized = " ".join(normalized.split())
+        name = next(
+            (
+                field
+                for field, variants in _SPEC_ROW_LABELS.items()
+                if normalized in variants
+            ),
+            None,
+        )
+        if name is None:
+            continue
+        height = max(1.0, label.bbox[3] - label.bbox[1])
+        if name == "handle_length_from_bore":
+            qualifier = " ".join(
+                [
+                    normalized,
+                    *(
+                        line.normalized_text.upper()
+                        for line in lines
+                        if line is not label
+                        and line.region_id == label.region_id
+                        and line.page_number == label.page_number
+                        and line.bbox[0] >= label.bbox[0] - height
+                        and line.bbox[0] <= label.bbox[2] + height
+                        and 0 <= line.bbox[1] - label.bbox[3] <= height * 2.5
+                    ),
+                ]
+            )
+            if not (
+                re.search(r"BORE\s+CENT(?:ER|RE)", qualifier)
+                and re.search(r"HANDLE\s+TIP", qualifier)
+            ):
+                continue
+        values = [
+            line
+            for line in lines
+            if line is not label
+            and line.region_id == label.region_id
+            and line.page_number == label.page_number
+            and 0 <= line.bbox[0] - label.bbox[2] <= height * 20
+            and abs((line.bbox[1] + line.bbox[3] - label.bbox[1] - label.bbox[3]) / 2)
+            <= height
+            and parse_measurement(line.normalized_text) is not None
+        ]
+        if values:
+            rows.append((name, label, min(values, key=lambda line: line.bbox[0])))
+    if len({name for name, _, _ in rows}) < 3:
+        return {}
+    value_xs = sorted(value.bbox[0] for _, _, value in rows)
+    if value_xs[-1] - value_xs[0] > max(
+        30.0, 3 * max(label.bbox[3] - label.bbox[1] for _, label, _ in rows)
+    ):
+        return {}
+
+    candidates: dict[str, list[_NumericCandidate]] = {}
+    for name, label, value in rows:
+        measurement = parse_measurement(value.normalized_text)
+        if (
+            measurement is None
+            or measurement.value <= 0
+            or not measurement.explicit_unit
+        ):
+            continue
+        source_tokens = [*label.tokens, *value.tokens]
+        raw = f"{label.raw_text}: {value.raw_text}"
+        candidates.setdefault(name, []).append(
+            _NumericCandidate(
+                value=measurement.value,
+                unit=measurement.unit,
+                raw_text=raw,
+                source=_source_for_tokens(source_tokens, raw),
+                token_ids=tuple(token.token_id for token in source_tokens),
+                engine_pass=value.engine_pass,
+                normalization_rules=tuple(
+                    dict.fromkeys(
+                        [
+                            *measurement.normalization_rules,
+                            *(
+                                rule
+                                for token in value.tokens
+                                for rule in token.normalization_rules
+                            ),
+                        ]
+                    )
+                ),
+            )
+        )
+    return candidates
+
+
 def _normalized_candidate_value(candidate: _NumericCandidate) -> float:
     return to_inches(candidate.value, candidate.unit)
 
@@ -303,6 +438,7 @@ def _resolve_numeric_field(
     candidates: list[_NumericCandidate],
     *,
     geometry_support: bool = False,
+    table_association: bool = False,
 ) -> FieldRecognitionResult:
     if not candidates:
         return FieldRecognitionResult(
@@ -407,8 +543,16 @@ def _resolve_numeric_field(
     ]
     evidence = [
         RecognitionEvidence(
-            rule_id=f"{field_name}_adjacent_label",
-            description="Dimension token is spatially adjacent to the field label.",
+            rule_id=(
+                f"{field_name}_key_value_row"
+                if table_association
+                else f"{field_name}_adjacent_label"
+            ),
+            description=(
+                "A labeled key/value row binds the printed dimension to this field."
+                if table_association
+                else "Dimension token is spatially adjacent to the field label."
+            ),
             source=representative.source,
             token_ids=list(representative.token_ids),
         )
@@ -1142,28 +1286,37 @@ def _interpret_region(
     bore_tokens = scoped("bore")
     outside_tokens = scoped("outside")
     thickness_tokens = scoped("thickness")
+    specification_rows = (
+        _specification_row_candidates(base_tokens)
+        if region.derivation_method == "single_quote_specific_raster_page_v1"
+        else {}
+    )
     bore = _resolve_numeric_field(
         "bore_diameter",
-        _adjacent_numeric_candidates(
-            bore_tokens,
-            labels={"BORE"},
-            excluded_neighbor_labels={"BETA"},
+        specification_rows.get("bore_diameter")
+        or _adjacent_numeric_candidates(
+            bore_tokens, labels={"BORE"}, excluded_neighbor_labels={"BETA"}
         ),
         geometry_support=geometry.has_inner_outer_profiles,
+        table_association=bool(specification_rows.get("bore_diameter")),
     )
     outside = _resolve_numeric_field(
         "outside_diameter",
-        _adjacent_numeric_candidates(outside_tokens, labels={"DIA", "OD"}),
+        specification_rows.get("outside_diameter")
+        or _adjacent_numeric_candidates(outside_tokens, labels={"DIA", "OD"}),
         geometry_support=geometry.has_inner_outer_profiles,
+        table_association=bool(specification_rows.get("outside_diameter")),
     )
     thickness = _resolve_numeric_field(
         "thickness",
-        _adjacent_numeric_candidates(
+        specification_rows.get("thickness")
+        or _adjacent_numeric_candidates(
             thickness_tokens,
             labels={"THK", "THICK", "THICKNESS"},
             thickness_context=True,
             require_explicit_unit=True,
         ),
+        table_association=bool(specification_rows.get("thickness")),
     )
     _promote_dimension_relationship(bore, outside)
     tolerance_plus, tolerance_minus = _resolve_tolerance(
@@ -1186,6 +1339,18 @@ def _interpret_region(
     handle_length = _resolve_handle_field(
         "handle_length_from_bore", handle_observations["handle_length_from_bore"]
     )
+    for field_name, current in (
+        ("handle_width", handle_width),
+        ("handle_length_from_bore", handle_length),
+    ):
+        if current.value is None and specification_rows.get(field_name):
+            table_value = _resolve_numeric_field(
+                field_name, specification_rows[field_name], table_association=True
+            )
+            if field_name == "handle_width":
+                handle_width = table_value
+            else:
+                handle_length = table_value
     quantity = _resolve_quantity(build_spatial_lines(scoped("quantity")))
     chamfer_present, chamfer_width, chamfer_angle = _resolve_chamfer(base_lines)
     marking = _resolve_marking(base_lines)
