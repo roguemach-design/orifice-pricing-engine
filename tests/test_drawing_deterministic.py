@@ -320,6 +320,26 @@ def test_region_rendering_scale_and_coordinate_transform_are_traceable():
     assert at_300.png_bytes.startswith(b"\x89PNG")
 
 
+def test_tesseract_tsv_inch_quote_does_not_swallow_following_rows():
+    document, region = single_region_document()
+    rendered = render_region_png(document, region, dpi=300)
+    header = "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext"
+    tsv = "\n".join(
+        [
+            header,
+            '5\t1\t1\t1\t1\t1\t10\t10\t10\t15\t90\t"',
+            "5\t1\t1\t1\t2\t1\t10\t40\t40\t15\t90\tTEST",
+            "5\t1\t1\t1\t2\t2\t55\t40\t20\t15\t90\tID:",
+            "5\t1\t1\t1\t3\t1\t10\t65\t90\t15\t90\tZX-2041",
+        ]
+    )
+    tokens = TesseractLocalOcrEngine._parse_tsv(tsv, rendered, "psm11")
+    assert [token.raw_text for token in tokens] == ['"', "TEST", "ID:", "ZX-2041"]
+    assert tokens[-1].source_bbox == pytest.approx(
+        rendered.transform.pixel_bbox_to_pdf((10, 65, 100, 80))
+    )
+
+
 @pytest.mark.skipif(shutil.which("tesseract") is None, reason="Tesseract not installed")
 def test_local_tesseract_returns_word_boxes_mapped_to_original_pdf_region():
     document = normalize_document(drawing_pdf(), "ocr-local.pdf")

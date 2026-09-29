@@ -208,11 +208,22 @@ def _adjacent_numeric_candidates(
         ]
         parsed: list[tuple[OcrTokenObservation, ParsedMeasurement]] = []
         for token in nearby:
+            if re.fullmatch(r"\d{1,2}\.", token.raw_text.strip()):
+                # A numbered note prefix from this or an adjacent line
+                # cannot establish a manufacturing dimension.
+                continue
             measurement = parse_measurement(
                 token.interpreted_text,
                 thickness_context=thickness_context,
             )
             if measurement is None or measurement.value <= 0:
+                continue
+            if not measurement.explicit_unit and re.fullmatch(
+                r"\d{1,2}\.?(?:\s*)", token.raw_text
+            ):
+                # A bare small integer by a label can be a note number even
+                # when targeted OCR drops the period. Require a dimension
+                # form or explicit unit before promoting it.
                 continue
             if require_explicit_unit and not measurement.explicit_unit:
                 adjacent_units = [
@@ -401,6 +412,51 @@ def _specification_row_candidates(
             )
         )
     return candidates
+
+
+_NOTE_DIMENSION_LABELS = {
+    "outside_diameter": re.compile(r"\b(?:OUTSIDE|OUTER)\s+DIAMETER\s*[:=]", re.I),
+    "bore_diameter": re.compile(r"\b(?:BORE|ORIFICE)\s+DIAMETER\s*[:=]", re.I),
+    "thickness": re.compile(r"\bPLATE\s+(?:THICKNESS|THK)\s*[:=]", re.I),
+}
+
+
+def _labeled_note_candidates(
+    tokens: list[OcrTokenObservation],
+) -> dict[str, list[_NumericCandidate]]:
+    """Read a value immediately after an explicit manufacturing-note label.
+
+    Numbered note prefixes, tolerance values, and unrelated text elsewhere on
+    a long PSM 6 line cannot supply the dimension. An explicit unit is required.
+    """
+    found: dict[str, list[_NumericCandidate]] = {}
+    for line in build_spatial_lines(tokens):
+        for name, label in _NOTE_DIMENSION_LABELS.items():
+            match = label.search(line.normalized_text)
+            if not match:
+                continue
+            following = line.normalized_text[match.end() :].strip()
+            if not re.match(r"^(?:[Ø⌀Φ@%]\s*)?(?:\d|\.)", following):
+                continue
+            measurement = parse_measurement(following)
+            if (
+                measurement is None
+                or measurement.value <= 0
+                or not measurement.explicit_unit
+            ):
+                continue
+            found.setdefault(name, []).append(
+                _NumericCandidate(
+                    value=measurement.value,
+                    unit=measurement.unit,
+                    raw_text=line.raw_text,
+                    source=_line_source(line),
+                    token_ids=tuple(line.token_ids),
+                    engine_pass=line.engine_pass,
+                    normalization_rules=tuple(measurement.normalization_rules),
+                )
+            )
+    return found
 
 
 def _normalized_candidate_value(candidate: _NumericCandidate) -> float:
@@ -1043,29 +1099,104 @@ def _resolve_chamfer(
 
 
 def _resolve_marking(lines: list[SpatialTextLine]) -> FieldRecognitionResult:
-    candidates = [
-        line
-        for line in lines
-        if "STAMP" in normalize_engineering_text(line.normalized_text).normalized_text
-    ]
-    if not candidates:
-        return FieldRecognitionResult(
-            field_name="marking_text",
-            status=FieldStatus.NOT_DETECTED,
-            evidence_classification=EvidenceClassification.NOT_DETECTED,
-            abstention_reason="no_marking_instruction",
+    def literal(value: str) -> str | None:
+        value = value.strip().strip('"“”').strip().rstrip(".")
+        if (
+            not 1 <= len(value) <= 40
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 -]*", value)
+            or value.upper() in {"NONE", "NO MARKING", "N A"}
+            or re.search(
+                r"\b(?:DRAWING|DWG|TEST|MATERIAL|QUANTITY|BORE|THICKNESS|SCALE|SHEET|REV|STAMP|LETTERS?)\b",
+                value,
+                re.I,
+            )
+        ):
+            return None
+        return value
+
+    recognized: list[tuple[str, SpatialTextLine, str]] = []
+    instruction_lines: list[SpatialTextLine] = []
+    for line in lines:
+        text = line.normalized_text
+        label = re.search(r"\b(?:HANDLE\s+)?MARKING\s+TEXT\s*[:=]", text, re.I)
+        if label:
+            candidate = literal(text[label.end() :])
+            if candidate:
+                recognized.append((candidate, line, "marking_text_literal"))
+            else:
+                instruction_lines.append(line)
+        elif re.fullmatch(r"\s*(?:HANDLE\s+)?MARKING\s+TEXT\s*:?\s*", text, re.I):
+            height = max(1.0, line.bbox[3] - line.bbox[1])
+            neighbors = [
+                other
+                for other in lines
+                if other is not line
+                and other.region_id == line.region_id
+                and other.page_number == line.page_number
+                and other.engine_pass == line.engine_pass
+                and 0 <= other.bbox[0] - line.bbox[2] <= height * 20
+                and min(other.bbox[3], line.bbox[3]) - max(other.bbox[1], line.bbox[1])
+                >= height * 0.5
+            ]
+            if neighbors:
+                nearest = min(neighbors, key=lambda other: other.bbox[0])
+                candidate = literal(nearest.normalized_text)
+                if candidate:
+                    recognized.append((candidate, nearest, "marking_text_table_cell"))
+                else:
+                    instruction_lines.append(line)
+            else:
+                instruction_lines.append(line)
+        quoted = re.search(
+            r'\b(?:MARK\s+(?:THE\s+)?HANDLE\s+WITH|STAMP\s+(?:HANDLE\s+)?WITH)\s+["“]([^"”]{1,40})["”]',
+            text,
+            re.I,
         )
-    unique = {line.raw_text for line in candidates}
-    if len(unique) > 2:
+        if quoted:
+            candidate = literal(quoted.group(1))
+            if candidate:
+                recognized.append((candidate, line, "quoted_handle_marking"))
+        elif re.search(r"\b(?:STAMP|MARK\s+HANDLE)\b", text, re.I):
+            instruction_lines.append(line)
+
+    values = sorted({value for value, _, _ in recognized})
+    if len(values) > 1:
         return FieldRecognitionResult(
             field_name="marking_text",
             status=FieldStatus.AMBIGUOUS,
             evidence_classification=EvidenceClassification.AMBIGUOUS,
-            candidate_values=sorted(unique),
-            abstention_reason="multiple_marking_instruction_readings",
+            evidence=[
+                RecognitionEvidence(
+                    rule_id=rule,
+                    description="Competing explicit handle-marking literals were found.",
+                    source=_line_source(line),
+                    token_ids=line.token_ids,
+                )
+                for _, line, rule in recognized
+            ],
+            candidate_values=values,
+            abstention_reason="competing_marking_literals",
         )
-    line = candidates[0]
-    if re.search(r"\bSTAMP\s+WITH\b", line.normalized_text, re.IGNORECASE):
+    if values:
+        value, line, rule = recognized[0]
+        return FieldRecognitionResult(
+            field_name="marking_text",
+            value=value,
+            raw_text=line.raw_text,
+            status=FieldStatus.LOW_CONFIDENCE,
+            evidence_classification=EvidenceClassification.REQUIRES_CONFIRMATION,
+            evidence=[
+                RecognitionEvidence(
+                    rule_id=rule,
+                    description="An explicit marking literal was bound to a handle-marking label.",
+                    source=_line_source(line),
+                    token_ids=line.token_ids,
+                )
+            ],
+            candidate_values=values,
+        )
+    if instruction_lines:
+        line = instruction_lines[0]
         return FieldRecognitionResult(
             field_name="marking_text",
             raw_text=line.raw_text,
@@ -1074,29 +1205,18 @@ def _resolve_marking(lines: list[SpatialTextLine]) -> FieldRecognitionResult:
             evidence=[
                 RecognitionEvidence(
                     rule_id="marking_instruction_without_bound_literal",
-                    description="A stamping instruction was detected, but its text is not the marking itself.",
+                    description="A marking instruction was found without one bounded literal.",
                     source=_line_source(line),
                     token_ids=line.token_ids,
                 )
             ],
-            candidate_values=[line.raw_text],
             abstention_reason="marking_instruction_without_bound_literal",
         )
     return FieldRecognitionResult(
         field_name="marking_text",
-        value=line.raw_text,
-        raw_text=line.raw_text,
-        status=FieldStatus.LOW_CONFIDENCE,
-        evidence_classification=EvidenceClassification.REQUIRES_CONFIRMATION,
-        evidence=[
-            RecognitionEvidence(
-                rule_id="marking_instruction_line",
-                description="A STAMP instruction was found but requires human scoping.",
-                source=_line_source(line),
-                token_ids=line.token_ids,
-            )
-        ],
-        candidate_values=[line.raw_text],
+        status=FieldStatus.NOT_DETECTED,
+        evidence_classification=EvidenceClassification.NOT_DETECTED,
+        abstention_reason="no_marking_instruction",
     )
 
 
@@ -1291,19 +1411,22 @@ def _interpret_region(
         if region.derivation_method == "single_quote_specific_raster_page_v1"
         else {}
     )
+    note_dimensions = _labeled_note_candidates(base_tokens)
     bore = _resolve_numeric_field(
         "bore_diameter",
         specification_rows.get("bore_diameter")
         or _adjacent_numeric_candidates(
             bore_tokens, labels={"BORE"}, excluded_neighbor_labels={"BETA"}
-        ),
+        )
+        or note_dimensions.get("bore_diameter", []),
         geometry_support=geometry.has_inner_outer_profiles,
         table_association=bool(specification_rows.get("bore_diameter")),
     )
     outside = _resolve_numeric_field(
         "outside_diameter",
         specification_rows.get("outside_diameter")
-        or _adjacent_numeric_candidates(outside_tokens, labels={"DIA", "OD"}),
+        or _adjacent_numeric_candidates(outside_tokens, labels={"DIA", "OD"})
+        or note_dimensions.get("outside_diameter", []),
         geometry_support=geometry.has_inner_outer_profiles,
         table_association=bool(specification_rows.get("outside_diameter")),
     )
@@ -1315,7 +1438,8 @@ def _interpret_region(
             labels={"THK", "THICK", "THICKNESS"},
             thickness_context=True,
             require_explicit_unit=True,
-        ),
+        )
+        or note_dimensions.get("thickness", []),
         table_association=bool(specification_rows.get("thickness")),
     )
     _promote_dimension_relationship(bore, outside)

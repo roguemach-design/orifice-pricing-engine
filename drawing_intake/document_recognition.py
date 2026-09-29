@@ -35,7 +35,7 @@ class DeterministicDocumentRecognitionResult(StrictModel):
 
 
 _IDENTIFIER_LABEL = re.compile(
-    r"\b(?:DRAWING|DWG|PART|CONTRACT)\s*(?:NO\.?|NUMBER)\b|\bTEST\s*ID\b",
+    r"\b(?:DRAWING|DWG|PART|CONTRACT)\s*(?:NO\.?|NUMBER)(?!\w)|\bTEST\s*ID\b",
     re.IGNORECASE,
 )
 
@@ -54,18 +54,26 @@ def _labeled_document_identifier(ocr) -> bool:
             value_lines = [label, *lines]
             for value_line in value_lines:
                 if value_line is label:
-                    value = label.raw_text[match.end() :].strip()
+                    value = label.raw_text[match.end() :].strip(" :#\t")
                 else:
                     label_height = max(1, label.bbox[3] - label.bbox[1])
                     x_gap = value_line.bbox[0] - label.bbox[2]
-                    vertical_gap = abs(
-                        (value_line.bbox[1] + value_line.bbox[3]) / 2
-                        - (label.bbox[1] + label.bbox[3]) / 2
+                    vertical_overlap = max(
+                        0,
+                        min(value_line.bbox[3], label.bbox[3])
+                        - max(value_line.bbox[1], label.bbox[1]),
                     )
-                    if not (
-                        -label_height <= x_gap <= label_height * 6
-                        and vertical_gap <= label_height * 2
-                    ):
+                    same_row = (
+                        0 <= x_gap <= label_height * 15
+                        and vertical_overlap
+                        >= min(label_height, value_line.bbox[3] - value_line.bbox[1])
+                        * 0.5
+                    )
+                    below_label = (
+                        0 <= value_line.bbox[1] - label.bbox[3] <= label_height * 2
+                        and abs(value_line.bbox[0] - label.bbox[0]) <= label_height * 6
+                    )
+                    if not (same_row or below_label):
                         continue
                     value = value_line.raw_text.strip()
                 if re.fullmatch(

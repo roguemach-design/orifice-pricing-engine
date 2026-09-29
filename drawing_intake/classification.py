@@ -118,16 +118,29 @@ def classify_drawing_document(
                     ],
                     reason="Catalog/selection information is not a unique plate order.",
                 )
-            required = {
-                "labeled_document_identifier": labeled_document_identifier,
-                "outside_diameter_label": "OUTSIDE DIAMETER" in text,
-                "bore_diameter_label": "BORE DIAMETER" in text,
-                "plate_thickness_label": "PLATE THICKNESS" in text,
-                "material_label": "MATERIAL" in text,
-                "quantity_label": "QUANTITY" in text or "NO REQ" in text,
-            }
-            missing = [name for name, detected in required.items() if not detected]
-            if missing:
+            # Quote specificity is about a unique part and its associated
+            # specification context, not whether every quote field was read.
+            # The latter belongs to the assisted form's missing-field review.
+            plate_title = "ORIFICE PLATE" in text or "PADDLE PLATE" in text
+            dimension_labels = sum(
+                phrase in text
+                for phrase in ("OUTSIDE DIAMETER", "BORE DIAMETER", "PLATE THICKNESS")
+            )
+            specification_context = dimension_labels >= 2 or (
+                dimension_labels >= 1 and "MATERIAL" in text and "SPECIFICATION" in text
+            )
+            if not (
+                labeled_document_identifier and plate_title and specification_context
+            ):
+                missing = [
+                    name
+                    for name, present in (
+                        ("labeled_document_identifier", labeled_document_identifier),
+                        ("plate_title", plate_title),
+                        ("associated_specification_context", specification_context),
+                    )
+                    if not present
+                ]
                 return DocumentClassificationResult(
                     document_class=DrawingDocumentClass.AMBIGUOUS_DOCUMENT,
                     quote_specific=False,
@@ -138,7 +151,8 @@ def classify_drawing_document(
                     ],
                     reason=(
                         "One plate-like raster profile was found, but the document "
-                        "does not establish one labeled, quote-specific specification set."
+                        "does not establish one uniquely labeled plate with an "
+                        "associated specification context."
                     ),
                 )
             return DocumentClassificationResult(
@@ -147,11 +161,14 @@ def classify_drawing_document(
                 candidate_count=1,
                 evidence_rules=[
                     "single_raster_concentric_plate_profile",
-                    *required,
+                    "labeled_document_identifier",
+                    "plate_title",
+                    "associated_specification_context",
                 ],
                 reason=(
-                    "One raster plate profile has a labeled identifier and one "
-                    "associated dimensional/material/quantity specification set."
+                    "One raster plate profile has a labeled identifier, plate title, "
+                    "and associated specifications; unreadable or absent quote fields "
+                    "remain for customer entry."
                 ),
             )
         return DocumentClassificationResult(

@@ -131,7 +131,10 @@ def _broken_centerline_profiles(
     proposals: list[tuple[float, int, int, int, int]] = []
     minimum_outer = min(coarse_width, coarse_height) * 0.095
     for center, row in zip(centers, scores, strict=True):
-        good = np.flatnonzero(row >= 0.85)
+        # The coarse vote proposes centers only. Original-pixel concentric
+        # perimeters below provide the final check; a slightly broken outer
+        # paddle arc can still yield a useful center at this threshold.
+        good = np.flatnonzero(row >= 0.75)
         for outer_index in reversed(good):
             outer = int(radii[outer_index])
             if outer < minimum_outer:
@@ -276,7 +279,7 @@ def detect_raster_plate_structure(
                         pixels, width, height, center_x, center_y, radius
                     )
                 )
-                >= 0.40
+                >= 0.60
             ]
             bands = _radius_bands(strong)
             if len(bands) < 2:

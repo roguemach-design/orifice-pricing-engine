@@ -141,7 +141,12 @@ class TesseractLocalOcrEngine:
         pass_name: str,
     ) -> list[OcrTokenObservation]:
         observations: list[OcrTokenObservation] = []
-        reader = csv.DictReader(io.StringIO(raw_tsv), delimiter="\t")
+        # Tesseract's TSV is not CSV-quoted: a recognized inch mark can be a
+        # standalone `"` token. CSV's default quote handling would consume
+        # subsequent TSV records as one enormous OCR observation.
+        reader = csv.DictReader(
+            io.StringIO(raw_tsv), delimiter="\t", quoting=csv.QUOTE_NONE
+        )
         for row_index, row in enumerate(reader, start=1):
             raw_text = (row.get("text") or "").strip()
             if not raw_text:
