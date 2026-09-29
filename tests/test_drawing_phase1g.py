@@ -1008,6 +1008,18 @@ def test_internal_real_form_upload_populate_complete_confirm_without_pricing(
         assert not any(
             ".st-key-quote_field_handle_width" in item.value for item in app.markdown
         )
+        assert any(
+            ".st-key-phase1g_customer_confirmation" in item.value
+            and "outline: 2px solid #e02424" in item.value
+            for item in app.markdown
+        )
+        assert (
+            sum(
+                "Confirmation required before pricing." in item.value
+                for item in app.error
+            )
+            >= 2
+        )  # Form prompt and Quote Summary.
 
         confirmation = next(
             field
@@ -1031,9 +1043,33 @@ def test_internal_real_form_upload_populate_complete_confirm_without_pricing(
             "review": final_review.model_dump(),
         }
         assert len(quote_calls) == price_calls_after_apply
+        assert not any(
+            ".st-key-phase1g_customer_confirmation" in item.value
+            for item in app.markdown
+        )
         assert (
             app.session_state["phase1g_assisted_session"].selected_candidate_id
             == "plate-1"
+        )
+        next(
+            field for field in app.number_input if field.label == "Bore diameter (in.)"
+        ).set_value(2.125).run()
+        assert not app.exception
+        assert not app.session_state["phase1g_customer_confirmation"]
+        assert not review_assisted_quote(
+            app.session_state["phase1g_assisted_session"], availability=availability
+        ).confirmation_current
+        assert any(
+            ".st-key-phase1g_customer_confirmation" in item.value
+            for item in app.markdown
+        )
+        assert any(
+            "Confirmation required before pricing." in item.value for item in app.error
+        )
+        assert len(quote_calls) == price_calls_after_apply
+        assert not any(
+            "Customer-confirmed configuration is ready" in item.value
+            for item in app.success
         )
         next(
             button

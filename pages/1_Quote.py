@@ -196,7 +196,10 @@ if not API_BASE:
 
 
 def _internal_drawing_access_allowed() -> bool:
-    """Ask the existing API to verify the current Supabase JWT and allowlist."""
+    """Gate owner testing with the existing verified JWT and allowlist.
+
+    This limited test gate does not define the eventual public guest-upload UX.
+    """
 
     if not DRAWING_ASSISTED_ENABLED or not is_logged_in():
         return False
@@ -541,13 +544,20 @@ def _reset_to_manual_defaults() -> None:
 
 
 def _required_field_highlights(review) -> tuple[list[str], str]:
-    """Mark only form controls that the canonical assisted review says block completion."""
+    """Mark incomplete controls and then the purchaser confirmation control."""
 
     needs_attention = set(review.missing_required_fields) | set(review.invalid_fields)
     fields = [field for field in _FORM_KEYS if field in needs_attention]
-    if not fields:
+    confirmation_needed = (
+        not review.missing_required_fields
+        and not review.invalid_fields
+        and not review.confirmation_current
+    )
+    if not fields and not confirmation_needed:
         return [], ""
     selectors = [f".st-key-{_FORM_KEYS[field]}" for field in fields]
+    if confirmation_needed:
+        selectors.append(f".st-key-{_DRAWING_CONFIRM_KEY}")
     return fields, (
         "<style>\n"
         + ",\n".join(selectors)
@@ -1097,16 +1107,6 @@ if active_assisted_session is not None:
         active_assisted_session,
         availability=form_availability,
     )
-    highlighted_fields, highlight_css = _required_field_highlights(assisted_review)
-    if highlighted_fields:
-        attention_style.markdown(highlight_css, unsafe_allow_html=True)
-        labels = ", ".join(FIELD_LABELS[field] for field in highlighted_fields)
-        attention_prompt.error(
-            f"Complete or correct the fields outlined in red: {labels}."
-        )
-    else:
-        attention_style.empty()
-        attention_prompt.empty()
     owner_run = st.session_state.get(_OWNER_ACCEPTANCE_RUN_KEY)
     if isinstance(owner_run, OwnerAcceptanceRun):
         owner_run = update_run(
@@ -1179,6 +1179,23 @@ if active_assisted_session is not None:
                     active_assisted_session,
                     availability=form_availability,
                 )
+
+            highlighted_fields, highlight_css = _required_field_highlights(
+                assisted_review
+            )
+            if highlight_css:
+                attention_style.markdown(highlight_css, unsafe_allow_html=True)
+            else:
+                attention_style.empty()
+            if highlighted_fields:
+                labels = ", ".join(FIELD_LABELS[field] for field in highlighted_fields)
+                attention_prompt.error(
+                    f"Complete or correct the fields outlined in red: {labels}."
+                )
+            elif not assisted_review.confirmation_current:
+                attention_prompt.error("Confirmation required before pricing.")
+            else:
+                attention_prompt.empty()
 
             owner_run = st.session_state.get(_OWNER_ACCEPTANCE_RUN_KEY)
             if isinstance(owner_run, OwnerAcceptanceRun):
@@ -1345,9 +1362,17 @@ with left:
                 "No live price was requested during Phase 1G internal acceptance."
             )
         elif active_assisted_session is not None:
-            st.info(
-                "Complete and confirm the configuration to make it ready for pricing."
-            )
+            if (
+                assisted_review is not None
+                and not assisted_review.missing_required_fields
+                and not assisted_review.invalid_fields
+                and not assisted_review.confirmation_current
+            ):
+                st.error("Confirmation required before pricing.")
+            else:
+                st.info(
+                    "Complete the required fields before confirming the configuration."
+                )
         elif payload_inputs is None:
             st.info("Complete the required fields to see a verified price.")
         else:
