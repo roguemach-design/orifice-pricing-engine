@@ -1,0 +1,4 @@
+-r requirements.txt
+-r requirements-manufacturing.txt
+# Offline artifact validation only; production requirements remain unchanged.
+pypdf==6.10.0

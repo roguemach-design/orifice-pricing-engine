@@ -1,0 +1,58 @@
+Field,Source,Validation or release condition,Current sample
+Drawing state,Workflow,"Enum PROTOTYPE/CUSTOMER CONFIRMATION/RELEASED; confirmation requires complete reviewed requirements; release requires authorized approval",PROTOTYPE
+Part number,Customer/order,"Nonempty printable identifier; filename-safe mapping; immutable revision",PROTOTYPE-001
+Drawing number,Rule,"Deterministic association with part and specification revision",OP-PROTOTYPE-001
+Drawing revision,Workflow,"Required revision; immutable after approval",P3D
+Specification revision,Workflow,"Required frozen revision and content digest",Missing
+Generator revision,Rule,"Pinned renderer revision; no current-time metadata",op-drawing-v3d
+Geometry revision,Rule,"Current canonical geometry only",straight-handle-r03125-v2-prototype
+Drawing standard,Owner,"ASME Y14.5-2018; obtain selected Y14.100/Y14.3 editions",2018 requested
+Projection,Owner,"Third-angle; verify view direction and symbol against controlled drawing-practice source",Requested
+Units,Shop default,"Inches throughout; explicit conversions for standards tables",INCHES
+View scale,Presentation rule,"NTS while views are independently scaled; numeric scale only for uniformly scaled view",NTS
+Sheet number,Rule,"Sequential index and total",1 of 1 currently
+Product application,Customer,"Metering vs restriction; single/bidirectional; standard applicability must be established",Missing
+Governing product standard,Owner/customer,"Edition and amendment locked; explicit precedence; do not combine incompatible requirements",AGA/API requested; edition missing
+Line nominal size,Customer,"Approved designation; not interchangeable with pipe ID",Missing
+Pipe schedule / actual meter-tube ID,Customer,"Positive actual ID; compatible with application and geometry; standard domain check",Missing
+Flange class and facing,Customer,"Approved standard/class/facing; plate OD fit and sealing interface checked",Missing
+Pressure tap arrangement,Customer,"Compatible with selected metering standard",Missing
+Operating conditions,Customer/application engineer,"Fluid/phase/flow direction/temperature/differential pressure/support needed for applicability and deflection",Missing
+Finished plate OD,Customer,"Positive; bore smaller; validate flange fit; not pipe ID or a separately specified sealing diameter",5.000
+Finished bore nominal,Customer,"Positive and less than OD; rough bore positive; governing standard domain",1.548
+Bore size tolerance,Verified rule or approved shop requirement,"Edition-specific table boundaries and tolerance meaning verified; not diameter variation substituted for nominal tolerance",Unresolved
+Handle width,Customer,"Positive; less than OD; canonical fillets fit",2.000
+Centerline to handle tip,Customer,"Greater than plate radius; canonical tip/neck clearance valid",10.500
+Total overall length,Derived reference,"Centerline-to-tip plus OD/2; do not replace centerline dimension",13.000
+Corner radius,Approved geometry rule,"Exact 0.03125; retain five places unless rounded nominal and tolerance approved",0.03125 at four corners
+Plate thickness E,Customer + standard validation,"Positive; validate against actual pipe ID/service/support and selected standard",0.125
+Bore land e,Customer/shop selection constrained by rule,"Positive; no greater than E; all governing land limits satisfied",Unresolved
+Chamfer enabled,Rule/customer subject to standard,"Explicit none/configured; reject conflict with required geometry",Unresolved
+Chamfer angle and convention,Rule/customer,"Verified standard range; face-versus-axis convention explicit",Unresolved
+Chamfer extent,Derived,"Exact E-e and trigonometric extent; remaining land positive; fits OD",Unresolved
+Chamfer side,Rule/customer,"Consistent with upstream/downstream and flow",Unresolved
+Flow direction,Customer,"Unambiguous physical face; bidirectional is a distinct configuration",Missing
+Upstream identification,Rule + customer orientation,"Face and marking agree; not inferred from page orientation",Missing
+Material specification and edition,Customer/owner,"ASTM A240 edition pinned; heat certificate verifies ordered grade",Type 304 requested
+304L dual certification,Owner procurement policy,"Require MTR proving both grades if dual-cert ordered; never infer from a 304 label",Decision required
+Quantity,Customer,"Positive integer",1
+Tag and order numbers,Customer/order,"Required or explicit not applicable; deterministic escaped text",Missing
+Heat number,Material traceability,"Actual assigned heat; may be unavailable at customer confirmation; mandatory by applicable release policy",Missing
+Marking text,Rule from approved fields,"Line size/bore/material/heat/tag/order per approved policy; verified lengths and characters",Unresolved
+Marking method,Owner shop policy,"Approved process that preserves plate requirements; do not invent standard mandate",Decision required
+Marking location,Owner/customer,"Defined handle face and offsets; avoid sealing/metering surfaces; actual fit",Decision required
+Upstream face roughness,Verified standard rule,"Explicit Ra/RMS distinction; measurement region and units specified",Unresolved primary standard
+Upstream edge,Verified standard rule,"Sharpness/squareness/burr requirements and inspection method sourced",Unresolved primary standard
+Plate flatness / departure,Verified standard rule,"Preserve specified region/setup/condition; do not substitute a different GD&T flatness control",Unresolved primary standard
+Datum A,Proposed engineering definition,"Upstream face; exact feature scope and fixture method approved",Proposed only
+Datum B,Proposed engineering definition,"Actual centering feature verified; interrupted paddle OD may need explicit datum simulation",Proposed only
+Bore position / orientation,Approved engineering requirement,"Numeric tolerance; datum establishment; no invented FCF value; check inspection feasibility",Unresolved
+Handle location,Approved engineering requirement,"A and circular B leave clocking freedom; constrain only functionally necessary degrees of freedom",Unresolved
+General .X/.XX/.XXX/angle tolerances,Approved Rogue policy,"Process-capable values; specific callouts override; no values supplied by drafting standard alone",Decision required
+Break edges,Owner requested policy subject to review,".005-.015 proposal must exclude upstream edge and any protected bore land/other controlled feature",Proposed; not active
+Inspection requirements,Owner + verified standard,"Feature-specific method/setup/resolution/acceptance; measurements tied to serial/order revision",Unresolved
+Customer confirmation fields,Customer,"Line size/class/bore/material/tag/flow/quantity resolved; approval bound to exact frozen revision",Incomplete
+Customer signature/date,Customer approval record,"Explicit supplied approval event; do not synthesize signer or current timestamp",Blank awaiting approval
+Manufacturing release,Authorized workflow,"Separate authorization; complete material/requirements/inspection checks; no prototype promotion by relabeling",Blocked
+Rough bore,Approved manufacturing rule,"Finished bore minus .125 diameter; positive and compatible with machining stock",1.423
+Radial stock,Derived,"Half diameter allowance",0.0625

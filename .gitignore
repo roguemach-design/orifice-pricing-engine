@@ -2,3 +2,9 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+# Phase 4 private local database, cookies, bearer tokens and email fixtures
+.frozen-plate-local/
+
+# Reproducible local render exports; only curated review evidence is tracked.
+prototype_output/**
+!prototype_output/README.md
