@@ -1,0 +1,4 @@
+# Install in addition to requirements.txt; prototype-only dependency.
+ezdxf==1.4.3
+pyparsing==3.2.5
+fonttools==4.60.1

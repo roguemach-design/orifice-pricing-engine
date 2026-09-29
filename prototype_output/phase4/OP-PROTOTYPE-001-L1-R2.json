@@ -1,0 +1,305 @@
+{
+  "application_context": {
+    "active_metering_rule_sets": [],
+    "application": "restriction-general",
+    "metering_validation": "NOT APPLICABLE"
+  },
+  "drawing": {
+    "bore_finish": null,
+    "chamfer_width_definition": null,
+    "customer_tag": null,
+    "edge_finish": null,
+    "flow_orientation": null,
+    "inspection": null,
+    "line_service": null,
+    "marking_location": null,
+    "marking_method": null,
+    "order_identifier": "OP-PROTOTYPE-001",
+    "order_line_revision": "L1-R2",
+    "revision": "R2",
+    "specification_revision": "R2",
+    "state": "customer-confirmation",
+    "surface_finish": null,
+    "tolerance_angles": null,
+    "tolerance_x": null,
+    "tolerance_xx": null,
+    "tolerance_xxx": null
+  },
+  "geometry": {
+    "corner_count": 4,
+    "corner_radius": 0.03125,
+    "finished_bore_diameter": 1.548,
+    "half_handle_width": 1.0,
+    "handle_axis": "+X",
+    "join_x": 2.311655251113366,
+    "origin": "bore center",
+    "outer_vertices_xyb": [
+      [
+        2.2831162973959174,
+        1.0185185185185186,
+        4.696150546534168
+      ],
+      [
+        2.2831162973959174,
+        -1.0185185185185186,
+        -0.2960138063451394
+      ],
+      [
+        2.311655251113366,
+        -1.0,
+        0.0
+      ],
+      [
+        10.46875,
+        -1.0,
+        0.41421356237309503
+      ],
+      [
+        10.5,
+        -0.96875,
+        0.0
+      ],
+      [
+        10.5,
+        0.96875,
+        0.41421356237309503
+      ],
+      [
+        10.46875,
+        1.0,
+        0.0
+      ],
+      [
+        2.311655251113366,
+        1.0,
+        -0.2960138063451394
+      ]
+    ],
+    "radius": 2.5,
+    "segments": [
+      {
+        "center": [
+          0.0,
+          0.0
+        ],
+        "end": [
+          2.2831162973959174,
+          -1.0185185185185186
+        ],
+        "kind": "arc",
+        "radius": 2.5,
+        "start": [
+          2.2831162973959174,
+          1.0185185185185186
+        ],
+        "start_degrees": 24.042075905756228,
+        "sweep_degrees": 311.91584818848753
+      },
+      {
+        "center": [
+          2.311655251113366,
+          -1.03125
+        ],
+        "end": [
+          2.311655251113366,
+          -1.0
+        ],
+        "kind": "arc",
+        "radius": 0.03125,
+        "start": [
+          2.2831162973959174,
+          -1.0185185185185186
+        ],
+        "start_degrees": 155.95792409424377,
+        "sweep_degrees": -65.95792409424377
+      },
+      {
+        "center": null,
+        "end": [
+          10.46875,
+          -1.0
+        ],
+        "kind": "line",
+        "radius": null,
+        "start": [
+          2.311655251113366,
+          -1.0
+        ],
+        "start_degrees": 0.0,
+        "sweep_degrees": 0.0
+      },
+      {
+        "center": [
+          10.46875,
+          -0.96875
+        ],
+        "end": [
+          10.5,
+          -0.96875
+        ],
+        "kind": "arc",
+        "radius": 0.03125,
+        "start": [
+          10.46875,
+          -1.0
+        ],
+        "start_degrees": -90,
+        "sweep_degrees": 90
+      },
+      {
+        "center": null,
+        "end": [
+          10.5,
+          0.96875
+        ],
+        "kind": "line",
+        "radius": null,
+        "start": [
+          10.5,
+          -0.96875
+        ],
+        "start_degrees": 0.0,
+        "sweep_degrees": 0.0
+      },
+      {
+        "center": [
+          10.46875,
+          0.96875
+        ],
+        "end": [
+          10.46875,
+          1.0
+        ],
+        "kind": "arc",
+        "radius": 0.03125,
+        "start": [
+          10.5,
+          0.96875
+        ],
+        "start_degrees": 0,
+        "sweep_degrees": 90
+      },
+      {
+        "center": null,
+        "end": [
+          2.311655251113366,
+          1.0
+        ],
+        "kind": "line",
+        "radius": null,
+        "start": [
+          10.46875,
+          1.0
+        ],
+        "start_degrees": 0.0,
+        "sweep_degrees": 0.0
+      },
+      {
+        "center": [
+          2.311655251113366,
+          1.03125
+        ],
+        "end": [
+          2.2831162973959174,
+          1.0185185185185186
+        ],
+        "kind": "arc",
+        "radius": 0.03125,
+        "start": [
+          2.311655251113366,
+          1.0
+        ],
+        "start_degrees": -90,
+        "sweep_degrees": -65.95792409424377
+      }
+    ],
+    "units": "inches",
+    "version": "straight-handle-r03125-v2-prototype"
+  },
+  "manufacturing": {
+    "corner_radius": 0.03125,
+    "finished_bore_diameter": 1.548,
+    "geometry_rule_version": "straight-handle-r03125-v2-prototype",
+    "outer_profile": "finished nominal; no kerf compensation",
+    "radial_machining_stock": 0.0625,
+    "rough_bore_diameter": 1.423,
+    "rough_bore_diameter_allowance": 0.125
+  },
+  "owner_confirmation_required": [
+    "Bore tolerance, general tolerances, edge finish and bore finish",
+    "Chamfer requirements (width, angle, side), marking method and placement",
+    "General surface finish and inspection requirements"
+  ],
+  "schema_version": 4,
+  "section_geometry": {
+    "angle_degrees": null,
+    "bore_radius": 0.774,
+    "chamfer_axial_depth": null,
+    "chamfer_radial_width": null,
+    "face": null,
+    "flow_orientation": null,
+    "missing": [],
+    "polygons": [
+      [
+        [
+          0,
+          0.774
+        ],
+        [
+          0.125,
+          0.774
+        ],
+        [
+          0.125,
+          10.5
+        ],
+        [
+          0,
+          10.5
+        ]
+      ],
+      [
+        [
+          0,
+          -2.5
+        ],
+        [
+          0.125,
+          -2.5
+        ],
+        [
+          0.125,
+          -0.774
+        ],
+        [
+          0,
+          -0.774
+        ]
+      ]
+    ],
+    "status": "NOT SPECIFIED - HOLD",
+    "straight_land": null,
+    "thickness": 0.125,
+    "version": "longitudinal-section-v1"
+  },
+  "specification": {
+    "application": "restriction-general",
+    "bore_tolerance": null,
+    "centerline_to_handle_end": 10.5,
+    "chamfer": null,
+    "chamfer_angle_degrees": null,
+    "chamfer_side": null,
+    "chamfer_width": null,
+    "chamfer_width_definition": null,
+    "finished_bore_diameter": 1.548,
+    "finished_od": 5.0,
+    "flow_orientation": null,
+    "handle_width": 2.0,
+    "marking": null,
+    "material": "304 stainless steel",
+    "part_identifier": "PROTOTYPE-001",
+    "quantity": 2,
+    "thickness": 0.125
+  },
+  "status": "CUSTOMER CONFIRMATION - NOT RELEASED FOR MANUFACTURE"
+}

@@ -1,0 +1,3 @@
+-r requirements-frozen-plate.txt
+# Optional static HTML review rendering; not used by Frozen Plate runtime.
+weasyprint==68.1
