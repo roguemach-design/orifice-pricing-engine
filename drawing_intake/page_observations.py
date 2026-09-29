@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from .documents import NormalizedDocument
 from .ocr import LocalOcrResult, TesseractLocalOcrEngine
 from .regions import DerivedDrawingRegion
@@ -12,8 +14,13 @@ def observe_page_locally(
     page_number: int = 1,
     dpi: int = 150,
     ocr_engine: TesseractLocalOcrEngine | None = None,
+    decisive_initial_observation: Callable[[LocalOcrResult], bool] | None = None,
 ) -> tuple[LocalOcrResult, int, RenderedRegion]:
-    """OCR a page locally and conservatively correct a sideways orientation."""
+    """OCR a page locally and conservatively correct a sideways orientation.
+
+    A caller may skip rotation only when the initial observations already
+    establish an outcome that cannot benefit from more orientation probes.
+    """
 
     page = document.pages[page_number - 1]
     region = DerivedDrawingRegion(
@@ -31,6 +38,8 @@ def observe_page_locally(
     candidates: list[tuple[int, LocalOcrResult, RenderedRegion]] = [
         (0, engine.recognize(rendered), rendered)
     ]
+    if decisive_initial_observation and decisive_initial_observation(candidates[0][1]):
+        return candidates[0][1], 0, rendered
     initial_chars = sum(
         len("".join(character for character in token.raw_text if character.isalnum()))
         for token in candidates[0][1].tokens

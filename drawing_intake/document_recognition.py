@@ -5,7 +5,11 @@ import re
 
 from pydantic import Field
 
-from .classification import DocumentClassificationResult, classify_drawing_document
+from .classification import (
+    DocumentClassificationResult,
+    DrawingDocumentClass,
+    classify_drawing_document,
+)
 from .documents import NormalizedDocument
 from .models import DocumentStructureAssessment, StrictModel
 from .ocr import TesseractLocalOcrEngine, recover_plus_minus_glyphs
@@ -93,8 +97,47 @@ def recognize_document_structure(
     started = time.perf_counter()
     engine = ocr_engine or TesseractLocalOcrEngine()
     structure = assess_document_structure(document)
+    preliminary_reference: DocumentClassificationResult | None = None
+    preliminary_classification_seconds = 0.0
+
+    def decisive_reference(ocr) -> bool:
+        nonlocal preliminary_reference, preliminary_classification_seconds
+        classification_started = time.perf_counter()
+        candidate = classify_drawing_document(
+            document,
+            structure,
+            observed_text=" ".join(token.interpreted_text for token in ocr.tokens),
+        )
+        preliminary_classification_seconds = (
+            time.perf_counter() - classification_started
+        )
+        if candidate.document_class == DrawingDocumentClass.REFERENCE_VENDOR_DATASHEET:
+            preliminary_reference = candidate
+            return True
+        return False
+
     ocr_started = time.perf_counter()
-    ocr, rotation, rendered = observe_page_locally(document, ocr_engine=engine)
+    ocr, rotation, rendered = observe_page_locally(
+        document,
+        ocr_engine=engine,
+        decisive_initial_observation=decisive_reference,
+    )
+    if preliminary_reference is not None:
+        # This is the existing two-part generic reference rule, independent of
+        # geometry and schedule rows. No quote candidates or field readings are
+        # produced; preserve the manual configuration without further OCR.
+        return DeterministicDocumentRecognitionResult(
+            structure=structure,
+            classification=preliminary_reference,
+            page_rotation_degrees=rotation,
+            ocr_token_count=len(ocr.tokens),
+            timings=DocumentRecognitionTimings(
+                classification_seconds=preliminary_classification_seconds,
+                rendering_and_ocr_seconds=time.perf_counter() - ocr_started,
+                table_interpretation_seconds=0.0,
+                total_seconds=time.perf_counter() - started,
+            ),
+        )
     ocr = recover_plus_minus_glyphs(ocr, rendered)
     if structure.status == "unknown":
         raster_structure = detect_raster_plate_structure(rendered)
