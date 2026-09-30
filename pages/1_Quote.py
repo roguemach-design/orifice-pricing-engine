@@ -1,5 +1,6 @@
 # pages/1_Quote.py
 import os
+import copy
 import hashlib
 import json
 import time
@@ -39,6 +40,8 @@ from drawing_intake.configurator_integration import (
     validate_drawing_upload,
 )
 from drawing_intake.pricing_gate import confirmed_drawing_quote_inputs
+from drawing_intake.cart_gate import verified_assisted_cart_inputs
+from drawing_intake.owner_access import verified_owner_access
 from drawing_intake.owner_acceptance import (
     AcceptanceEventKind,
     OwnerAcceptanceRun,
@@ -131,7 +134,7 @@ render_auth_sidebar(show_debug=False)
 
 # ✅ NEW: cart support (session state)
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 if "cart" not in st.session_state or not isinstance(st.session_state.cart, list):
     st.session_state.cart = []
@@ -160,6 +163,9 @@ DRAWING_ASSISTED_ENABLED = feature_flag_enabled(
 )
 OWNER_ACCEPTANCE_MODE = feature_flag_enabled(
     os.environ.get("OPLATES_OWNER_ACCEPTANCE_MODE")
+)
+OWNER_TEST_CHECKOUT_ENABLED = feature_flag_enabled(
+    os.environ.get("OPLATES_OWNER_TEST_CHECKOUT_ENABLED")
 )
 
 _DRAWING_UPLOAD_KEY = "phase1g_processed_upload"
@@ -201,27 +207,12 @@ def _internal_drawing_access_allowed() -> bool:
     This limited test gate does not define the eventual public guest-upload UX.
     """
 
-    if not DRAWING_ASSISTED_ENABLED or not is_logged_in():
-        return False
-    user_hint = current_user_id_hint()
-    if not user_hint:
-        return False
-    try:
-        response = requests.get(
-            f"{API_BASE}/internal/drawing-intake/access",
-            headers=auth_headers(),
-            timeout=5,
-        )
-        if response.status_code != 200:
-            return False
-        body = response.json()
-        return bool(
-            body.get("enabled")
-            and body.get("authorized")
-            and body.get("user_id") == user_hint
-        )
-    except (requests.RequestException, ValueError):
-        return False
+    return verified_owner_access(
+        API_BASE,
+        enabled=DRAWING_ASSISTED_ENABLED and is_logged_in(),
+        user_id_hint=current_user_id_hint() if is_logged_in() else None,
+        headers=auth_headers() if is_logged_in() else {},
+    )
 
 
 def _qp_get(name: str) -> Optional[str]:
@@ -622,8 +613,13 @@ def _can_prefill_single_plate() -> bool:
     )
 
 
+if st.session_state.pop("phase1k_new_plate_requested", False):
+    _reset_to_manual_defaults()
 _initialize_form_state()
 drawing_access_allowed = _internal_drawing_access_allowed()
+owner_test_checkout_allowed = bool(
+    OWNER_ACCEPTANCE_MODE and OWNER_TEST_CHECKOUT_ENABLED and drawing_access_allowed
+)
 
 if drawing_access_allowed:
     with st.expander(
@@ -1396,17 +1392,21 @@ with left:
 # -----------------------------
 # Cart helper (NEW)
 # -----------------------------
-def _add_to_cart(payload_inputs: dict, result: dict) -> None:
+def _add_to_cart(payload_inputs: dict, result: dict, *, assisted: bool = False) -> None:
     st.session_state.cart.append(
         {
             "line_id": str(uuid.uuid4()),
-            "created_at": datetime.utcnow().isoformat() + "Z",
-            "inputs": payload_inputs,
+            "created_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "inputs": copy.deepcopy(payload_inputs),
             # snapshot pricing at time added (optional but useful)
             "unit_price": float(result.get("unit_price") or 0),
             "total_price": float(result.get("total_price") or 0),
             "material": payload_inputs.get("material"),
             "thickness": payload_inputs.get("thickness"),
+            # Browser-session metadata only. Checkout sends only canonical inputs.
+            "assisted_quote": assisted,
+            "configuration_id": result.get("configuration_id"),
+            "pricing_config_version": result.get("pricing_config_version"),
         }
     )
 
@@ -1429,11 +1429,11 @@ with right:
                 "Checkout as guest — log in from the sidebar to save orders to your account."
             )
 
-        if OWNER_ACCEPTANCE_MODE:
+        if OWNER_ACCEPTANCE_MODE and not owner_test_checkout_allowed:
             st.caption(
                 "Checkout is disabled in this controlled owner-acceptance environment."
             )
-        elif active_assisted_session is not None:
+        elif active_assisted_session is not None and not owner_test_checkout_allowed:
             st.caption("Checkout remains disabled for drawing-assisted configurations.")
         else:
             st.caption(
@@ -1446,11 +1446,27 @@ with right:
         with btn_cols[1]:
             checkout_disabled = (
                 result is None
-                or OWNER_ACCEPTANCE_MODE
-                or active_assisted_session is not None
+                or (OWNER_ACCEPTANCE_MODE and not owner_test_checkout_allowed)
+                or (
+                    active_assisted_session is not None
+                    and not owner_test_checkout_allowed
+                )
             )
             if st.button("Continue to secure checkout", disabled=checkout_disabled):
-                start_checkout(payload_inputs, result)
+                if active_assisted_session is not None:
+                    try:
+                        verified_assisted_cart_inputs(
+                            active_assisted_session,
+                            pricing_payload,
+                            result,
+                            availability=form_availability,
+                        )
+                    except (ValueError, KeyError, TypeError):
+                        st.error(
+                            "Review and confirm the current verified quote before checkout."
+                        )
+                        st.stop()
+                start_checkout(pricing_payload, result)
 
             # Under your existing "Place Order & Pay" button block:
             st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
@@ -1459,13 +1475,33 @@ with right:
             add_disabled = (
                 not is_logged_in()
                 or result is None
-                or OWNER_ACCEPTANCE_MODE
-                or active_assisted_session is not None
+                or (OWNER_ACCEPTANCE_MODE and not owner_test_checkout_allowed)
+                or (
+                    active_assisted_session is not None
+                    and not owner_test_checkout_allowed
+                )
             )
             if st.button(
                 "Add another plate", disabled=add_disabled, use_container_width=True
             ):
-                _add_to_cart(payload_inputs, result)
+                if active_assisted_session is not None:
+                    try:
+                        cart_inputs = verified_assisted_cart_inputs(
+                            active_assisted_session,
+                            pricing_payload,
+                            result,
+                            availability=form_availability,
+                        )
+                    except (ValueError, KeyError, TypeError):
+                        st.error(
+                            "Review and confirm the current verified quote before adding it."
+                        )
+                        st.stop()
+                else:
+                    cart_inputs = pricing_payload
+                _add_to_cart(
+                    cart_inputs, result, assisted=active_assisted_session is not None
+                )
                 st.success(
                     f"Added to Quote Cart. Items in cart: {len(st.session_state.cart)}"
                 )

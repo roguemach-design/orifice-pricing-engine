@@ -12,7 +12,16 @@ from typing import Any, Dict, List
 import streamlit as st
 import requests
 
-from auth import render_auth_sidebar, require_login, auth_headers
+from auth import (
+    auth_headers,
+    current_user_id_hint,
+    is_logged_in,
+    render_auth_sidebar,
+    require_login,
+)
+from drawing_intake.configurator_integration import feature_flag_enabled
+from drawing_intake.owner_access import verified_owner_access
+
 render_auth_sidebar(show_debug=False)
 require_login("Log in in the sidebar to manage quote carts.")
 
@@ -25,11 +34,26 @@ if "cart" not in st.session_state or not isinstance(st.session_state.cart, list)
 
 cart: List[Dict[str, Any]] = st.session_state.cart
 API_BASE = (os.environ.get("API_BASE") or "").strip().rstrip("/")
+if API_BASE and "://" not in API_BASE:
+    API_BASE = f"http://{API_BASE}"
 API_KEY = (os.environ.get("API_KEY") or "").strip()
+OWNER_ACCEPTANCE_MODE = feature_flag_enabled(
+    os.environ.get("OPLATES_OWNER_ACCEPTANCE_MODE")
+)
+OWNER_TEST_CHECKOUT_ENABLED = feature_flag_enabled(
+    os.environ.get("OPLATES_OWNER_TEST_CHECKOUT_ENABLED")
+)
 
 if not API_BASE:
     st.error("The O-Plates pricing service is not configured.")
     st.stop()
+
+owner_checkout_allowed = not OWNER_ACCEPTANCE_MODE or verified_owner_access(
+    API_BASE,
+    enabled=OWNER_TEST_CHECKOUT_ENABLED and is_logged_in(),
+    user_id_hint=current_user_id_hint() if is_logged_in() else None,
+    headers=auth_headers() if is_logged_in() else {},
+)
 
 checkout_return = st.query_params.get("checkout")
 if isinstance(checkout_return, list):
@@ -342,6 +366,8 @@ def _make_pdf_quote(lines: List[Dict[str, Any]], *, customer: Dict[str, Any] | N
 top = st.columns([1, 1, 2])
 with top[0]:
     if st.button("➕ Add another plate"):
+        if cart and cart[-1].get("assisted_quote"):
+            st.session_state["phase1k_new_plate_requested"] = True
         st.switch_page("pages/1_Quote.py")
 with top[1]:
     if st.button("🧹 Clear cart"):
@@ -385,6 +411,7 @@ for idx, item in enumerate(cart):
             )
             st.caption(f"Label: {inputs.get('handle_label') or 'No label'}")
 
+        assisted_line = bool(item.get("assisted_quote"))
         with cols[1]:
             new_qty = st.number_input(
                 "Qty",
@@ -392,9 +419,15 @@ for idx, item in enumerate(cart):
                 value=int(inputs.get("quantity") or 1),
                 step=1,
                 key=f"qty_{line_id}",
+                disabled=assisted_line,
             )
-            inputs["quantity"] = int(new_qty)
-            item["inputs"] = inputs  # persist edit in session
+            if assisted_line:
+                st.caption(
+                    "To change this confirmed plate, remove it and configure it again."
+                )
+            else:
+                inputs["quantity"] = int(new_qty)
+                item["inputs"] = inputs  # existing manual-cart behavior
 
         # Live pricing
         try:
@@ -472,7 +505,15 @@ with c1:
 
 with c2:
     st.caption("Prices are revalidated before Stripe checkout.")
-    if st.button("💳 Checkout All Items", use_container_width=True):
+    if OWNER_ACCEPTANCE_MODE and not owner_checkout_allowed:
+        st.caption(
+            "Checkout is disabled in this controlled owner-acceptance environment."
+        )
+    if st.button(
+        "💳 Checkout All Items",
+        use_container_width=True,
+        disabled=not owner_checkout_allowed,
+    ):
         cart_items = [lv["inputs"] for lv in line_views]
         fingerprint = hashlib.sha256(
             json.dumps(

@@ -403,6 +403,124 @@ def test_authenticated_cart_checkout_uses_verified_user_and_idempotency(
         db.close()
 
 
+def test_confirmed_drawing_items_use_existing_test_checkout_and_order_path(
+    monkeypatch, checkout_client, database
+):
+    from drawing_intake.assisted_quote import (
+        AssistedQuoteSession,
+        CanonicalFieldValue,
+        ConfigurationValueOrigin,
+        availability_from_active_config,
+        confirm_configuration,
+    )
+    from drawing_intake.cart_gate import verified_assisted_cart_inputs
+    from drawing_intake.classification import DrawingDocumentClass
+    from pricing_engine import QuoteInputs
+
+    availability = availability_from_active_config({
+        "materials": ["304"],
+        "thicknesses_by_material": {"304": [0.125, 0.25]},
+        "lead_times_days": [14, 21],
+        "tolerance_options_in": [0.001, 0.002, 0.005],
+        "max_paddle_dia_in": 48.0,
+        "max_bore_dia_in": 19.0,
+        "max_handle_label_chars": 40,
+    })
+    first = quote_inputs(
+        paddle_dia=5.0, bore_dia=1.548, handle_width=2.0,
+        handle_length_from_bore=10.5, chamfer=False, chamfer_width=None,
+        handle_label="No label",
+    )
+    corrected = quote_inputs(
+        paddle_dia=10.25, bore_dia=3.75, thickness=0.25,
+        handle_width=2.0, handle_length_from_bore=10.5,
+        chamfer=False, chamfer_width=None, handle_label="No label",
+    )
+
+    def confirmed_line(payload, part):
+        session = AssistedQuoteSession(
+            source_document="synthetic-fixture.pdf",
+            source_sha256="1" * 64,
+            document_class=DrawingDocumentClass.SINGLE_PLATE_DRAWING,
+            candidate_count=1,
+            selected_candidate_id=part,
+            selection_required=False,
+            configuration={
+                name: CanonicalFieldValue(
+                    value=value, origin=ConfigurationValueOrigin.CUSTOMER
+                )
+                for name, value in payload.items() if value is not None
+            },
+        )
+        session = confirm_configuration(session, availability=availability)
+        quote = {
+            "normalized_configuration": QuoteInputs(**payload).model_dump(),
+            "validation": {"valid": True},
+            "currency": "USD",
+            "configuration_id": part,
+            "pricing_config_version": "version-current",
+            "unit_price": 125.0,
+            "total_price": 125.0,
+        }
+        return verified_assisted_cart_inputs(
+            session, payload, quote, availability=availability
+        )
+
+    items = [confirmed_line(first, "plate-1"), confirmed_line(corrected, "plate-2")]
+    calls = install_idempotent_stripe(monkeypatch)
+    monkeypatch.setattr(
+        api_app, "_decode_supabase_user_id_from_bearer",
+        lambda authorization: "verified-owner" if authorization == "Bearer valid" else None,
+    )
+    request = {
+        "items": items,
+        "pricing_config_version": "version-current",
+        "idempotency_key": "00000000-0000-4000-8000-000000000111",
+    }
+    headers = {"Authorization": "Bearer valid"}
+    first_checkout = checkout_client.post(
+        "/checkout/cart/create", json=request, headers=headers
+    )
+    replay_checkout = checkout_client.post(
+        "/checkout/cart/create", json=request, headers=headers
+    )
+    assert first_checkout.status_code == 200
+    assert replay_checkout.json() == first_checkout.json()
+    assert calls[0]["line_items"][0]["price_data"]["unit_amount"] == 25000
+    assert calls[0]["idempotency_key"] == request["idempotency_key"]
+    assert not any("drawing" in key for key in calls[0]["metadata"])
+
+    session = completed_session(
+        first_checkout.json()["session_id"], customer_id="verified-owner"
+    )
+    session.update(amount_subtotal=25000, amount_shipping=3000, amount_total=28000)
+    install_completed_webhook(monkeypatch, session)
+    monkeypatch.setattr(api_app, "_send_email", lambda *args, **kwargs: None)
+    webhook = checkout_client.post(
+        "/stripe/webhook", content=b"{}", headers={"stripe-signature": "valid"}
+    )
+    replay = checkout_client.post(
+        "/stripe/webhook", content=b"{}", headers={"stripe-signature": "valid"}
+    )
+    assert webhook.json()["status"] == "completed"
+    assert replay.json()["status"] == "already_completed"
+    orders = checkout_client.get("/me/orders", headers=headers)
+    assert orders.status_code == 200
+    assert len(orders.json()) == 1
+    detail = checkout_client.get(
+        f"/me/orders/{orders.json()[0]['id']}", headers=headers
+    )
+    assert detail.status_code == 200
+    assert detail.json()["quote_payload"] == {"cart_items": items}
+    assert detail.json()["quote_payload"]["cart_items"][1]["paddle_dia"] == 10.25
+    assert detail.json()["amount_total_usd"] == 280.0
+    db = database()
+    try:
+        assert db.query(api_app.Order).count() == 1
+    finally:
+        db.close()
+
+
 def test_cart_checkout_rejects_stale_pricing_before_stripe(
     monkeypatch, checkout_client
 ):
