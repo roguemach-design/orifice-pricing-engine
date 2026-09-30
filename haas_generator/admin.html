@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>O-Plates internal Haas review</title>
+<style>body{font:16px system-ui;max-width:960px;margin:40px auto;padding:0 20px;color:#172b3a}textarea{box-sizing:border-box;width:100%;height:440px;font:14px monospace}button{padding:12px 20px;margin:16px 0;background:#172b3a;color:white;border:0;border-radius:4px}pre{white-space:pre-wrap}strong{color:#8a3500}</style></head>
+<body><h1>Internal Haas program review</h1><p><strong>REVIEW ONLY — NOT RELEASED FOR MACHINE USE</strong></p>
+<p>Load a manufacturing record reviewed by a programmer. Intake, print recognition, and DXF extraction do not constitute review.</p>
+<details><summary>Server-owned machine profile and HOLD findings</summary><pre id="profile"></pre></details>
+<p><label for="record">Reviewed manufacturing record (JSON)</label></p><textarea id="record" spellcheck="false"></textarea>
+<p>The download contains a commented NC draft, setup sheet, blank inspection record, path preview, and traceability hashes. It cannot authorize machining.</p>
+<button id="generate">Generate review bundle</button><pre id="result" role="status"></pre>
+<script>
+fetch('/profile').then(r=>r.json()).then(p=>document.getElementById('profile').textContent=JSON.stringify(p,null,2));
+document.getElementById('generate').onclick=async()=>{
+ const status=document.getElementById('result'); status.textContent='Validating record...';
+ try {
+  const response=await fetch('/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:document.getElementById('record').value});
+  if(!response.ok){status.textContent=await response.text();return;}
+  const url=URL.createObjectURL(await response.blob());const link=document.createElement('a');link.href=url;link.download='haas-review.zip';link.click();URL.revokeObjectURL(url);
+  status.textContent='Review bundle downloaded. Machine review and controlled prove-out remain required.';
+ }catch(e){status.textContent='Generation failed: '+e.message;}
+};
+</script></body></html>
