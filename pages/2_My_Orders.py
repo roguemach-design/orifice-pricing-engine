@@ -211,3 +211,43 @@ st.info(
 
 with st.expander("Show full order JSON"):
     st.json(detail)
+
+# The staging backend advertises this integration. Production has no such route.
+from auth import api_post
+from frozen_plate.presentation import APPROVAL_COPY, BUTTON
+
+frozen_response = api_get(f"/me/orders/{selected_id}/frozen-plates")
+if frozen_response.status_code == 200:
+    for plate in frozen_response.json():
+        if not plate.get("current_revision"):
+            continue
+        st.subheader(f"Drawing approval — {plate['line_id']}")
+        if plate["lifecycle"] in ("CUSTOMER_APPROVED", "READY_FOR_RELEASE"):
+            st.success("YOUR ORDER IS IN PRODUCTION")
+            continue
+        session_key = "frozen-confirmation-" + plate["current_revision"]
+        if st.button("Review attached drawing", key="review-" + plate["id"]):
+            response = api_post(f"/me/frozen-plates/{plate['id']}/confirmation", payload={})
+            if response.status_code == 200:
+                st.session_state[session_key] = response.json()
+            else:
+                st.error("This drawing is no longer available for confirmation. Refresh your order.")
+        confirmation = st.session_state.get(session_key)
+        if confirmation:
+            context = confirmation["context"]
+            st.write(f"Drawing {context['drawing']} · {context['revision']} · Quantity {context['quantity']}")
+            pdf_response = api_post("/me/frozen-plates/pdf", payload={"token": confirmation["token"]})
+            if pdf_response.status_code != 200:
+                st.error("The drawing could not be verified. Refresh your order.")
+                continue
+            st.download_button("Download drawing PDF", pdf_response.content,
+                               file_name=context["filename"], mime="application/pdf",
+                               key="pdf-" + plate["id"])
+            st.write(APPROVAL_COPY)
+            if st.button(BUTTON, key="approve-" + plate["id"]):
+                response = api_post("/me/frozen-plates/approve", payload={"token": confirmation["token"]})
+                if response.status_code == 200:
+                    st.session_state.pop(session_key, None)
+                    st.success("YOUR ORDER IS IN PRODUCTION")
+                else:
+                    st.error("Approval was not recorded. Refresh to review the current drawing.")
