@@ -822,13 +822,14 @@ def test_invalid_upload_preserves_existing_manual_configuration(
     assert quote_calls
 
 
-def test_internal_real_form_upload_populate_complete_confirm_without_pricing(
+def test_internal_real_form_upload_populate_complete_confirm_then_price(
     monkeypatch, active_config, availability
 ):
     from streamlit.testing.v1 import AppTest
 
     monkeypatch.setenv("API_BASE", "http://test")
     monkeypatch.setenv("OPLATES_DRAWING_ASSISTED_ENABLED", "true")
+    monkeypatch.setenv("OPLATES_OWNER_ACCEPTANCE_MODE", "true")
     monkeypatch.setattr(auth, "API_BASE", "http://test")
     quote_calls = []
 
@@ -1032,9 +1033,7 @@ def test_internal_real_form_upload_populate_complete_confirm_without_pricing(
         success_messages = [item.value for item in app.success]
         final_session = app.session_state["phase1g_assisted_session"]
         final_review = review_assisted_quote(final_session, availability=availability)
-        assert any(
-            "Configuration confirmed and ready" in item for item in success_messages
-        ), {
+        assert any("Estimated to ship" in item for item in success_messages), {
             "messages": success_messages,
             "confirmation_widget": app.session_state.get(
                 "phase1g_customer_confirmation"
@@ -1042,7 +1041,17 @@ def test_internal_real_form_upload_populate_complete_confirm_without_pricing(
             "fingerprint": final_session.confirmation_fingerprint,
             "review": final_review.model_dump(),
         }
-        assert len(quote_calls) == price_calls_after_apply
+        assert len(quote_calls) == price_calls_after_apply + 1
+        assert quote_calls[-1]["paddle_dia"] == 8.0
+        assert any(item.label == "Unit price" for item in app.metric)
+        assert next(
+            button
+            for button in app.button
+            if button.label == "Continue to secure checkout"
+        ).disabled
+        assert next(
+            button for button in app.button if button.label == "Add another plate"
+        ).disabled
         assert not any(
             ".st-key-phase1g_customer_confirmation" in item.value
             for item in app.markdown
@@ -1066,11 +1075,18 @@ def test_internal_real_form_upload_populate_complete_confirm_without_pricing(
         assert any(
             "Confirmation required before pricing." in item.value for item in app.error
         )
-        assert len(quote_calls) == price_calls_after_apply
-        assert not any(
-            "Customer-confirmed configuration is ready" in item.value
-            for item in app.success
+        assert len(quote_calls) == price_calls_after_apply + 1
+        assert not any(item.label == "Unit price" for item in app.metric)
+        confirmation = next(
+            field
+            for field in app.checkbox
+            if field.label.startswith("I have reviewed the dimensions")
         )
+        confirmation.set_value(True).run()
+        assert not app.exception
+        assert len(quote_calls) == price_calls_after_apply + 2
+        assert quote_calls[-1]["bore_dia"] == 2.125
+        assert any(item.label == "Unit price" for item in app.metric)
         next(
             button
             for button in app.button
@@ -1145,7 +1161,7 @@ def test_source_contract_has_no_upload_api_or_drawing_pricing_path():
     assert '@app.post("/internal/drawing-intake' not in api_source
     assert '@app.get("/internal/drawing-intake/access")' in api_source
     assert "calculate_quote" not in quote_source
-    assert "accept_pricing_boundary_without_invocation" in quote_source
+    assert "confirmed_drawing_quote_inputs" in quote_source
     assert "drawing" not in pricing_source.lower()
     assert 'st.subheader("Configuration Drawing")' in quote_source
     assert 'st.checkbox("Chamfer", value=False)' in quote_source

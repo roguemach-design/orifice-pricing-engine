@@ -30,7 +30,6 @@ from drawing_intake.configurator_integration import (
     DrawingProcessingTimeoutError,
     DrawingUploadValidationError,
     FormValueOrigin,
-    accept_pricing_boundary_without_invocation,
     feature_flag_enabled,
     inspect_validated_upload,
     integrate_selected_session,
@@ -39,6 +38,7 @@ from drawing_intake.configurator_integration import (
     upload_limits_from_environment,
     validate_drawing_upload,
 )
+from drawing_intake.pricing_gate import confirmed_drawing_quote_inputs
 from drawing_intake.owner_acceptance import (
     AcceptanceEventKind,
     OwnerAcceptanceRun,
@@ -1282,32 +1282,35 @@ if all(
 
 result = None
 pricing_error = None
-pricing_boundary = None
-if active_assisted_session is None and payload_inputs is not None and not errors:
-    result, pricing_error = request_authoritative_price(payload_inputs)
+pricing_payload = None
+if payload_inputs is not None and not errors:
+    if active_assisted_session is None:
+        pricing_payload = payload_inputs
+    elif (
+        OWNER_ACCEPTANCE_MODE
+        and drawing_access_allowed
+        and assisted_review is not None
+        and assisted_review.confirmation_current
+    ):
+        try:
+            pricing_payload = confirmed_drawing_quote_inputs(
+                active_assisted_session,
+                payload_inputs,
+                availability=form_availability,
+            )
+        except ValueError:
+            pricing_error = "The current configuration needs review and confirmation before pricing."
+
+if pricing_payload is not None:
+    result, pricing_error = request_authoritative_price(pricing_payload)
     if pricing_error:
         with right:
             st.error(pricing_error)
             st.caption("Checkout is disabled until the live price can be verified.")
         result = None
-elif (
-    payload_inputs is not None
-    and assisted_review is not None
-    and assisted_review.confirmation_current
-):
-    pricing_boundary = accept_pricing_boundary_without_invocation(
-        active_assisted_session,
-        payload_inputs,
-        availability=form_availability,
-    )
+elif pricing_error:
     with right:
-        with form_col:
-            if pricing_boundary.structures_equal:
-                st.success(
-                    "Configuration confirmed and ready for the existing pricing workflow. Pricing is disabled during internal acceptance."
-                )
-            else:
-                st.error("The drawing-assisted handoff does not match the quote form.")
+        st.error(pricing_error)
 
 # Shipping estimates (computed once)
 area_sq_in = result.get("area_sq_in") if result else None
@@ -1356,10 +1359,9 @@ with left:
                 f"Quote reference: {result.get('configuration_id', '')} · "
                 "Verified using the active pricing and availability configuration."
             )
-        elif active_assisted_session is not None and pricing_boundary is not None:
-            st.success("Customer-confirmed configuration is ready for pricing review.")
-            st.caption(
-                "No live price was requested during Phase 1G internal acceptance."
+        elif active_assisted_session is not None and pricing_error:
+            st.warning(
+                "A verified price is not currently available. Your configuration is preserved."
             )
         elif active_assisted_session is not None:
             if (
@@ -1432,9 +1434,7 @@ with right:
                 "Checkout is disabled in this controlled owner-acceptance environment."
             )
         elif active_assisted_session is not None:
-            st.caption(
-                "Pricing and checkout are disabled for the internal drawing-assisted acceptance flow."
-            )
+            st.caption("Checkout remains disabled for drawing-assisted configurations.")
         else:
             st.caption(
                 "Price is revalidated before checkout; shipping is selected there."
@@ -1444,7 +1444,11 @@ with right:
         btn_cols = st.columns([left_pad, PAY_BUTTON_WIDTH_RATIO, left_pad])
 
         with btn_cols[1]:
-            checkout_disabled = result is None or OWNER_ACCEPTANCE_MODE
+            checkout_disabled = (
+                result is None
+                or OWNER_ACCEPTANCE_MODE
+                or active_assisted_session is not None
+            )
             if st.button("Continue to secure checkout", disabled=checkout_disabled):
                 start_checkout(payload_inputs, result)
 
@@ -1452,7 +1456,12 @@ with right:
             st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
 
             # Only for logged-in users (multi-item workflow)
-            add_disabled = not is_logged_in() or result is None or OWNER_ACCEPTANCE_MODE
+            add_disabled = (
+                not is_logged_in()
+                or result is None
+                or OWNER_ACCEPTANCE_MODE
+                or active_assisted_session is not None
+            )
             if st.button(
                 "Add another plate", disabled=add_disabled, use_container_width=True
             ):

@@ -631,6 +631,6 @@ def test_drawing_integration_preserves_authoritative_pricing_entrypoint():
     # Phase 1G intentionally integrates drawing assistance into the real page.
     # Preserve the original safety intent: pricing remains API-authoritative.
     assert "calculate_quote" not in quote_source
-    assert "accept_pricing_boundary_without_invocation" in quote_source
+    assert "confirmed_drawing_quote_inputs" in quote_source
     assert "drawing_intake" not in pricing_source
     assert 'requests.post(\n            f"{API_BASE}/quote"' in quote_source
