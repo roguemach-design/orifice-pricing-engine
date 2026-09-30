@@ -1459,3 +1459,22 @@ async def stripe_webhook(request: Request):
         "ok": True,
         "status": "completed" if processed else "already_completed",
     }
+
+# Phase 5 is explicitly staging-only and uses a separate database connection.
+if APP_ENV == "staging" and os.environ.get("FROZEN_PLATE_DATABASE_URL"):
+    from frozen_plate.api import router as frozen_plate_router
+
+    def _frozen_plate_order_snapshot(order_id):
+        _db_required()
+        db = SessionLocal()
+        try:
+            order = db.query(Order).filter(Order.id == order_id, Order.status == "completed").first()
+            if not order or not order.customer_id:
+                raise HTTPException(404, "Completed customer order not found")
+            return {"id": order.id, "customer_id": order.customer_id,
+                    "quote_payload": copy.deepcopy(order.quote_payload)}
+        finally:
+            db.close()
+
+    app.include_router(frozen_plate_router(_require_customer_user_id, _rate_limit_admin,
+                                          _frozen_plate_order_snapshot))
