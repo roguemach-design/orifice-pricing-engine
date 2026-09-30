@@ -349,3 +349,11 @@ def render_auth_sidebar(*, show_debug: bool = False) -> None:
         if show_debug:
             st.divider()
             st.write("Has access token:", bool(st.session_state.auth.get("access_token")))
+
+
+def api_post(path: str, *, payload: dict, timeout: int = 60) -> requests.Response:
+    """Authenticated server-side POST; tokens stay out of URLs and access logs."""
+    if not API_BASE:
+        st.error("The O-Plates pricing service is not configured.")
+        st.stop()
+    return requests.post(f"{API_BASE}{path}", headers=auth_headers(), json=payload, timeout=timeout)
