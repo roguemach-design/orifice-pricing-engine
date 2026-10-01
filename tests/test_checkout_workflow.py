@@ -155,16 +155,18 @@ def test_guest_checkout_reprices_persists_pending_and_is_idempotent(
     calls = install_idempotent_stripe(monkeypatch)
     headers = {"x-api-key": "test-ui-key"}
 
-    first = checkout_client.post("/checkout/create", json=checkout_body(), headers=headers)
-    duplicate = checkout_client.post("/checkout/create", json=checkout_body(), headers=headers)
+    first = checkout_client.post(
+        "/checkout/create", json=checkout_body(), headers=headers
+    )
+    duplicate = checkout_client.post(
+        "/checkout/create", json=checkout_body(), headers=headers
+    )
 
     assert first.status_code == 200
     assert duplicate.status_code == 200
     assert first.json() == duplicate.json()
     assert calls[0]["idempotency_key"] == checkout_body()["idempotency_key"]
-    assert calls[0]["success_url"].endswith(
-        "/Success?session_id={CHECKOUT_SESSION_ID}"
-    )
+    assert calls[0]["success_url"].endswith("/Success?session_id={CHECKOUT_SESSION_ID}")
     assert calls[0]["cancel_url"].endswith("/Quote?checkout=cancelled")
     assert calls[0]["line_items"][0]["price_data"]["unit_amount"] == 12500
 
@@ -188,9 +190,15 @@ def test_checkout_rate_limit_allows_requests_below_limit_then_enforces(
     headers = {"x-api-key": "test-ui-key"}
 
     try:
-        first = checkout_client.post("/checkout/create", json=checkout_body(), headers=headers)
-        second = checkout_client.post("/checkout/create", json=checkout_body(), headers=headers)
-        limited = checkout_client.post("/checkout/create", json=checkout_body(), headers=headers)
+        first = checkout_client.post(
+            "/checkout/create", json=checkout_body(), headers=headers
+        )
+        second = checkout_client.post(
+            "/checkout/create", json=checkout_body(), headers=headers
+        )
+        limited = checkout_client.post(
+            "/checkout/create", json=checkout_body(), headers=headers
+        )
 
         assert first.status_code == 200
         assert second.status_code == 200
@@ -283,9 +291,7 @@ def test_checkout_rate_limit_isolates_customer_principals(monkeypatch, checkout_
     assert request(body_a, headers_a).status_code == 429
 
 
-def test_checkout_rejects_stale_pricing_before_stripe(
-    monkeypatch, checkout_client
-):
+def test_checkout_rejects_stale_pricing_before_stripe(monkeypatch, checkout_client):
     calls = install_idempotent_stripe(monkeypatch)
     response = checkout_client.post(
         "/checkout/create",
@@ -317,7 +323,9 @@ def test_verified_bearer_identity_wins_when_ui_key_is_also_present(
     monkeypatch.setattr(
         api_app,
         "_decode_supabase_user_id_from_bearer",
-        lambda authorization: "verified-user" if authorization == "Bearer valid" else None,
+        lambda authorization: (
+            "verified-user" if authorization == "Bearer valid" else None
+        ),
     )
 
     response = checkout_client.post(
@@ -389,9 +397,7 @@ def test_authenticated_cart_checkout_uses_verified_user_and_idempotency(
     assert calls[0]["idempotency_key"] == body["idempotency_key"]
     assert calls[0]["metadata"]["customer_id"] == "verified-user"
     assert calls[0]["metadata"]["pricing_config_version"] == "version-current"
-    assert calls[0]["cancel_url"].endswith(
-        "/Quote_Cart?checkout=cancelled"
-    )
+    assert calls[0]["cancel_url"].endswith("/Quote_Cart?checkout=cancelled")
 
     db = database()
     try:
@@ -417,24 +423,35 @@ def test_confirmed_drawing_items_use_existing_test_checkout_and_order_path(
     from drawing_intake.classification import DrawingDocumentClass
     from pricing_engine import QuoteInputs
 
-    availability = availability_from_active_config({
-        "materials": ["304"],
-        "thicknesses_by_material": {"304": [0.125, 0.25]},
-        "lead_times_days": [14, 21],
-        "tolerance_options_in": [0.001, 0.002, 0.005],
-        "max_paddle_dia_in": 48.0,
-        "max_bore_dia_in": 19.0,
-        "max_handle_label_chars": 40,
-    })
+    availability = availability_from_active_config(
+        {
+            "materials": ["304"],
+            "thicknesses_by_material": {"304": [0.125, 0.25]},
+            "lead_times_days": [14, 21],
+            "tolerance_options_in": [0.001, 0.002, 0.005],
+            "max_paddle_dia_in": 48.0,
+            "max_bore_dia_in": 19.0,
+            "max_handle_label_chars": 40,
+        }
+    )
     first = quote_inputs(
-        paddle_dia=5.0, bore_dia=1.548, handle_width=2.0,
-        handle_length_from_bore=10.5, chamfer=False, chamfer_width=None,
+        paddle_dia=5.0,
+        bore_dia=1.548,
+        handle_width=2.0,
+        handle_length_from_bore=10.5,
+        chamfer=False,
+        chamfer_width=None,
         handle_label="No label",
     )
     corrected = quote_inputs(
-        paddle_dia=10.25, bore_dia=3.75, thickness=0.25,
-        handle_width=2.0, handle_length_from_bore=10.5,
-        chamfer=False, chamfer_width=None, handle_label="No label",
+        paddle_dia=10.25,
+        bore_dia=3.75,
+        thickness=0.25,
+        handle_width=2.0,
+        handle_length_from_bore=10.5,
+        chamfer=False,
+        chamfer_width=None,
+        handle_label="No label",
     )
 
     def confirmed_line(payload, part):
@@ -449,7 +466,8 @@ def test_confirmed_drawing_items_use_existing_test_checkout_and_order_path(
                 name: CanonicalFieldValue(
                     value=value, origin=ConfigurationValueOrigin.CUSTOMER
                 )
-                for name, value in payload.items() if value is not None
+                for name, value in payload.items()
+                if value is not None
             },
         )
         session = confirm_configuration(session, availability=availability)
@@ -469,8 +487,11 @@ def test_confirmed_drawing_items_use_existing_test_checkout_and_order_path(
     items = [confirmed_line(first, "plate-1"), confirmed_line(corrected, "plate-2")]
     calls = install_idempotent_stripe(monkeypatch)
     monkeypatch.setattr(
-        api_app, "_decode_supabase_user_id_from_bearer",
-        lambda authorization: "verified-owner" if authorization == "Bearer valid" else None,
+        api_app,
+        "_decode_supabase_user_id_from_bearer",
+        lambda authorization: (
+            "verified-owner" if authorization == "Bearer valid" else None
+        ),
     )
     request = {
         "items": items,
@@ -646,8 +667,12 @@ def test_checkout_retry_reuses_stripe_session_after_transient_database_failure(
     monkeypatch.setattr(api_app, "SessionLocal", flaky_session_factory)
     headers = {"x-api-key": "test-ui-key"}
 
-    failed = checkout_client.post("/checkout/create", json=checkout_body(), headers=headers)
-    retried = checkout_client.post("/checkout/create", json=checkout_body(), headers=headers)
+    failed = checkout_client.post(
+        "/checkout/create", json=checkout_body(), headers=headers
+    )
+    retried = checkout_client.post(
+        "/checkout/create", json=checkout_body(), headers=headers
+    )
 
     assert failed.status_code == 503
     assert retried.status_code == 200
@@ -712,6 +737,35 @@ def test_completed_webhook_updates_once_and_replay_does_not_duplicate(
         assert order.paid_at is not None
     finally:
         db.close()
+
+
+def test_signed_replay_repairs_only_missing_shipping_service(monkeypatch, checkout_client, database):
+    install_idempotent_stripe(monkeypatch)
+    result = checkout_client.post('/checkout/create', json=checkout_body(), headers={'x-api-key': 'test-ui-key'})
+    session = completed_session(result.json()['session_id'])
+    install_completed_webhook(monkeypatch, session)
+    emails = []
+    monkeypatch.setattr(api_app, '_send_email', lambda **kwargs: emails.append(kwargs))
+
+    def retrieve(session_id, **kwargs):
+        assert kwargs['expand'] == ['shipping_cost.shipping_rate']
+        return session
+
+    monkeypatch.setattr(api_app.stripe.checkout.Session, 'retrieve', retrieve)
+    headers = {'stripe-signature': 'valid'}
+    assert checkout_client.post('/stripe/webhook', content=b'{}', headers=headers).json()['status'] == 'completed'
+    with database() as db:
+        order = db.query(api_app.Order).one()
+        before = (order.id, order.order_number, order.paid_at, order.stripe_payment_intent, order.amount_total_cents, order.quote_payload)
+        order.shipping_service = None
+        db.commit()
+    for _ in range(2):
+        assert checkout_client.post('/stripe/webhook', content=b'{}', headers=headers).json()['status'] == 'already_completed'
+    with database() as db:
+        order = db.query(api_app.Order).one()
+        assert order.shipping_service == 'ups_ground'
+        assert (order.id, order.order_number, order.paid_at, order.stripe_payment_intent, order.amount_total_cents, order.quote_payload) == before
+    assert len(emails) == 1
 
 
 def test_completed_webhook_accepts_stripe_session_objects(
@@ -1095,11 +1149,18 @@ def test_recovered_session_requires_fresh_confirmation():
     assert all(field.origin == "customer" for field in session.configuration.values())
 
 
-@pytest.mark.parametrize("document_class,count", [("single_plate_drawing", 1), ("multi_plate_drawing", 8), ("table_driven_plate_schedule", 13)])
+@pytest.mark.parametrize(
+    "document_class,count",
+    [
+        ("single_plate_drawing", 1),
+        ("multi_plate_drawing", 8),
+        ("table_driven_plate_schedule", 13),
+    ],
+)
 def test_selected_part_checkout_cancel_reconfirm_reprice(
     recovery_client, database, monkeypatch, document_class, count
 ):
-    from drawing_intake.checkout_context import attest_context
+    from drawing_intake.checkout_context import attest_context, selected_part_context
     from drawing_intake.checkout_recovery import recovered_quote_session
     from drawing_intake.assisted_quote import confirm_configuration
     from drawing_intake.pricing_gate import confirmed_drawing_quote_inputs
@@ -1119,9 +1180,23 @@ def test_selected_part_checkout_cancel_reconfirm_reprice(
         "selected_candidate_id": "explicit-selected-part",
         "selection_required": False,
     }
+    # Exercise the initial confirmation/pricing gate as well as recovery.
+    initial = recovered_quote_session(inputs, context)
+    with pytest.raises(ValueError):
+        confirmed_drawing_quote_inputs(initial, inputs, availability=available())
+    initial = confirm_configuration(initial, availability=available())
+    initial_payload = confirmed_drawing_quote_inputs(
+        initial, inputs, availability=available()
+    )
+    first_price = recovery_client.post(
+        "/quote", json=initial_payload, headers={"x-api-key": "test-ui-key"}
+    )
+    assert first_price.status_code == 200
     body = checkout_body(
-        inputs=inputs,
-        recovery_context=attest_context(context, inputs, "owner", "test-ui-key"),
+        inputs=initial_payload,
+        recovery_context=attest_context(
+            selected_part_context(initial), initial_payload, "owner", "test-ui-key"
+        ),
     )
     headers = {"Authorization": "Bearer owner"}
     assert (
@@ -1144,6 +1219,7 @@ def test_selected_part_checkout_cancel_reconfirm_reprice(
     )
     assert price.status_code == 200
     assert price.json()["total_price"] == 125.0
+    assert price.json()["total_price"] == first_price.json()["total_price"]
 
 
 @pytest.mark.parametrize(

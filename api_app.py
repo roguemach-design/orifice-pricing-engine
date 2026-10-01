@@ -1541,7 +1541,7 @@ async def stripe_webhook(request: Request):
     try:
         session = stripe.checkout.Session.retrieve(
             session.get("id"),
-            expand=["shipping_cost.shipping_rate", "customer_details", "shipping_details"],
+            expand=["shipping_cost.shipping_rate"],
         )
         if not isinstance(session, dict):
             to_dict = getattr(session, "to_dict_recursive", None) or getattr(
@@ -1605,6 +1605,11 @@ async def stripe_webhook(request: Request):
             )
 
         if order.status == "completed":
+            # A signed replay may repair shipping metadata omitted by an
+            # earlier failed Session expansion, without repeating completion.
+            if not order.shipping_service and shipping_service:
+                order.shipping_service = shipping_service
+                db.commit()
             order_display = _format_order_number(order.order_number) or "OP-????"
         else:
             if not order.customer_id and customer_id:
