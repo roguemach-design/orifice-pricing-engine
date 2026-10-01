@@ -19,6 +19,7 @@ from auth import (
     render_auth_sidebar,
     require_login,
 )
+from drawing_intake.checkout_context import attest_context
 from drawing_intake.checkout_recovery import fetch_checkout_recovery, restore_quote_editor
 from drawing_intake.configurator_integration import feature_flag_enabled
 from drawing_intake.owner_access import verified_owner_access
@@ -71,11 +72,23 @@ if checkout_return == "cancelled":
             if recovered["kind"] != "cart":
                 raise ValueError("This recovery belongs to a single configuration.")
             st.session_state.cart = [
-                {"line_id": str(uuid.uuid4()), "inputs": inputs, "assisted_quote": True}
-                for inputs in recovered["items"]
+                {
+                    "line_id": str(uuid.uuid4()),
+                    "inputs": inputs,
+                    "assisted_quote": True,
+                    "selected_part_context": context,
+                }
+                for inputs, context in zip(
+                    recovered["items"],
+                    recovered.get("contexts", [None] * len(recovered["items"])),
+                )
             ]
             cart = st.session_state.cart
-            restore_quote_editor(st.session_state, recovered["items"][-1])
+            restore_quote_editor(
+                st.session_state,
+                recovered["items"][-1],
+                recovered.get("contexts", [None])[-1],
+            )
             st.session_state["cart_recovered_reference"] = reference
             st.session_state["cart_recovery_review_required"] = True
             st.query_params.pop("checkout", None)
@@ -576,6 +589,19 @@ with c2:
                 f"{API_BASE}/checkout/cart/create",
                 json={
                     "items": cart_items,
+                    "recovery_contexts": [
+                        (
+                            attest_context(
+                                item["selected_part_context"],
+                                inputs,
+                                current_user_id_hint(),
+                                API_KEY,
+                            )
+                            if item.get("selected_part_context")
+                            else None
+                        )
+                        for item, inputs in zip(cart, cart_items)
+                    ],
                     "pricing_config_version": cart_pricing_config_version,
                     "idempotency_key": checkout_attempt["idempotency_key"],
                 },

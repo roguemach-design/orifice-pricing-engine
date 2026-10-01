@@ -1,3 +1,4 @@
+from drawing_intake.checkout_context import verify_context
 # api_app.py
 import os
 import hashlib
@@ -755,6 +756,7 @@ class CheckoutCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     inputs: QuoteRequest
+    recovery_context: Optional[dict] = None
     configuration_id: Optional[str] = None
     pricing_config_version: Optional[str] = None
     idempotency_key: Optional[str] = Field(default=None, min_length=16, max_length=100)
@@ -764,6 +766,7 @@ class CartCheckoutCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: List[QuoteRequest]
+    recovery_contexts: Optional[List[Optional[dict]]] = None
     pricing_config_version: Optional[str] = None
     idempotency_key: Optional[str] = Field(default=None, min_length=16, max_length=100)
 
@@ -998,6 +1001,7 @@ def checkout_recovery(
         return {
             "kind": recovery["kind"],
             "items": [QuoteRequest(**item).model_dump() for item in items],
+            "contexts": recovery.get("contexts", [None] * len(items)),
             "requires_confirmation": True,
         }
     finally:
@@ -1044,6 +1048,25 @@ def checkout_create(
     recovery_reference = _checkout_recovery_reference(
         customer_user_id, req.idempotency_key, "direct"
     )
+    recovery_contexts = [None]
+    if req.recovery_context is not None:
+        if not recovery_reference:
+            raise HTTPException(
+                status_code=403, detail="Selected-part recovery unavailable"
+            )
+        try:
+            recovery_contexts = [
+                verify_context(
+                    req.recovery_context,
+                    req.inputs.model_dump(),
+                    customer_user_id,
+                    API_KEY,
+                )
+            ]
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail="Invalid selected-part recovery context"
+            )
     checkout_args = dict(
         mode="payment",
         success_url=f"{APP_BASE_URL}/Success?session_id={{CHECKOUT_SESSION_ID}}",
@@ -1114,6 +1137,7 @@ def checkout_create(
                     "_checkout_recovery": {
                         "reference": recovery_reference,
                         "kind": "direct",
+                        "contexts": recovery_contexts,
                     }
                 }
                 if recovery_reference
@@ -1176,6 +1200,27 @@ def checkout_cart_create(
     recovery_reference = _checkout_recovery_reference(
         customer_user_id, req.idempotency_key, "cart"
     )
+    recovery_contexts = [None] * len(req.items)
+    if req.recovery_contexts is not None:
+        if not recovery_reference or len(req.recovery_contexts) != len(req.items):
+            raise HTTPException(
+                status_code=400, detail="Invalid selected-part recovery contexts"
+            )
+        try:
+            recovery_contexts = [
+                (
+                    verify_context(
+                        context, item.model_dump(), customer_user_id, API_KEY
+                    )
+                    if context is not None
+                    else None
+                )
+                for context, item in zip(req.recovery_contexts, req.items)
+            ]
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail="Invalid selected-part recovery context"
+            )
     checkout_args = dict(
         mode="payment",
         success_url=f"{APP_BASE_URL}/Success?session_id={{CHECKOUT_SESSION_ID}}",
@@ -1246,6 +1291,7 @@ def checkout_cart_create(
                     "_checkout_recovery": {
                         "reference": recovery_reference,
                         "kind": "cart",
+                        "contexts": recovery_contexts,
                     }
                 }
                 if recovery_reference

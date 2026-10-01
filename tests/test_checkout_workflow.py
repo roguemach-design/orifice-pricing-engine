@@ -987,6 +987,7 @@ def test_checkout_recovery_exact_customer_inputs(
     assert result.json() == {
         "kind": "direct",
         "items": [values],
+        "contexts": [None],
         "requires_confirmation": True,
     }
     assert (
@@ -1092,3 +1093,90 @@ def test_recovered_session_requires_fresh_confirmation():
     assert session.confirmation_fingerprint is None
     assert not review_assisted_quote(session).confirmation_current
     assert all(field.origin == "customer" for field in session.configuration.values())
+
+
+@pytest.mark.parametrize("document_class,count", [("single_plate_drawing", 1), ("multi_plate_drawing", 8), ("table_driven_plate_schedule", 13)])
+def test_selected_part_checkout_cancel_reconfirm_reprice(
+    recovery_client, database, monkeypatch, document_class, count
+):
+    from drawing_intake.checkout_context import attest_context
+    from drawing_intake.checkout_recovery import recovered_quote_session
+    from drawing_intake.assisted_quote import confirm_configuration
+    from drawing_intake.pricing_gate import confirmed_drawing_quote_inputs
+    from test_drawing_phase1k import available
+
+    calls = install_idempotent_stripe(monkeypatch)
+    inputs = quote_inputs(
+        paddle_dia=10.25,
+        bore_dia=3.75,
+        thickness=0.25,
+        handle_width=2,
+        handle_length_from_bore=14,
+    )
+    context = {
+        "document_class": document_class,
+        "candidate_count": count,
+        "selected_candidate_id": "explicit-selected-part",
+        "selection_required": False,
+    }
+    body = checkout_body(
+        inputs=inputs,
+        recovery_context=attest_context(context, inputs, "owner", "test-ui-key"),
+    )
+    headers = {"Authorization": "Bearer owner"}
+    assert (
+        recovery_client.post("/checkout/create", json=body, headers=headers).status_code
+        == 200
+    )
+    snapshot = recovery_client.get(
+        "/checkout/recovery/" + recovery_reference(calls), headers=headers
+    ).json()
+    assert snapshot["contexts"] == [context]
+    session = recovered_quote_session(snapshot["items"][0], snapshot["contexts"][0])
+    with pytest.raises(ValueError):
+        confirmed_drawing_quote_inputs(session, inputs, availability=available())
+    session = confirm_configuration(session, availability=available())
+    payload = confirmed_drawing_quote_inputs(session, inputs, availability=available())
+    assert payload["paddle_dia"] == 10.25
+    assert payload == api_app.QuoteInputs(**inputs).model_dump()
+    price = recovery_client.post(
+        "/quote", json=payload, headers={"x-api-key": "test-ui-key"}
+    )
+    assert price.status_code == 200
+    assert price.json()["total_price"] == 125.0
+
+
+@pytest.mark.parametrize(
+    "tamper", ["signature", "inputs", "customer", "reference", "unselected"]
+)
+def test_selected_part_attestation_cannot_be_forged(
+    recovery_client, monkeypatch, tamper
+):
+    from drawing_intake.checkout_context import attest_context
+
+    calls = install_idempotent_stripe(monkeypatch)
+    inputs = quote_inputs()
+    context = {
+        "document_class": "multi_plate_drawing",
+        "candidate_count": 8,
+        "selected_candidate_id": "selected-part",
+        "selection_required": False,
+    }
+    envelope = attest_context(
+        context, inputs, "other" if tamper == "customer" else "owner", "test-ui-key"
+    )
+    if tamper == "signature":
+        envelope["signature"] = "0" * 64
+    if tamper == "inputs":
+        inputs["paddle_dia"] = 5
+    if tamper == "reference":
+        envelope["context"]["document_class"] = "reference_vendor_datasheet"
+    if tamper == "unselected":
+        envelope["context"]["selection_required"] = True
+    result = recovery_client.post(
+        "/checkout/create",
+        json=checkout_body(inputs=inputs, recovery_context=envelope),
+        headers={"Authorization": "Bearer owner"},
+    )
+    assert result.status_code == 400
+    assert not calls

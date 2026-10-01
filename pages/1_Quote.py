@@ -16,6 +16,7 @@ from auth import (
     is_logged_in,
     render_auth_sidebar,
 )
+from drawing_intake.checkout_context import attest_context, selected_part_context
 from drawing_intake.checkout_recovery import (
     fetch_checkout_recovery,
     recovered_quote_session,
@@ -326,6 +327,14 @@ def start_checkout(payload_inputs: dict, priced_configuration: dict) -> None:
         "idempotency_key": checkout_attempt["idempotency_key"],
     }
 
+    assisted_session = st.session_state.get("phase1g_assisted_session")
+    if assisted_session is not None:
+        body["recovery_context"] = attest_context(
+            selected_part_context(assisted_session),
+            payload_inputs,
+            current_user_id_hint(),
+            API_KEY,
+        )
     headers: Dict[str, str] = {}
 
     # Logged-in customers: use Bearer token so API saves customer_id on the order
@@ -643,7 +652,9 @@ if (
                 field: FormValueOrigin.CUSTOMER.value for field in _FORM_KEYS
             }
             st.session_state[_FORM_SNAPSHOT_KEY] = dict(values)
-            st.session_state[_DRAWING_SESSION_KEY] = recovered_quote_session(values)
+            st.session_state[_DRAWING_SESSION_KEY] = recovered_quote_session(
+                values, recovered.get("contexts", [None])[0]
+            )
             st.session_state[_DRAWING_CONFIRM_KEY] = False
             st.session_state[_DRAWING_CONFLICTS_KEY] = []
             st.session_state["checkout_recovered_reference"] = resume_reference
@@ -1458,6 +1469,9 @@ def _add_to_cart(payload_inputs: dict, result: dict, *, assisted: bool = False) 
             "thickness": payload_inputs.get("thickness"),
             # Browser-session metadata only. Checkout sends only canonical inputs.
             "assisted_quote": assisted,
+            "selected_part_context": (
+                selected_part_context(active_assisted_session) if assisted else None
+            ),
             "configuration_id": result.get("configuration_id"),
             "pricing_config_version": result.get("pricing_config_version"),
         }

@@ -176,6 +176,7 @@ def test_owner_access_fails_closed_and_uses_existing_verified_api_gate():
 
 
 def _quote_app(monkeypatch, *, checkout_enabled, confirmed=True, authorized=True):
+    monkeypatch.setenv("API_KEY", "test-ui-key")
     monkeypatch.setenv("API_BASE", "http://test")
     monkeypatch.setenv("OPLATES_DRAWING_ASSISTED_ENABLED", "true")
     monkeypatch.setenv("OPLATES_OWNER_ACCEPTANCE_MODE", "true")
@@ -325,6 +326,7 @@ def test_unconfirmed_quote_cannot_add_or_start_checkout(monkeypatch):
 
 
 def test_owner_cart_freezes_confirmed_line_and_reprices_each_snapshot(monkeypatch):
+    monkeypatch.setenv("API_KEY", "test-ui-key")
     monkeypatch.setenv("API_BASE", "http://test")
     monkeypatch.setenv("OPLATES_OWNER_ACCEPTANCE_MODE", "true")
     monkeypatch.setenv("OPLATES_OWNER_TEST_CHECKOUT_ENABLED", "true")
@@ -391,6 +393,7 @@ def test_owner_cart_freezes_confirmed_line_and_reprices_each_snapshot(monkeypatc
 
 
 def test_owner_cart_checkout_remains_disabled_without_switch_or_access(monkeypatch):
+    monkeypatch.setenv("API_KEY", "test-ui-key")
     monkeypatch.setenv("API_BASE", "http://test")
     monkeypatch.setenv("OPLATES_OWNER_ACCEPTANCE_MODE", "true")
     monkeypatch.setattr(auth, "API_BASE", "http://test")
@@ -437,6 +440,7 @@ def test_owner_cart_checkout_remains_disabled_without_switch_or_access(monkeypat
 def test_fresh_quote_session_recovers_corrected_checkout_snapshot(monkeypatch):
     import drawing_intake.checkout_recovery as recovery
 
+    monkeypatch.setenv("API_KEY", "test-ui-key")
     monkeypatch.setenv("API_BASE", "http://test")
     monkeypatch.setenv("OPLATES_DRAWING_ASSISTED_ENABLED", "true")
     monkeypatch.setenv("OPLATES_OWNER_ACCEPTANCE_MODE", "true")
@@ -456,7 +460,18 @@ def test_fresh_quote_session_recovers_corrected_checkout_snapshot(monkeypatch):
         patch.object(
             recovery,
             "fetch_checkout_recovery",
-            return_value={"kind": "direct", "items": [payload]},
+            return_value={
+                "kind": "direct",
+                "items": [payload],
+                "contexts": [
+                    {
+                        "document_class": "single_plate_drawing",
+                        "selected_candidate_id": "selected-detail",
+                        "candidate_count": 1,
+                        "selection_required": False,
+                    }
+                ],
+            },
         ) as fetch,
         patch(
             "requests.get",
@@ -487,16 +502,26 @@ def test_fresh_quote_session_recovers_corrected_checkout_snapshot(monkeypatch):
             assert app.session_state[f"quote_field_{field}"] == value
         assert app.session_state["phase1g_customer_confirmation"] is False
         assert not calls
+        app.checkbox(key="phase1g_customer_confirmation").check().run()
+        assert not app.exception
+        assert calls == ["http://test/quote"]
+        assert app.session_state["quote_field_paddle_dia"] == 10.25
+        calls.clear()
         app.number_input(key="quote_field_paddle_dia").set_value(10.5).run()
         assert not app.exception
         assert app.session_state["quote_field_paddle_dia"] == 10.5
         assert fetch.call_count == 1
         assert not calls
+        assert app.session_state["phase1g_customer_confirmation"] is False
+        app.checkbox(key="phase1g_customer_confirmation").check().run()
+        assert not app.exception
+        assert calls == ["http://test/quote"]
 
 
 def test_fresh_cart_session_recovers_independent_lines_and_editor(monkeypatch):
     import drawing_intake.checkout_recovery as recovery
 
+    monkeypatch.setenv("API_KEY", "test-ui-key")
     monkeypatch.setenv("API_BASE", "http://test")
     monkeypatch.setenv("OPLATES_OWNER_ACCEPTANCE_MODE", "true")
     monkeypatch.setenv("OPLATES_OWNER_TEST_CHECKOUT_ENABLED", "true")
