@@ -1,5 +1,7 @@
 # api_app.py
 import os
+import hashlib
+import hmac
 import uuid
 import copy
 import threading
@@ -7,7 +9,7 @@ import re
 import secrets
 import time
 from collections import deque
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any
 
 import stripe
@@ -861,7 +863,6 @@ async def quote(request: Request):
         raise HTTPException(status_code=500, detail=f"Unhandled quote error: {type(e).__name__}: {e}")
 
 
-
 # ----------------------------
 # Admin config endpoints
 # ----------------------------
@@ -948,6 +949,61 @@ def admin_reset_config():
         db.close()
 
 
+def _checkout_recovery_reference(customer_id, idempotency_key, kind):
+    # Enabled only for the existing authenticated, allowlisted owner-test path.
+    if (
+        APP_ENV != "preview"
+        or not _drawing_assisted_feature_enabled()
+        or customer_id not in _drawing_assisted_allowed_user_ids()
+        or not idempotency_key
+        or not API_KEY
+    ):
+        return None
+    message = f"checkout-recovery:v1:{kind}:{customer_id}:{idempotency_key}"
+    return hmac.new(API_KEY.encode(), message.encode(), hashlib.sha256).hexdigest()
+
+
+@app.get("/checkout/recovery/{reference}")
+def checkout_recovery(
+    reference: str,
+    customer_id: str = Depends(_require_internal_drawing_user_id),
+):
+    """Read an owner's pending snapshot; never mark paid or restore an old price."""
+    if APP_ENV != "preview" or not re.fullmatch(r"[0-9a-f]{64}", reference):
+        raise HTTPException(status_code=404, detail="Recovery unavailable")
+    _db_required()
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    db = SessionLocal()
+    try:
+        order = (
+            db.query(Order)
+            .filter(
+                Order.customer_id == customer_id,
+                Order.status == "pending",
+                Order.paid_at.is_(None),
+                Order.created_at >= cutoff,
+                Order.quote_payload["_checkout_recovery"]["reference"].as_string()
+                == reference,
+            )
+            .first()
+        )
+        if not order:
+            raise HTTPException(
+                status_code=404, detail="Recovery unavailable or expired"
+            )
+        payload = copy.deepcopy(order.quote_payload)
+        recovery = payload.pop("_checkout_recovery")
+        items = payload.get("cart_items") if recovery["kind"] == "cart" else [payload]
+        # Return only canonical manufacturing inputs, never stored price/payment data.
+        return {
+            "kind": recovery["kind"],
+            "items": [QuoteRequest(**item).model_dump() for item in items],
+            "requires_confirmation": True,
+        }
+    finally:
+        db.close()
+
+
 # ----------------------------
 # Checkout endpoints
 # ----------------------------
@@ -985,10 +1041,14 @@ def checkout_create(
     if missing:
         raise HTTPException(status_code=500, detail=f"Missing shipping fields from pricing engine: {', '.join(missing)}")
 
+    recovery_reference = _checkout_recovery_reference(
+        customer_user_id, req.idempotency_key, "direct"
+    )
     checkout_args = dict(
         mode="payment",
         success_url=f"{APP_BASE_URL}/Success?session_id={{CHECKOUT_SESSION_ID}}",
-        cancel_url=f"{APP_BASE_URL}/Quote?checkout=cancelled",
+        cancel_url=f"{APP_BASE_URL}/Quote?checkout=cancelled"
+        + (f"&resume={recovery_reference}" if recovery_reference else ""),
         shipping_address_collection={"allowed_countries": ["US"]},
         line_items=[
             {
@@ -1004,7 +1064,10 @@ def checkout_create(
             {
                 "shipping_rate_data": {
                     "type": "fixed_amount",
-                    "fixed_amount": {"amount": int(shipping["ups_ground_cents"]), "currency": "usd"},
+                    "fixed_amount": {
+                        "amount": int(shipping["ups_ground_cents"]),
+                        "currency": "usd",
+                    },
                     "display_name": "UPS Ground",
                     "metadata": {"service": "ups_ground"},
                 }
@@ -1012,7 +1075,10 @@ def checkout_create(
             {
                 "shipping_rate_data": {
                     "type": "fixed_amount",
-                    "fixed_amount": {"amount": int(shipping["ups_2day_cents"]), "currency": "usd"},
+                    "fixed_amount": {
+                        "amount": int(shipping["ups_2day_cents"]),
+                        "currency": "usd",
+                    },
                     "display_name": "UPS 2nd Day Air",
                     "metadata": {"service": "ups_2day"},
                 }
@@ -1020,7 +1086,10 @@ def checkout_create(
             {
                 "shipping_rate_data": {
                     "type": "fixed_amount",
-                    "fixed_amount": {"amount": int(shipping["ups_nextday_cents"]), "currency": "usd"},
+                    "fixed_amount": {
+                        "amount": int(shipping["ups_nextday_cents"]),
+                        "currency": "usd",
+                    },
                     "display_name": "UPS Next Day Air",
                     "metadata": {"service": "ups_nextday"},
                 }
@@ -1038,7 +1107,19 @@ def checkout_create(
 
     _persist_pending_order(
         stripe_session_id=session.id,
-        quote_payload=req.inputs.model_dump(),
+        quote_payload={
+            **req.inputs.model_dump(),
+            **(
+                {
+                    "_checkout_recovery": {
+                        "reference": recovery_reference,
+                        "kind": "direct",
+                    }
+                }
+                if recovery_reference
+                else {}
+            ),
+        },
         customer_user_id=customer_user_id,
     )
 
@@ -1092,16 +1173,22 @@ def checkout_cart_create(
 
         normalized_items.append(it.model_dump())
 
+    recovery_reference = _checkout_recovery_reference(
+        customer_user_id, req.idempotency_key, "cart"
+    )
     checkout_args = dict(
         mode="payment",
         success_url=f"{APP_BASE_URL}/Success?session_id={{CHECKOUT_SESSION_ID}}",
-        cancel_url=f"{APP_BASE_URL}/Quote_Cart?checkout=cancelled",
+        cancel_url=f"{APP_BASE_URL}/Quote_Cart?checkout=cancelled"
+        + (f"&resume={recovery_reference}" if recovery_reference else ""),
         shipping_address_collection={"allowed_countries": ["US"]},
         line_items=[
             {
                 "price_data": {
                     "currency": "usd",
-                    "product_data": {"name": f"O-Plates Quote Cart ({len(req.items)} items)"},
+                    "product_data": {
+                        "name": f"O-Plates Quote Cart ({len(req.items)} items)"
+                    },
                     "unit_amount": int(total_items_cents),
                 },
                 "quantity": 1,
@@ -1111,7 +1198,10 @@ def checkout_cart_create(
             {
                 "shipping_rate_data": {
                     "type": "fixed_amount",
-                    "fixed_amount": {"amount": int(ship_ground_cents), "currency": "usd"},
+                    "fixed_amount": {
+                        "amount": int(ship_ground_cents),
+                        "currency": "usd",
+                    },
                     "display_name": "UPS Ground",
                     "metadata": {"service": "ups_ground"},
                 }
@@ -1127,7 +1217,10 @@ def checkout_cart_create(
             {
                 "shipping_rate_data": {
                     "type": "fixed_amount",
-                    "fixed_amount": {"amount": int(ship_nextday_cents), "currency": "usd"},
+                    "fixed_amount": {
+                        "amount": int(ship_nextday_cents),
+                        "currency": "usd",
+                    },
                     "display_name": "UPS Next Day Air",
                     "metadata": {"service": "ups_nextday"},
                 }
@@ -1146,7 +1239,19 @@ def checkout_cart_create(
 
     _persist_pending_order(
         stripe_session_id=session.id,
-        quote_payload={"cart_items": normalized_items},
+        quote_payload={
+            "cart_items": normalized_items,
+            **(
+                {
+                    "_checkout_recovery": {
+                        "reference": recovery_reference,
+                        "kind": "cart",
+                    }
+                }
+                if recovery_reference
+                else {}
+            ),
+        },
         customer_user_id=customer_user_id,
     )
 

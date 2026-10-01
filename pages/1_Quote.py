@@ -16,6 +16,10 @@ from auth import (
     is_logged_in,
     render_auth_sidebar,
 )
+from drawing_intake.checkout_recovery import (
+    fetch_checkout_recovery,
+    recovered_quote_session,
+)
 from drawing_intake.assisted_quote import (
     FIELD_LABELS,
     AssistedQuoteSession,
@@ -234,7 +238,9 @@ if session_id:
 
 if _qp_get("checkout") == "cancelled":
     st.session_state.pop("checkout_attempt", None)
-    st.info("Checkout was canceled. Your configuration is still available below.")
+    st.info(
+        "Checkout was canceled. No payment was completed. Sign in to recover your saved configuration, then review and confirm it again."
+    )
 
 
 # -----------------------------
@@ -616,6 +622,38 @@ def _can_prefill_single_plate() -> bool:
 if st.session_state.pop("phase1k_new_plate_requested", False):
     _reset_to_manual_defaults()
 _initialize_form_state()
+resume_reference = _qp_get("resume") if _qp_get("checkout") == "cancelled" else None
+if (
+    resume_reference
+    and st.session_state.get("checkout_recovered_reference") != resume_reference
+):
+    if not is_logged_in():
+        st.warning("Sign in to recover the configuration submitted to checkout.")
+    else:
+        try:
+            recovered = fetch_checkout_recovery(
+                API_BASE, resume_reference, auth_headers()
+            )
+            if recovered["kind"] != "direct" or len(recovered["items"]) != 1:
+                raise ValueError("This recovery belongs to a quote cart.")
+            values = recovered["items"][0]
+            for field in _FORM_KEYS:
+                st.session_state[_FORM_KEYS[field]] = values.get(field)
+            st.session_state[_FORM_ORIGINS_KEY] = {
+                field: FormValueOrigin.CUSTOMER.value for field in _FORM_KEYS
+            }
+            st.session_state[_FORM_SNAPSHOT_KEY] = dict(values)
+            st.session_state[_DRAWING_SESSION_KEY] = recovered_quote_session(values)
+            st.session_state[_DRAWING_CONFIRM_KEY] = False
+            st.session_state[_DRAWING_CONFLICTS_KEY] = []
+            st.session_state["checkout_recovered_reference"] = resume_reference
+            st.query_params.pop("checkout", None)
+            st.query_params.pop("resume", None)
+            st.success(
+                "Your submitted configuration has been restored. Review and confirm it for fresh pricing."
+            )
+        except ValueError as exc:
+            st.error(str(exc))
 drawing_access_allowed = _internal_drawing_access_allowed()
 owner_test_checkout_allowed = bool(
     OWNER_ACCEPTANCE_MODE and OWNER_TEST_CHECKOUT_ENABLED and drawing_access_allowed

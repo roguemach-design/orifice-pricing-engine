@@ -19,6 +19,7 @@ from auth import (
     render_auth_sidebar,
     require_login,
 )
+from drawing_intake.checkout_recovery import fetch_checkout_recovery, restore_quote_editor
 from drawing_intake.configurator_integration import feature_flag_enabled
 from drawing_intake.owner_access import verified_owner_access
 
@@ -60,7 +61,30 @@ if isinstance(checkout_return, list):
     checkout_return = checkout_return[0] if checkout_return else None
 if checkout_return == "cancelled":
     st.session_state.pop("cart_checkout_attempt", None)
-    st.info("Checkout was canceled. Your quote cart is unchanged.")
+    st.info("Checkout was canceled. No payment was completed.")
+    reference = st.query_params.get("resume")
+    if reference and st.session_state.get("cart_recovered_reference") != reference:
+        try:
+            recovered = fetch_checkout_recovery(
+                API_BASE, str(reference), auth_headers()
+            )
+            if recovered["kind"] != "cart":
+                raise ValueError("This recovery belongs to a single configuration.")
+            st.session_state.cart = [
+                {"line_id": str(uuid.uuid4()), "inputs": inputs, "assisted_quote": True}
+                for inputs in recovered["items"]
+            ]
+            cart = st.session_state.cart
+            restore_quote_editor(st.session_state, recovered["items"][-1])
+            st.session_state["cart_recovered_reference"] = reference
+            st.session_state["cart_recovery_review_required"] = True
+            st.query_params.pop("checkout", None)
+            st.query_params.pop("resume", None)
+            st.success(
+                "Your independent cart configurations have been restored. Prices are recalculated below; review before checkout."
+            )
+        except ValueError as exc:
+            st.error(str(exc))
 
 
 # ----------------------------
@@ -372,6 +396,8 @@ with top[0]:
 with top[1]:
     if st.button("🧹 Clear cart"):
         st.session_state.cart = []
+        st.session_state.pop("cart_recovery_review_required", None)
+        st.session_state.pop("cart_recovered_reference", None)
         # Optional: reset quote number when cart is cleared
         if "quote_meta" in st.session_state:
             del st.session_state["quote_meta"]
@@ -488,6 +514,18 @@ st.divider()
 # ----------------------------
 st.subheader("Next actions")
 
+recovery_review_current = True
+if st.session_state.get("cart_recovery_review_required"):
+    recovery_fingerprint = hashlib.sha256(
+        json.dumps([line["inputs"] for line in line_views], sort_keys=True).encode()
+    ).hexdigest()
+    recovery_review_current = st.checkbox(
+        "I have reviewed the restored cart specifications and confirm them for checkout.",
+        key=f"cart_recovery_confirm_{recovery_fingerprint}",
+    )
+    if not recovery_review_current:
+        st.error("Confirmation required before checkout.")
+
 c1, c2 = st.columns(2)
 
 with c1:
@@ -512,7 +550,7 @@ with c2:
     if st.button(
         "💳 Checkout All Items",
         use_container_width=True,
-        disabled=not owner_checkout_allowed,
+        disabled=not owner_checkout_allowed or not recovery_review_current,
     ):
         cart_items = [lv["inputs"] for lv in line_views]
         fingerprint = hashlib.sha256(

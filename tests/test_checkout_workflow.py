@@ -931,3 +931,164 @@ def test_webhook_database_failure_returns_retryable_status(
     assert response.json()["detail"] == (
         "Order completion is temporarily unavailable; Stripe will retry."
     )
+
+
+@pytest.fixture
+def recovery_client(checkout_client, monkeypatch):
+    monkeypatch.setattr(api_app, "APP_ENV", "preview")
+    monkeypatch.setenv("OPLATES_DRAWING_ASSISTED_ENABLED", "true")
+    monkeypatch.setenv("OPLATES_DRAWING_ASSISTED_ALLOWED_USER_IDS", "owner")
+    monkeypatch.setattr(
+        api_app,
+        "_decode_supabase_user_id_from_bearer",
+        lambda token: {"Bearer owner": "owner", "Bearer other": "other"}.get(token),
+    )
+    yield checkout_client
+
+
+def recovery_reference(calls):
+    from urllib.parse import urlparse, parse_qs
+
+    return parse_qs(urlparse(calls[-1]["cancel_url"]).query)["resume"][0]
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        quote_inputs(
+            paddle_dia=5.0,
+            bore_dia=1.548,
+            handle_width=2.0,
+            handle_length_from_bore=10.5,
+        ),
+        quote_inputs(
+            paddle_dia=10.25,
+            bore_dia=3.75,
+            thickness=0.25,
+            quantity=3,
+            handle_width=2.0,
+            handle_length_from_bore=14.0,
+        ),
+    ],
+)
+def test_checkout_recovery_exact_customer_inputs(
+    recovery_client, database, monkeypatch, values
+):
+    calls = install_idempotent_stripe(monkeypatch)
+    body = checkout_body(inputs=values)
+    headers = {"Authorization": "Bearer owner"}
+    assert (
+        recovery_client.post("/checkout/create", json=body, headers=headers).status_code
+        == 200
+    )
+    reference = recovery_reference(calls)
+    result = recovery_client.get(f"/checkout/recovery/{reference}", headers=headers)
+    assert result.status_code == 200, result.text
+    assert result.json() == {
+        "kind": "direct",
+        "items": [values],
+        "requires_confirmation": True,
+    }
+    assert (
+        recovery_client.post("/checkout/create", json=body, headers=headers).status_code
+        == 200
+    )
+    assert calls[0]["cancel_url"] == calls[1]["cancel_url"]
+    with database() as db:
+        assert db.query(api_app.Order).count() == 1
+        order = db.query(api_app.Order).one()
+        assert order.status == "pending" and order.paid_at is None
+
+
+def test_checkout_recovery_isolation_expiration_and_paid(
+    recovery_client, database, monkeypatch
+):
+    from datetime import datetime, timezone, timedelta
+
+    calls = install_idempotent_stripe(monkeypatch)
+    assert (
+        recovery_client.post(
+            "/checkout/create",
+            json=checkout_body(),
+            headers={"Authorization": "Bearer owner"},
+        ).status_code
+        == 200
+    )
+    path = f"/checkout/recovery/{recovery_reference(calls)}"
+    assert recovery_client.get(path).status_code == 401
+    assert (
+        recovery_client.get(path, headers={"Authorization": "Bearer other"}).status_code
+        == 403
+    )
+    assert (
+        recovery_client.get(
+            "/checkout/recovery/" + "f" * 64, headers={"Authorization": "Bearer owner"}
+        ).status_code
+        == 404
+    )
+    assert (
+        recovery_client.get(
+            "/checkout/recovery/tampered", headers={"Authorization": "Bearer owner"}
+        ).status_code
+        == 404
+    )
+    with database() as db:
+        order = db.query(api_app.Order).one()
+        order.created_at = datetime.now(timezone.utc) - timedelta(hours=25)
+        db.commit()
+    assert (
+        recovery_client.get(path, headers={"Authorization": "Bearer owner"}).status_code
+        == 404
+    )
+    with database() as db:
+        order = db.query(api_app.Order).one()
+        order.created_at = datetime.now(timezone.utc)
+        order.status = "completed"
+        order.paid_at = datetime.now(timezone.utc)
+        db.commit()
+    assert (
+        recovery_client.get(path, headers={"Authorization": "Bearer owner"}).status_code
+        == 404
+    )
+
+
+def test_checkout_recovery_two_independent_cart_lines(
+    recovery_client, database, monkeypatch
+):
+    calls = install_idempotent_stripe(monkeypatch)
+    items = [
+        quote_inputs(paddle_dia=5.0, bore_dia=1.548),
+        quote_inputs(paddle_dia=10.25, bore_dia=3.75, quantity=3),
+    ]
+    body = {
+        "items": items,
+        "pricing_config_version": "version-current",
+        "idempotency_key": "cart-recovery-unique-attempt",
+    }
+    headers = {"Authorization": "Bearer owner"}
+    response = recovery_client.post("/checkout/cart/create", json=body, headers=headers)
+    assert response.status_code == 200, response.text
+    result = recovery_client.get(
+        f"/checkout/recovery/{recovery_reference(calls)}", headers=headers
+    )
+    assert result.status_code == 200, result.text
+    assert result.json()["items"] == items
+    assert result.json()["kind"] == "cart"
+    assert (
+        recovery_client.post(
+            "/checkout/cart/create", json=body, headers=headers
+        ).status_code
+        == 200
+    )
+    with database() as db:
+        assert db.query(api_app.Order).count() == 1
+
+
+def test_recovered_session_requires_fresh_confirmation():
+    from drawing_intake.checkout_recovery import recovered_quote_session
+    from drawing_intake.assisted_quote import review_assisted_quote
+
+    session = recovered_quote_session(quote_inputs(paddle_dia=5.0, bore_dia=1.548))
+    assert session.confirmation_fingerprint is None
+    assert not review_assisted_quote(session).confirmation_current
+    assert all(field.origin == "customer" for field in session.configuration.values())

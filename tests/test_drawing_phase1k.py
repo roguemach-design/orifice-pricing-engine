@@ -432,3 +432,121 @@ def test_owner_cart_checkout_remains_disabled_without_switch_or_access(monkeypat
                 b for b in app.button if b.label == "💳 Checkout All Items"
             ).disabled
             assert not any(url.endswith("/checkout/cart/create") for url in calls)
+
+
+def test_fresh_quote_session_recovers_corrected_checkout_snapshot(monkeypatch):
+    import drawing_intake.checkout_recovery as recovery
+
+    monkeypatch.setenv("API_BASE", "http://test")
+    monkeypatch.setenv("OPLATES_DRAWING_ASSISTED_ENABLED", "true")
+    monkeypatch.setenv("OPLATES_OWNER_ACCEPTANCE_MODE", "true")
+    monkeypatch.setenv("OPLATES_OWNER_TEST_CHECKOUT_ENABLED", "false")
+    monkeypatch.setattr(auth, "API_BASE", "http://test")
+    payload = _payload()
+    payload.update(
+        paddle_dia=10.25,
+        bore_dia=3.75,
+        thickness=0.25,
+        handle_width=2.0,
+        handle_length_from_bore=14.0,
+        quantity=3,
+    )
+    calls = []
+    with (
+        patch.object(
+            recovery,
+            "fetch_checkout_recovery",
+            return_value={"kind": "direct", "items": [payload]},
+        ) as fetch,
+        patch(
+            "requests.get",
+            lambda url, **kwargs: Response(
+                ACTIVE
+                if url.endswith("/config/active")
+                else {"enabled": True, "authorized": True, "user_id": "internal-user"}
+            ),
+        ),
+        patch(
+            "requests.post",
+            lambda url, **kwargs: calls.append(url) or Response(priced(kwargs["json"])),
+        ),
+        patch("streamlit.switch_page"),
+    ):
+        app = AppTest.from_file(str(ROOT / "pages" / "1_Quote.py"), default_timeout=20)
+        app.session_state["auth"] = {
+            "access_token": _jwt(),
+            "refresh_token": None,
+            "user": None,
+            "email": "internal@example.com",
+        }
+        app.query_params["checkout"] = "cancelled"
+        app.query_params["resume"] = "a" * 64
+        app.run()
+        assert not app.exception
+        for field, value in payload.items():
+            assert app.session_state[f"quote_field_{field}"] == value
+        assert app.session_state["phase1g_customer_confirmation"] is False
+        assert not calls
+        app.number_input(key="quote_field_paddle_dia").set_value(10.5).run()
+        assert not app.exception
+        assert app.session_state["quote_field_paddle_dia"] == 10.5
+        assert fetch.call_count == 1
+        assert not calls
+
+
+def test_fresh_cart_session_recovers_independent_lines_and_editor(monkeypatch):
+    import drawing_intake.checkout_recovery as recovery
+
+    monkeypatch.setenv("API_BASE", "http://test")
+    monkeypatch.setenv("OPLATES_OWNER_ACCEPTANCE_MODE", "true")
+    monkeypatch.setenv("OPLATES_OWNER_TEST_CHECKOUT_ENABLED", "true")
+    monkeypatch.setattr(auth, "API_BASE", "http://test")
+    first = _payload()
+    second = dict(
+        first, paddle_dia=10.25, bore_dia=3.75, quantity=3, handle_length_from_bore=14.0
+    )
+    calls = []
+    with (
+        patch.object(
+            recovery,
+            "fetch_checkout_recovery",
+            return_value={"kind": "cart", "items": [first, second]},
+        ) as fetch,
+        patch(
+            "requests.get",
+            lambda url, **kwargs: Response(
+                {"enabled": True, "authorized": True, "user_id": "internal-user"}
+            ),
+        ),
+        patch(
+            "requests.post",
+            lambda url, **kwargs: calls.append((url, kwargs["json"]))
+            or Response(priced(kwargs["json"])),
+        ),
+        patch("streamlit.switch_page"),
+    ):
+        app = AppTest.from_file(
+            str(ROOT / "pages" / "3_Quote_Cart.py"), default_timeout=20
+        )
+        app.session_state["auth"] = {
+            "access_token": _jwt(),
+            "refresh_token": None,
+            "user": None,
+            "email": "internal@example.com",
+        }
+        app.query_params["checkout"] = "cancelled"
+        app.query_params["resume"] = "a" * 64
+        app.run()
+        assert not app.exception
+        assert [line["inputs"] for line in app.session_state["cart"]] == [first, second]
+        assert len({line["line_id"] for line in app.session_state["cart"]}) == 2
+        assert app.session_state["quote_field_paddle_dia"] == 10.25
+        assert app.session_state["phase1g_customer_confirmation"] is False
+        assert next(
+            b for b in app.button if b.label == "💳 Checkout All Items"
+        ).disabled
+        assert all(url.endswith("/quote") for url, body in calls)
+        app.run()
+        assert not app.exception
+        assert fetch.call_count == 1
+        assert [line["inputs"] for line in app.session_state["cart"]] == [first, second]
