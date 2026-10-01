@@ -621,6 +621,21 @@ owner_test_checkout_allowed = bool(
     OWNER_ACCEPTANCE_MODE and OWNER_TEST_CHECKOUT_ENABLED and drawing_access_allowed
 )
 
+if DRAWING_ASSISTED_ENABLED and not drawing_access_allowed:
+    with st.expander("Upload a Drawing", expanded=True):
+        st.write("Upload your print and we'll fill in the details we can identify.")
+        if not is_logged_in():
+            st.info("Sign in to upload and analyze your drawing.")
+            if st.button("Sign in to upload", key="drawing_sign_in_cta"):
+                st.info(
+                    "Open the Account sidebar, enter your email, and select Send code. "
+                    "Then enter the email verification code and select Verify code."
+                )
+        else:
+            st.info(
+                "Drawing uploads are currently available to approved test users only."
+            )
+
 if drawing_access_allowed:
     with st.expander(
         "Upload a Drawing",
