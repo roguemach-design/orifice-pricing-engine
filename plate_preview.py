@@ -6,6 +6,32 @@ def _clamp(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, value))
 
 
+def _paddle_outline_path(
+    cx: float, cy: float, radius: float, half_handle: float, handle_end: float
+) -> str:
+    """One outer contour with symmetric circular fillets tangent to the OD and handle.
+
+    Each fillet center is one fillet radius above/below the handle side.
+    Its distance from the plate center is R + f, so the two circles are
+    externally tangent. This avoids a circle stroke under a second handle fill.
+    """
+    fillet = min(radius * 0.12, half_handle * 0.35)
+    offset = half_handle + fillet
+    fillet_x = cx + sqrt((radius + fillet) ** 2 - offset**2)
+    plate_x = cx + radius * (fillet_x - cx) / (radius + fillet)
+    plate_y = radius * offset / (radius + fillet)
+    top = cy - half_handle
+    bottom = cy + half_handle
+    return (
+        f"M {fillet_x:.3f},{top:.3f} "
+        f"A {fillet:.3f},{fillet:.3f} 0 0 1 {plate_x:.3f},{cy - plate_y:.3f} "
+        f"A {radius:.3f},{radius:.3f} 0 1 0 {plate_x:.3f},{cy + plate_y:.3f} "
+        f"A {fillet:.3f},{fillet:.3f} 0 0 1 {fillet_x:.3f},{bottom:.3f} "
+        f"L {handle_end:.3f},{bottom:.3f} "
+        f"L {handle_end:.3f},{top:.3f} Z"
+    )
+
+
 def render_plate_svg(
     *,
     paddle_dia: float,
@@ -35,19 +61,14 @@ def render_plate_svg(
     radius_px = 110.0
     cx, cy = 220.0, 225.0
     bore_px = _clamp(radius_px * bore / od, 6.0, radius_px * 0.94)
-    handle_px = _clamp((2 * radius_px) * handle / od, 16.0, 76.0)
+    handle_px = _clamp((2 * radius_px) * handle / od, 16.0, 2 * radius_px * 0.98)
     physical_extension = max(length - (od / 2), 0.0)
     extension_px = _clamp(radius_px * physical_extension / (od / 2), 60.0, 210.0)
     handle_end = cx + radius_px + extension_px
 
-    # The transition begins inside the paddle and widens into the handle,
-    # making the neck/handle connection visible as one continuous cut profile.
-    neck_half_height = min(handle_px * 0.72, radius_px * 0.72)
-    neck_x = cx + sqrt(max(radius_px**2 - neck_half_height**2, 0.0)) - 7.0
+    outline = _paddle_outline_path(cx, cy, radius_px, handle_px / 2, handle_end)
     body_top = cy - handle_px / 2
     body_bottom = cy + handle_px / 2
-    neck_top = cy - neck_half_height
-    neck_bottom = cy + neck_half_height
 
     material_text = escape(str(material))
     unit_text = escape(str(units))
@@ -83,16 +104,7 @@ def render_plate_svg(
   <text x="22" y="34" font-family="Arial,sans-serif" font-size="17" font-weight="700" fill="#172033">HANDLED ORIFICE PLATE</text>
   <text x="658" y="34" text-anchor="end" font-family="Arial,sans-serif" font-size="12" font-weight="700" fill="#1d4f7a">CONFIGURATION DRAWING &#183; NTS</text>
 
-  <g fill="#f8fafc" stroke="#172033" stroke-width="2.2" stroke-linejoin="round">
-    <circle cx="{cx:.1f}" cy="{cy:.1f}" r="{radius_px:.1f}"/>
-    <path d="M {neck_x:.1f},{neck_top:.1f}
-             C {neck_x + 13:.1f},{neck_top:.1f} {neck_x + 19:.1f},{body_top:.1f} {neck_x + 33:.1f},{body_top:.1f}
-             L {handle_end:.1f},{body_top:.1f}
-             L {handle_end:.1f},{body_bottom:.1f}
-             L {neck_x + 33:.1f},{body_bottom:.1f}
-             C {neck_x + 19:.1f},{body_bottom:.1f} {neck_x + 13:.1f},{neck_bottom:.1f} {neck_x:.1f},{neck_bottom:.1f}
-             Z"/>
-  </g>
+  <path id="plate-outline" d="{outline}" fill="#f8fafc" stroke="#172033" stroke-width="2.2" stroke-linejoin="round"/>
 
   <circle cx="{cx:.1f}" cy="{cy:.1f}" r="{bore_px:.1f}" fill="#ffffff" stroke="#172033" stroke-width="2.2"/>
 

@@ -26,6 +26,25 @@ Optional session settings:
 - `AUTH_COOKIE_NAME`
 - `AUTH_COOKIE_TTL_DAYS`
 
+Internal-only drawing-assisted quote acceptance (disabled by default):
+
+- `OPLATES_DRAWING_ASSISTED_ENABLED` — set to `true` on both the customer UI
+  and pricing API only for an approved internal environment.
+- `OPLATES_DRAWING_ASSISTED_ALLOWED_USER_IDS` — comma-separated Supabase user
+  UUIDs, configured on the pricing API. An empty list fails closed.
+- `DRAWING_ASSISTED_MAX_FILE_BYTES`, `DRAWING_ASSISTED_MAX_PDF_PAGES`,
+  `DRAWING_ASSISTED_MAX_IMAGE_DIMENSION_PX`,
+  `DRAWING_ASSISTED_MAX_TOTAL_PIXELS`, and
+  `DRAWING_ASSISTED_PROCESSING_TIMEOUT_SECONDS` — optional UI-server resource
+  limits. The code defaults to 15 MiB, 10 pages, 16,000 pixels per dimension,
+  80 million total pixels, and 90 seconds.
+
+The customer UI must receive an affirmative response from the API's
+server-verified `/internal/drawing-intake/access` gate before it displays or
+processes a drawing. The API verifies the Supabase JWT and allowlisted user ID.
+No drawing bytes are sent to that endpoint, stored persistently, or sent to an
+external service.
+
 `SUPABASE_ANON_KEY` is the staging project's browser-safe publishable/anon key.
 Never configure a Supabase service-role key in the customer UI service.
 

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,7 +10,6 @@ from sqlalchemy.pool import StaticPool
 
 import api_app
 import auth
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -34,7 +34,9 @@ def test_supabase_jwt_is_verified_with_key_issuer_audience_and_expiry(monkeypatc
     monkeypatch.setattr(api_app, "_jwk_client", FakeJwkClient())
     monkeypatch.setattr(api_app, "SUPABASE_JWT_ISSUER", "https://auth.example.test/v1")
     monkeypatch.setattr(api_app, "SUPABASE_JWT_AUD", "authenticated")
-    monkeypatch.setattr(api_app.jwt, "get_unverified_header", lambda token: {"alg": "RS256"})
+    monkeypatch.setattr(
+        api_app.jwt, "get_unverified_header", lambda token: {"alg": "RS256"}
+    )
     monkeypatch.setattr(api_app.jwt, "decode", decode)
 
     user_id = api_app._decode_supabase_user_id_from_bearer("Bearer signed-token")
@@ -50,7 +52,9 @@ def test_supabase_jwt_is_verified_with_key_issuer_audience_and_expiry(monkeypatc
 def test_supabase_jwt_rejects_unapproved_algorithm(monkeypatch):
     monkeypatch.setattr(api_app, "_jwk_client", object())
     monkeypatch.setattr(api_app, "SUPABASE_JWT_ISSUER", "issuer")
-    monkeypatch.setattr(api_app.jwt, "get_unverified_header", lambda token: {"alg": "HS256"})
+    monkeypatch.setattr(
+        api_app.jwt, "get_unverified_header", lambda token: {"alg": "HS256"}
+    )
 
     assert api_app._decode_supabase_user_id_from_bearer("Bearer token") is None
 
@@ -167,7 +171,9 @@ def test_authenticated_customer_identity_behavior_is_unchanged(monkeypatch):
     monkeypatch.setattr(
         api_app,
         "_decode_supabase_user_id_from_bearer",
-        lambda authorization: "verified-user" if authorization == "Bearer valid" else None,
+        lambda authorization: (
+            "verified-user" if authorization == "Bearer valid" else None
+        ),
     )
 
     assert (
@@ -278,9 +284,7 @@ def test_failed_refresh_clears_an_expired_local_session(monkeypatch):
     monkeypatch.setattr(
         auth,
         "sb",
-        lambda: SimpleNamespace(
-            auth=SimpleNamespace(refresh_session=fail_refresh)
-        ),
+        lambda: SimpleNamespace(auth=SimpleNamespace(refresh_session=fail_refresh)),
     )
 
     auth._refresh_session_if_needed()
@@ -307,9 +311,7 @@ def test_malformed_cached_token_is_refreshed_or_cleared(monkeypatch):
     monkeypatch.setattr(
         auth,
         "sb",
-        lambda: SimpleNamespace(
-            auth=SimpleNamespace(refresh_session=fail_refresh)
-        ),
+        lambda: SimpleNamespace(auth=SimpleNamespace(refresh_session=fail_refresh)),
     )
 
     auth._refresh_session_if_needed()
@@ -334,6 +336,78 @@ def test_malformed_token_without_refresh_is_not_treated_as_logged_in(monkeypatch
 
     assert page_state.auth["access_token"] is None
     assert page_state.auth["refresh_token"] is None
+
+
+def test_cookie_get_prefers_synchronous_streamlit_request_cookie(monkeypatch):
+    payload = {
+        "access_token": "request-access",
+        "refresh_token": "request-refresh",
+        "email": "buyer@example.com",
+    }
+    page_state = AttrDict()
+    monkeypatch.setattr(
+        auth,
+        "st",
+        SimpleNamespace(
+            session_state=page_state,
+            context=SimpleNamespace(cookies={auth.COOKIE_NAME: json.dumps(payload)}),
+        ),
+    )
+    monkeypatch.setattr(
+        auth,
+        "_cookie_mgr",
+        lambda: pytest.fail("component reader should not be used"),
+    )
+
+    assert auth._cookie_get() == payload
+
+
+def test_cookie_get_decodes_request_cookie_serialized_by_browser(monkeypatch):
+    payload = {
+        "access_token": "request-access",
+        "refresh_token": "request-refresh",
+        "email": "buyer@example.com",
+    }
+    encoded = "%7B%22access_token%22%3A%20%22request-access%22%2C%20%22refresh_token%22%3A%20%22request-refresh%22%2C%20%22email%22%3A%20%22buyer%40example.com%22%7D"
+    monkeypatch.setattr(
+        auth,
+        "st",
+        SimpleNamespace(
+            session_state=AttrDict(),
+            context=SimpleNamespace(cookies={auth.COOKIE_NAME: encoded}),
+        ),
+    )
+
+    assert auth._cookie_get() == payload
+
+
+def test_cleared_cookie_cannot_restore_from_stale_request_context(monkeypatch):
+    page_state = AttrDict(
+        auth={
+            "access_token": None,
+            "refresh_token": None,
+            "user": None,
+            "email": None,
+        },
+        _auth_cookie_cleared=True,
+    )
+    payload = {
+        "access_token": "stale-access",
+        "refresh_token": "stale-refresh",
+        "email": "buyer@example.com",
+    }
+    monkeypatch.setattr(
+        auth,
+        "st",
+        SimpleNamespace(
+            session_state=page_state,
+            context=SimpleNamespace(cookies={auth.COOKIE_NAME: json.dumps(payload)}),
+        ),
+    )
+
+    auth._restore_auth_from_cookie_if_needed()
+
+    assert page_state.auth["access_token"] is None
 
 
 def test_customer_code_contains_no_supabase_service_role_secret():

@@ -1,15 +1,11 @@
-import os
-
 import requests
 import streamlit as st
 
-from auth import auth_headers, is_logged_in, render_auth_sidebar
+from auth import API_BASE, auth_headers, is_logged_in, render_auth_sidebar
 
 
 st.set_page_config(page_title="O-Plates Order Confirmation", layout="centered")
 render_auth_sidebar(show_debug=False)
-
-API_BASE = (os.environ.get("API_BASE") or "").strip().rstrip("/")
 
 if not API_BASE:
     st.error("The O-Plates pricing service is not configured.")

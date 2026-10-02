@@ -155,16 +155,18 @@ def test_guest_checkout_reprices_persists_pending_and_is_idempotent(
     calls = install_idempotent_stripe(monkeypatch)
     headers = {"x-api-key": "test-ui-key"}
 
-    first = checkout_client.post("/checkout/create", json=checkout_body(), headers=headers)
-    duplicate = checkout_client.post("/checkout/create", json=checkout_body(), headers=headers)
+    first = checkout_client.post(
+        "/checkout/create", json=checkout_body(), headers=headers
+    )
+    duplicate = checkout_client.post(
+        "/checkout/create", json=checkout_body(), headers=headers
+    )
 
     assert first.status_code == 200
     assert duplicate.status_code == 200
     assert first.json() == duplicate.json()
     assert calls[0]["idempotency_key"] == checkout_body()["idempotency_key"]
-    assert calls[0]["success_url"].endswith(
-        "/Success?session_id={CHECKOUT_SESSION_ID}"
-    )
+    assert calls[0]["success_url"].endswith("/Success?session_id={CHECKOUT_SESSION_ID}")
     assert calls[0]["cancel_url"].endswith("/Quote?checkout=cancelled")
     assert calls[0]["line_items"][0]["price_data"]["unit_amount"] == 12500
 
@@ -188,9 +190,15 @@ def test_checkout_rate_limit_allows_requests_below_limit_then_enforces(
     headers = {"x-api-key": "test-ui-key"}
 
     try:
-        first = checkout_client.post("/checkout/create", json=checkout_body(), headers=headers)
-        second = checkout_client.post("/checkout/create", json=checkout_body(), headers=headers)
-        limited = checkout_client.post("/checkout/create", json=checkout_body(), headers=headers)
+        first = checkout_client.post(
+            "/checkout/create", json=checkout_body(), headers=headers
+        )
+        second = checkout_client.post(
+            "/checkout/create", json=checkout_body(), headers=headers
+        )
+        limited = checkout_client.post(
+            "/checkout/create", json=checkout_body(), headers=headers
+        )
 
         assert first.status_code == 200
         assert second.status_code == 200
@@ -283,9 +291,7 @@ def test_checkout_rate_limit_isolates_customer_principals(monkeypatch, checkout_
     assert request(body_a, headers_a).status_code == 429
 
 
-def test_checkout_rejects_stale_pricing_before_stripe(
-    monkeypatch, checkout_client
-):
+def test_checkout_rejects_stale_pricing_before_stripe(monkeypatch, checkout_client):
     calls = install_idempotent_stripe(monkeypatch)
     response = checkout_client.post(
         "/checkout/create",
@@ -317,7 +323,9 @@ def test_verified_bearer_identity_wins_when_ui_key_is_also_present(
     monkeypatch.setattr(
         api_app,
         "_decode_supabase_user_id_from_bearer",
-        lambda authorization: "verified-user" if authorization == "Bearer valid" else None,
+        lambda authorization: (
+            "verified-user" if authorization == "Bearer valid" else None
+        ),
     )
 
     response = checkout_client.post(
@@ -389,9 +397,7 @@ def test_authenticated_cart_checkout_uses_verified_user_and_idempotency(
     assert calls[0]["idempotency_key"] == body["idempotency_key"]
     assert calls[0]["metadata"]["customer_id"] == "verified-user"
     assert calls[0]["metadata"]["pricing_config_version"] == "version-current"
-    assert calls[0]["cancel_url"].endswith(
-        "/Quote_Cart?checkout=cancelled"
-    )
+    assert calls[0]["cancel_url"].endswith("/Quote_Cart?checkout=cancelled")
 
     db = database()
     try:
@@ -399,6 +405,139 @@ def test_authenticated_cart_checkout_uses_verified_user_and_idempotency(
         assert len(orders) == 1
         assert orders[0].customer_id == "verified-user"
         assert len(orders[0].quote_payload["cart_items"]) == 2
+    finally:
+        db.close()
+
+
+def test_confirmed_drawing_items_use_existing_test_checkout_and_order_path(
+    monkeypatch, checkout_client, database
+):
+    from drawing_intake.assisted_quote import (
+        AssistedQuoteSession,
+        CanonicalFieldValue,
+        ConfigurationValueOrigin,
+        availability_from_active_config,
+        confirm_configuration,
+    )
+    from drawing_intake.cart_gate import verified_assisted_cart_inputs
+    from drawing_intake.classification import DrawingDocumentClass
+    from pricing_engine import QuoteInputs
+
+    availability = availability_from_active_config(
+        {
+            "materials": ["304"],
+            "thicknesses_by_material": {"304": [0.125, 0.25]},
+            "lead_times_days": [14, 21],
+            "tolerance_options_in": [0.001, 0.002, 0.005],
+            "max_paddle_dia_in": 48.0,
+            "max_bore_dia_in": 19.0,
+            "max_handle_label_chars": 40,
+        }
+    )
+    first = quote_inputs(
+        paddle_dia=5.0,
+        bore_dia=1.548,
+        handle_width=2.0,
+        handle_length_from_bore=10.5,
+        chamfer=False,
+        chamfer_width=None,
+        handle_label="No label",
+    )
+    corrected = quote_inputs(
+        paddle_dia=10.25,
+        bore_dia=3.75,
+        thickness=0.25,
+        handle_width=2.0,
+        handle_length_from_bore=10.5,
+        chamfer=False,
+        chamfer_width=None,
+        handle_label="No label",
+    )
+
+    def confirmed_line(payload, part):
+        session = AssistedQuoteSession(
+            source_document="synthetic-fixture.pdf",
+            source_sha256="1" * 64,
+            document_class=DrawingDocumentClass.SINGLE_PLATE_DRAWING,
+            candidate_count=1,
+            selected_candidate_id=part,
+            selection_required=False,
+            configuration={
+                name: CanonicalFieldValue(
+                    value=value, origin=ConfigurationValueOrigin.CUSTOMER
+                )
+                for name, value in payload.items()
+                if value is not None
+            },
+        )
+        session = confirm_configuration(session, availability=availability)
+        quote = {
+            "normalized_configuration": QuoteInputs(**payload).model_dump(),
+            "validation": {"valid": True},
+            "currency": "USD",
+            "configuration_id": part,
+            "pricing_config_version": "version-current",
+            "unit_price": 125.0,
+            "total_price": 125.0,
+        }
+        return verified_assisted_cart_inputs(
+            session, payload, quote, availability=availability
+        )
+
+    items = [confirmed_line(first, "plate-1"), confirmed_line(corrected, "plate-2")]
+    calls = install_idempotent_stripe(monkeypatch)
+    monkeypatch.setattr(
+        api_app,
+        "_decode_supabase_user_id_from_bearer",
+        lambda authorization: (
+            "verified-owner" if authorization == "Bearer valid" else None
+        ),
+    )
+    request = {
+        "items": items,
+        "pricing_config_version": "version-current",
+        "idempotency_key": "00000000-0000-4000-8000-000000000111",
+    }
+    headers = {"Authorization": "Bearer valid"}
+    first_checkout = checkout_client.post(
+        "/checkout/cart/create", json=request, headers=headers
+    )
+    replay_checkout = checkout_client.post(
+        "/checkout/cart/create", json=request, headers=headers
+    )
+    assert first_checkout.status_code == 200
+    assert replay_checkout.json() == first_checkout.json()
+    assert calls[0]["line_items"][0]["price_data"]["unit_amount"] == 25000
+    assert calls[0]["idempotency_key"] == request["idempotency_key"]
+    assert not any("drawing" in key for key in calls[0]["metadata"])
+
+    session = completed_session(
+        first_checkout.json()["session_id"], customer_id="verified-owner"
+    )
+    session.update(amount_subtotal=25000, amount_shipping=3000, amount_total=28000)
+    install_completed_webhook(monkeypatch, session)
+    monkeypatch.setattr(api_app, "_send_email", lambda *args, **kwargs: None)
+    webhook = checkout_client.post(
+        "/stripe/webhook", content=b"{}", headers={"stripe-signature": "valid"}
+    )
+    replay = checkout_client.post(
+        "/stripe/webhook", content=b"{}", headers={"stripe-signature": "valid"}
+    )
+    assert webhook.json()["status"] == "completed"
+    assert replay.json()["status"] == "already_completed"
+    orders = checkout_client.get("/me/orders", headers=headers)
+    assert orders.status_code == 200
+    assert len(orders.json()) == 1
+    detail = checkout_client.get(
+        f"/me/orders/{orders.json()[0]['id']}", headers=headers
+    )
+    assert detail.status_code == 200
+    assert detail.json()["quote_payload"] == {"cart_items": items}
+    assert detail.json()["quote_payload"]["cart_items"][1]["paddle_dia"] == 10.25
+    assert detail.json()["amount_total_usd"] == 280.0
+    db = database()
+    try:
+        assert db.query(api_app.Order).count() == 1
     finally:
         db.close()
 
@@ -528,8 +667,12 @@ def test_checkout_retry_reuses_stripe_session_after_transient_database_failure(
     monkeypatch.setattr(api_app, "SessionLocal", flaky_session_factory)
     headers = {"x-api-key": "test-ui-key"}
 
-    failed = checkout_client.post("/checkout/create", json=checkout_body(), headers=headers)
-    retried = checkout_client.post("/checkout/create", json=checkout_body(), headers=headers)
+    failed = checkout_client.post(
+        "/checkout/create", json=checkout_body(), headers=headers
+    )
+    retried = checkout_client.post(
+        "/checkout/create", json=checkout_body(), headers=headers
+    )
 
     assert failed.status_code == 503
     assert retried.status_code == 200
@@ -594,6 +737,35 @@ def test_completed_webhook_updates_once_and_replay_does_not_duplicate(
         assert order.paid_at is not None
     finally:
         db.close()
+
+
+def test_signed_replay_repairs_only_missing_shipping_service(monkeypatch, checkout_client, database):
+    install_idempotent_stripe(monkeypatch)
+    result = checkout_client.post('/checkout/create', json=checkout_body(), headers={'x-api-key': 'test-ui-key'})
+    session = completed_session(result.json()['session_id'])
+    install_completed_webhook(monkeypatch, session)
+    emails = []
+    monkeypatch.setattr(api_app, '_send_email', lambda **kwargs: emails.append(kwargs))
+
+    def retrieve(session_id, **kwargs):
+        assert kwargs['expand'] == ['shipping_cost.shipping_rate']
+        return session
+
+    monkeypatch.setattr(api_app.stripe.checkout.Session, 'retrieve', retrieve)
+    headers = {'stripe-signature': 'valid'}
+    assert checkout_client.post('/stripe/webhook', content=b'{}', headers=headers).json()['status'] == 'completed'
+    with database() as db:
+        order = db.query(api_app.Order).one()
+        before = (order.id, order.order_number, order.paid_at, order.stripe_payment_intent, order.amount_total_cents, order.quote_payload)
+        order.shipping_service = None
+        db.commit()
+    for _ in range(2):
+        assert checkout_client.post('/stripe/webhook', content=b'{}', headers=headers).json()['status'] == 'already_completed'
+    with database() as db:
+        order = db.query(api_app.Order).one()
+        assert order.shipping_service == 'ups_ground'
+        assert (order.id, order.order_number, order.paid_at, order.stripe_payment_intent, order.amount_total_cents, order.quote_payload) == before
+    assert len(emails) == 1
 
 
 def test_completed_webhook_accepts_stripe_session_objects(
@@ -813,3 +985,274 @@ def test_webhook_database_failure_returns_retryable_status(
     assert response.json()["detail"] == (
         "Order completion is temporarily unavailable; Stripe will retry."
     )
+
+
+@pytest.fixture
+def recovery_client(checkout_client, monkeypatch):
+    monkeypatch.setattr(api_app, "APP_ENV", "preview")
+    monkeypatch.setenv("OPLATES_DRAWING_ASSISTED_ENABLED", "true")
+    monkeypatch.setenv("OPLATES_DRAWING_ASSISTED_ALLOWED_USER_IDS", "owner")
+    monkeypatch.setattr(
+        api_app,
+        "_decode_supabase_user_id_from_bearer",
+        lambda token: {"Bearer owner": "owner", "Bearer other": "other"}.get(token),
+    )
+    yield checkout_client
+
+
+def recovery_reference(calls):
+    from urllib.parse import urlparse, parse_qs
+
+    return parse_qs(urlparse(calls[-1]["cancel_url"]).query)["resume"][0]
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        quote_inputs(
+            paddle_dia=5.0,
+            bore_dia=1.548,
+            handle_width=2.0,
+            handle_length_from_bore=10.5,
+        ),
+        quote_inputs(
+            paddle_dia=10.25,
+            bore_dia=3.75,
+            thickness=0.25,
+            quantity=3,
+            handle_width=2.0,
+            handle_length_from_bore=14.0,
+        ),
+    ],
+)
+def test_checkout_recovery_exact_customer_inputs(
+    recovery_client, database, monkeypatch, values
+):
+    calls = install_idempotent_stripe(monkeypatch)
+    body = checkout_body(inputs=values)
+    headers = {"Authorization": "Bearer owner"}
+    assert (
+        recovery_client.post("/checkout/create", json=body, headers=headers).status_code
+        == 200
+    )
+    reference = recovery_reference(calls)
+    result = recovery_client.get(f"/checkout/recovery/{reference}", headers=headers)
+    assert result.status_code == 200, result.text
+    assert result.json() == {
+        "kind": "direct",
+        "items": [values],
+        "contexts": [None],
+        "requires_confirmation": True,
+    }
+    assert (
+        recovery_client.post("/checkout/create", json=body, headers=headers).status_code
+        == 200
+    )
+    assert calls[0]["cancel_url"] == calls[1]["cancel_url"]
+    with database() as db:
+        assert db.query(api_app.Order).count() == 1
+        order = db.query(api_app.Order).one()
+        assert order.status == "pending" and order.paid_at is None
+
+
+def test_checkout_recovery_isolation_expiration_and_paid(
+    recovery_client, database, monkeypatch
+):
+    from datetime import datetime, timezone, timedelta
+
+    calls = install_idempotent_stripe(monkeypatch)
+    assert (
+        recovery_client.post(
+            "/checkout/create",
+            json=checkout_body(),
+            headers={"Authorization": "Bearer owner"},
+        ).status_code
+        == 200
+    )
+    path = f"/checkout/recovery/{recovery_reference(calls)}"
+    assert recovery_client.get(path).status_code == 401
+    assert (
+        recovery_client.get(path, headers={"Authorization": "Bearer other"}).status_code
+        == 403
+    )
+    assert (
+        recovery_client.get(
+            "/checkout/recovery/" + "f" * 64, headers={"Authorization": "Bearer owner"}
+        ).status_code
+        == 404
+    )
+    assert (
+        recovery_client.get(
+            "/checkout/recovery/tampered", headers={"Authorization": "Bearer owner"}
+        ).status_code
+        == 404
+    )
+    with database() as db:
+        order = db.query(api_app.Order).one()
+        order.created_at = datetime.now(timezone.utc) - timedelta(hours=25)
+        db.commit()
+    assert (
+        recovery_client.get(path, headers={"Authorization": "Bearer owner"}).status_code
+        == 404
+    )
+    with database() as db:
+        order = db.query(api_app.Order).one()
+        order.created_at = datetime.now(timezone.utc)
+        order.status = "completed"
+        order.paid_at = datetime.now(timezone.utc)
+        db.commit()
+    assert (
+        recovery_client.get(path, headers={"Authorization": "Bearer owner"}).status_code
+        == 404
+    )
+
+
+def test_checkout_recovery_two_independent_cart_lines(
+    recovery_client, database, monkeypatch
+):
+    calls = install_idempotent_stripe(monkeypatch)
+    items = [
+        quote_inputs(paddle_dia=5.0, bore_dia=1.548),
+        quote_inputs(paddle_dia=10.25, bore_dia=3.75, quantity=3),
+    ]
+    body = {
+        "items": items,
+        "pricing_config_version": "version-current",
+        "idempotency_key": "cart-recovery-unique-attempt",
+    }
+    headers = {"Authorization": "Bearer owner"}
+    response = recovery_client.post("/checkout/cart/create", json=body, headers=headers)
+    assert response.status_code == 200, response.text
+    result = recovery_client.get(
+        f"/checkout/recovery/{recovery_reference(calls)}", headers=headers
+    )
+    assert result.status_code == 200, result.text
+    assert result.json()["items"] == items
+    assert result.json()["kind"] == "cart"
+    assert (
+        recovery_client.post(
+            "/checkout/cart/create", json=body, headers=headers
+        ).status_code
+        == 200
+    )
+    with database() as db:
+        assert db.query(api_app.Order).count() == 1
+
+
+def test_recovered_session_requires_fresh_confirmation():
+    from drawing_intake.checkout_recovery import recovered_quote_session
+    from drawing_intake.assisted_quote import review_assisted_quote
+
+    session = recovered_quote_session(quote_inputs(paddle_dia=5.0, bore_dia=1.548))
+    assert session.confirmation_fingerprint is None
+    assert not review_assisted_quote(session).confirmation_current
+    assert all(field.origin == "customer" for field in session.configuration.values())
+
+
+@pytest.mark.parametrize(
+    "document_class,count",
+    [
+        ("single_plate_drawing", 1),
+        ("multi_plate_drawing", 8),
+        ("table_driven_plate_schedule", 13),
+    ],
+)
+def test_selected_part_checkout_cancel_reconfirm_reprice(
+    recovery_client, database, monkeypatch, document_class, count
+):
+    from drawing_intake.checkout_context import attest_context, selected_part_context
+    from drawing_intake.checkout_recovery import recovered_quote_session
+    from drawing_intake.assisted_quote import confirm_configuration
+    from drawing_intake.pricing_gate import confirmed_drawing_quote_inputs
+    from test_drawing_phase1k import available
+
+    calls = install_idempotent_stripe(monkeypatch)
+    inputs = quote_inputs(
+        paddle_dia=10.25,
+        bore_dia=3.75,
+        thickness=0.25,
+        handle_width=2,
+        handle_length_from_bore=14,
+    )
+    context = {
+        "document_class": document_class,
+        "candidate_count": count,
+        "selected_candidate_id": "explicit-selected-part",
+        "selection_required": False,
+    }
+    # Exercise the initial confirmation/pricing gate as well as recovery.
+    initial = recovered_quote_session(inputs, context)
+    with pytest.raises(ValueError):
+        confirmed_drawing_quote_inputs(initial, inputs, availability=available())
+    initial = confirm_configuration(initial, availability=available())
+    initial_payload = confirmed_drawing_quote_inputs(
+        initial, inputs, availability=available()
+    )
+    first_price = recovery_client.post(
+        "/quote", json=initial_payload, headers={"x-api-key": "test-ui-key"}
+    )
+    assert first_price.status_code == 200
+    body = checkout_body(
+        inputs=initial_payload,
+        recovery_context=attest_context(
+            selected_part_context(initial), initial_payload, "owner", "test-ui-key"
+        ),
+    )
+    headers = {"Authorization": "Bearer owner"}
+    assert (
+        recovery_client.post("/checkout/create", json=body, headers=headers).status_code
+        == 200
+    )
+    snapshot = recovery_client.get(
+        "/checkout/recovery/" + recovery_reference(calls), headers=headers
+    ).json()
+    assert snapshot["contexts"] == [context]
+    session = recovered_quote_session(snapshot["items"][0], snapshot["contexts"][0])
+    with pytest.raises(ValueError):
+        confirmed_drawing_quote_inputs(session, inputs, availability=available())
+    session = confirm_configuration(session, availability=available())
+    payload = confirmed_drawing_quote_inputs(session, inputs, availability=available())
+    assert payload["paddle_dia"] == 10.25
+    assert payload == api_app.QuoteInputs(**inputs).model_dump()
+    price = recovery_client.post(
+        "/quote", json=payload, headers={"x-api-key": "test-ui-key"}
+    )
+    assert price.status_code == 200
+    assert price.json()["total_price"] == 125.0
+    assert price.json()["total_price"] == first_price.json()["total_price"]
+
+
+@pytest.mark.parametrize(
+    "tamper", ["signature", "inputs", "customer", "reference", "unselected"]
+)
+def test_selected_part_attestation_cannot_be_forged(
+    recovery_client, monkeypatch, tamper
+):
+    from drawing_intake.checkout_context import attest_context
+
+    calls = install_idempotent_stripe(monkeypatch)
+    inputs = quote_inputs()
+    context = {
+        "document_class": "multi_plate_drawing",
+        "candidate_count": 8,
+        "selected_candidate_id": "selected-part",
+        "selection_required": False,
+    }
+    envelope = attest_context(
+        context, inputs, "other" if tamper == "customer" else "owner", "test-ui-key"
+    )
+    if tamper == "signature":
+        envelope["signature"] = "0" * 64
+    if tamper == "inputs":
+        inputs["paddle_dia"] = 5
+    if tamper == "reference":
+        envelope["context"]["document_class"] = "reference_vendor_datasheet"
+    if tamper == "unselected":
+        envelope["context"]["selection_required"] = True
+    result = recovery_client.post(
+        "/checkout/create",
+        json=checkout_body(inputs=inputs, recovery_context=envelope),
+        headers={"Authorization": "Bearer owner"},
+    )
+    assert result.status_code == 400
+    assert not calls
