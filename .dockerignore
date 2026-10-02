@@ -16,3 +16,7 @@ build
 dist
 drawing_corpus/private
 drawing_corpus/reports
+
+# Render secret files must never enter an image layer.
+secrets/
+*.pem
