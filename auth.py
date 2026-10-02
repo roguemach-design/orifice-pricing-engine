@@ -31,7 +31,7 @@ if API_BASE and "://" not in API_BASE:
 SUPABASE_URL = (os.environ.get("SUPABASE_URL") or "").strip()
 SUPABASE_ANON_KEY = (os.environ.get("SUPABASE_ANON_KEY") or "").strip()
 
-COOKIE_NAME = os.environ.get("AUTH_COOKIE_NAME", "oplates_auth")
+COOKIE_NAME = (os.environ.get("AUTH_COOKIE_NAME") or "oplates_auth").strip() or "oplates_auth"
 COOKIE_TTL_DAYS = int(os.environ.get("AUTH_COOKIE_TTL_DAYS", "14"))
 REFRESH_SKEW_SECONDS = 120
 
