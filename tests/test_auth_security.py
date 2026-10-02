@@ -410,6 +410,35 @@ def test_cleared_cookie_cannot_restore_from_stale_request_context(monkeypatch):
     assert page_state.auth["access_token"] is None
 
 
+@pytest.mark.parametrize("configured_name", ["", "   ", "owner_auth"])
+def test_configured_cookie_name_persists_and_restores_session(monkeypatch, configured_name):
+    import importlib
+
+    expected_name = configured_name.strip() or "oplates_auth"
+    payload = {"access_token": "synthetic-access", "refresh_token": "synthetic-refresh", "email": "buyer@example.com"}
+    cookies = {}
+
+    def save_cookie(name, value, **kwargs):
+        assert name == expected_name
+        assert kwargs["expires_at"].tzinfo is not None
+        cookies[name] = value
+
+    try:
+        with monkeypatch.context() as patch:
+            patch.setenv("AUTH_COOKIE_NAME", configured_name)
+            importlib.reload(auth)
+            state = AttrDict()
+            patch.setattr(auth, "st", SimpleNamespace(session_state=state, context=SimpleNamespace(cookies=cookies)))
+            patch.setattr(auth, "_cookie_mgr", lambda: SimpleNamespace(set=save_cookie))
+            auth._cookie_set(payload)
+            auth._restore_auth_from_cookie_if_needed()
+            assert state.auth["access_token"] == payload["access_token"]
+            assert state.auth["refresh_token"] == payload["refresh_token"]
+            assert state.auth["email"] == payload["email"]
+    finally:
+        importlib.reload(auth)
+
+
 def test_customer_code_contains_no_supabase_service_role_secret():
     customer_files = [
         ROOT / "auth.py",
