@@ -987,9 +987,9 @@ def test_webhook_database_failure_returns_retryable_status(
     )
 
 
-@pytest.fixture
-def recovery_client(checkout_client, monkeypatch):
-    monkeypatch.setattr(api_app, "APP_ENV", "preview")
+@pytest.fixture(params=["preview", "staging"])
+def recovery_client(checkout_client, monkeypatch, request):
+    monkeypatch.setattr(api_app, "APP_ENV", request.param)
     monkeypatch.setenv("OPLATES_DRAWING_ASSISTED_ENABLED", "true")
     monkeypatch.setenv("OPLATES_DRAWING_ASSISTED_ALLOWED_USER_IDS", "owner")
     monkeypatch.setattr(
@@ -1256,3 +1256,66 @@ def test_selected_part_attestation_cannot_be_forged(
     )
     assert result.status_code == 400
     assert not calls
+
+
+@pytest.mark.parametrize("cart", [False, True])
+def test_unified_completed_order_captures_exact_independent_lines(
+    monkeypatch, recovery_client, database, tmp_path, cart
+):
+    from hashlib import sha256
+    from email.parser import BytesParser
+    from email import policy
+    from frozen_plate.repository import Repository
+    from frozen_plate import api as frozen_api
+
+    class CaptureRepository(Repository):
+        def create_delivery(self, *args, **kwargs):
+            delivery = super().create_delivery(*args, **kwargs)
+            captured.append(delivery)
+            return delivery
+
+    captured = []
+    repo = CaptureRepository(tmp_path, "unit-signing-key" * 6)
+    monkeypatch.setattr(frozen_api, "repository", lambda: repo)
+    monkeypatch.setattr(api_app, "APP_ENV", "staging")
+    monkeypatch.setenv("FROZEN_PLATE_DATABASE_URL", "unit-test-binding")
+    monkeypatch.setenv("FROZEN_PLATE_EMAIL_MODE", "capture")
+    monkeypatch.setattr(api_app, "SENDGRID_API_KEY", "unit-test-do-not-send")
+    monkeypatch.setattr(api_app, "SendGridAPIClient", lambda *a, **k: pytest.fail("Customer email attempted"))
+    install_idempotent_stripe(monkeypatch)
+    values = quote_inputs(chamfer=False, chamfer_width=None, paddle_dia=5.0,
+                          bore_dia=1.548, handle_width=2.0, handle_length_from_bore=10.5)
+    other = {**values, "paddle_dia": 10.25, "bore_dia": 3.75, "quantity": 2}
+    body = checkout_body(inputs=values)
+    if cart:
+        body = {"items": [values, other], "pricing_config_version": "version-current",
+                "idempotency_key": body["idempotency_key"]}
+    response = recovery_client.post("/checkout/cart/create" if cart else "/checkout/create",
+                                    json=body, headers={"Authorization": "Bearer owner"})
+    assert response.status_code == 200, response.text
+    install_completed_webhook(monkeypatch, completed_session(response.json()["session_id"], customer_id="owner"))
+    for expected in ("completed", "already_completed"):
+        result = recovery_client.post("/stripe/webhook", content=b"{}", headers={"stripe-signature": "valid"})
+        assert result.status_code == 200, result.text
+        assert result.json()["status"] == expected
+    assert len(captured) == (2 if cart else 1)
+    with database() as db:
+        order = db.query(api_app.Order).one()
+        assert order.status == "completed" and order.shipping_service == "ups_ground"
+        assert "_checkout_recovery" in order.quote_payload
+    for delivery, source in zip(captured, [values, other] if cart else [values]):
+        context = delivery["context"]
+        token = delivery["token"]
+        filename, pdf = repo.customer_pdf(token, customer_id="owner")
+        mime = BytesParser(policy=policy.default).parsebytes(delivery["mime"])
+        attached = list(mime.iter_attachments())
+        assert len(attached) == 1 and attached[0].get_payload(decode=True) == pdf
+        with repo.connect() as db:
+            binding = db.execute("SELECT revision_id,pdf_sha256 FROM frozen_plate_tokens WHERE fingerprint=?",
+                                 (sha256(token.encode()).hexdigest(),)).fetchone()
+        assert sha256(pdf).hexdigest() == binding["pdf_sha256"]
+        import json
+        spec = json.loads(repo.revision(binding["revision_id"])["spec_json"])
+        assert spec["finished_od"] == source["paddle_dia"]
+        assert spec["finished_bore_diameter"] == source["bore_dia"]
+        assert spec["quantity"] == source["quantity"]
