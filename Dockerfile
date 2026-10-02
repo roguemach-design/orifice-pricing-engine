@@ -21,4 +21,5 @@ RUN useradd --create-home --uid 10001 appuser \
     && chown -R appuser:appuser /app
 USER appuser
 
-CMD ["/bin/sh", "-c", "exec streamlit run app.py --server.address 0.0.0.0 --server.port ${PORT:-10000} --server.headless true"]
+# The shared image starts the correct process only for the approved staging services.
+CMD ["/bin/sh", "-c", "case \"$RENDER_SERVICE_NAME\" in oplates-pricing-api-staging) exec uvicorn api_app:app --host 0.0.0.0 --port ${PORT:-10000} ;; oplates-customer-ui-staging) exec streamlit run app.py --server.address 0.0.0.0 --server.port ${PORT:-10000} --server.headless true ;; *) echo 'Unrecognized staging service' >&2; exit 1 ;; esac"]
