@@ -1,18 +1,14 @@
 # auth.py
 import base64
 import json
-import logging
 import os
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
-from urllib.parse import unquote
 
 import requests
 import streamlit as st
 from supabase import Client, create_client
-
-logger = logging.getLogger(__name__)
 
 # Cookie manager (for "stay logged in")
 try:
@@ -25,9 +21,6 @@ except Exception:
 # Env
 # ----------------------------
 API_BASE = (os.environ.get("API_BASE") or "").strip().rstrip("/")
-if API_BASE and "://" not in API_BASE:
-    # Render private-service host:port values intentionally have no URL scheme.
-    API_BASE = f"http://{API_BASE}"
 SUPABASE_URL = (os.environ.get("SUPABASE_URL") or "").strip()
 SUPABASE_ANON_KEY = (os.environ.get("SUPABASE_ANON_KEY") or "").strip()
 
@@ -70,50 +63,29 @@ def sb() -> Client:
 
 
 # ----------------------------
-# Cookie manager
+# Cookie manager (singleton, NO caching)
 # ----------------------------
 def _cookie_mgr():
     if stx is None:
         return None
 
-    manager = st.session_state.get("_cookie_mgr_instance")
-    if manager is None:
-        manager = stx.CookieManager(key="oplates_auth_cookie_manager")
-        st.session_state["_cookie_mgr_instance"] = manager
-    return manager
+    if "_cookie_mgr_instance" not in st.session_state:
+        st.session_state["_cookie_mgr_instance"] = stx.CookieManager()
+
+    return st.session_state["_cookie_mgr_instance"]
 
 
 def _cookie_get() -> Optional[dict]:
-    # Streamlit exposes cookies from the browser's initial websocket request.
-    # This is synchronous and avoids depending on an asynchronously rendered
-    # component during session restoration. The component remains responsible
-    # only for writing and clearing cookies in the browser.
-    context_available = False
-    raw = None
-    try:
-        cookies = st.context.cookies
-        context_available = True
-        raw = cookies.get(COOKIE_NAME)
-    except (AttributeError, RuntimeError):
-        pass
-
-    # Preserve compatibility with older Streamlit versions and bare unit-test
-    # contexts that do not expose st.context.cookies.
-    if not context_available:
-        cm = _cookie_mgr()
-        if cm is None:
-            return None
-        raw = cm.get(COOKIE_NAME)
-
+    cm = _cookie_mgr()
+    if cm is None:
+        return None
+    raw = cm.get(COOKIE_NAME)
     if not raw:
         return None
     try:
         return json.loads(raw)
-    except (TypeError, json.JSONDecodeError):
-        try:
-            return json.loads(unquote(raw))
-        except (TypeError, json.JSONDecodeError):
-            return None
+    except Exception:
+        return None
 
 
 def _cookie_set(payload: dict) -> None:
@@ -130,13 +102,11 @@ def _cookie_set(payload: dict) -> None:
             json.dumps(payload),
             expires_at=expires_dt,
         )
-        st.session_state.pop("_auth_cookie_cleared", None)
     except Exception:
         pass
 
 
 def _cookie_clear() -> None:
-    st.session_state["_auth_cookie_cleared"] = True
     cm = _cookie_mgr()
     if cm is None:
         return
@@ -150,8 +120,6 @@ def _restore_auth_from_cookie_if_needed() -> None:
     _ensure_auth_state()
 
     if st.session_state.auth.get("access_token"):
-        return
-    if st.session_state.get("_auth_cookie_cleared"):
         return
 
     data = _cookie_get()
@@ -224,9 +192,7 @@ def _refresh_session_if_needed() -> None:
 
     try:
         resp = sb().auth.refresh_session(refresh_token)
-        session = getattr(resp, "session", None) or (
-            resp.get("session") if isinstance(resp, dict) else None
-        )
+        session = getattr(resp, "session", None) or (resp.get("session") if isinstance(resp, dict) else None)
 
         if not session:
             if _token_is_expired(access_token):
@@ -280,37 +246,17 @@ def auth_headers() -> Dict[str, str]:
     return {"Authorization": f"Bearer {tok}"} if tok else {}
 
 
-def current_user_id_hint() -> Optional[str]:
-    """Return the JWT subject for UI visibility only.
-
-    This client-side decode is never an authorization decision. Internal
-    drawing access is independently verified by the pricing API using the
-    configured Supabase JWKS, issuer, audience, and server-side allowlist.
-    """
-
-    if not is_logged_in():
-        return None
-    token = st.session_state.auth.get("access_token")
-    payload = _jwt_payload(token) if token else None
-    subject = payload.get("sub") if payload else None
-    return str(subject) if subject else None
-
-
 def require_login(message: str = "Log in in the sidebar to continue.") -> None:
     if not is_logged_in():
         st.info(message)
         st.stop()
 
 
-def api_get(
-    path: str, *, params: dict | None = None, timeout: int = 30
-) -> requests.Response:
+def api_get(path: str, *, params: dict | None = None, timeout: int = 30) -> requests.Response:
     if not API_BASE:
         st.error("The O-Plates pricing service is not configured.")
         st.stop()
-    return requests.get(
-        f"{API_BASE}{path}", headers=auth_headers(), params=params, timeout=timeout
-    )
+    return requests.get(f"{API_BASE}{path}", headers=auth_headers(), params=params, timeout=timeout)
 
 
 # ----------------------------
@@ -337,9 +283,7 @@ def render_auth_sidebar(*, show_debug: bool = False) -> None:
         st.subheader("Account")
 
         if not is_logged_in():
-            email = st.text_input(
-                "Email", value=st.session_state.auth.get("email") or ""
-            ).strip()
+            email = st.text_input("Email", value=st.session_state.auth.get("email") or "").strip()
 
             c1, c2 = st.columns(2)
             send_code = c1.button("Send code")
@@ -360,17 +304,7 @@ def render_auth_sidebar(*, show_debug: bool = False) -> None:
                         )
                         st.session_state.auth["email"] = email
                         st.success("Check your email for the sign-in code.")
-                    except Exception as exc:
-                        # Keep the customer-facing response generic, but retain the
-                        # provider's non-sensitive classification for internal
-                        # owner-acceptance diagnostics. Never log the email, token,
-                        # API key, or exception message here.
-                        logger.warning(
-                            "Supabase OTP send failed: exception=%s status=%s code=%s",
-                            type(exc).__name__,
-                            getattr(exc, "status", None),
-                            getattr(exc, "code", None),
-                        )
+                    except Exception:
                         st.error("We couldn’t send a sign-in code. Please try again.")
 
             if verify_code:
@@ -403,10 +337,9 @@ def render_auth_sidebar(*, show_debug: bool = False) -> None:
                             }
                         )
                         st.success("You’re logged in.")
+                        st.rerun()
                     except Exception:
-                        st.error(
-                            "That sign-in code is invalid or expired. Request a new code."
-                        )
+                        st.error("That sign-in code is invalid or expired. Request a new code.")
 
         else:
             st.success(f"Logged in as {st.session_state.auth.get('email')}")
@@ -415,6 +348,12 @@ def render_auth_sidebar(*, show_debug: bool = False) -> None:
 
         if show_debug:
             st.divider()
-            st.write(
-                "Has access token:", bool(st.session_state.auth.get("access_token"))
-            )
+            st.write("Has access token:", bool(st.session_state.auth.get("access_token")))
+
+
+def api_post(path: str, *, payload: dict, timeout: int = 60) -> requests.Response:
+    """Authenticated server-side POST; tokens stay out of URLs and access logs."""
+    if not API_BASE:
+        st.error("The O-Plates pricing service is not configured.")
+        st.stop()
+    return requests.post(f"{API_BASE}{path}", headers=auth_headers(), json=payload, timeout=timeout)
