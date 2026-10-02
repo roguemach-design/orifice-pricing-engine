@@ -957,7 +957,7 @@ def admin_reset_config():
 def _checkout_recovery_reference(customer_id, idempotency_key, kind):
     # Enabled only for the existing authenticated, allowlisted owner-test path.
     if (
-        APP_ENV != "preview"
+        APP_ENV not in {"preview", "staging"}
         or not _drawing_assisted_feature_enabled()
         or customer_id not in _drawing_assisted_allowed_user_ids()
         or not idempotency_key
@@ -974,7 +974,7 @@ def checkout_recovery(
     customer_id: str = Depends(_require_internal_drawing_user_id),
 ):
     """Read an owner's pending snapshot; never mark paid or restore an old price."""
-    if APP_ENV != "preview" or not re.fullmatch(r"[0-9a-f]{64}", reference):
+    if APP_ENV not in {"preview", "staging"} or not re.fullmatch(r"[0-9a-f]{64}", reference):
         raise HTTPException(status_code=404, detail="Recovery unavailable")
     _db_required()
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
@@ -1680,21 +1680,22 @@ async def stripe_webhook(request: Request):
         "status": "completed" if processed else "already_completed",
     }
 
+def _frozen_plate_order_snapshot(order_id):
+    """Load the committed server-owned order for immutable manufacturing output."""
+    _db_required()
+    db = SessionLocal()
+    try:
+        order = db.query(Order).filter(Order.id == order_id, Order.status == "completed").first()
+        if not order or not order.customer_id:
+            raise HTTPException(404, "Completed customer order not found")
+        return {"id": order.id, "customer_id": order.customer_id,
+                "quote_payload": copy.deepcopy(order.quote_payload)}
+    finally:
+        db.close()
+
+
 # Phase 5 is explicitly staging-only and uses a separate database connection.
 if APP_ENV == "staging" and os.environ.get("FROZEN_PLATE_DATABASE_URL"):
     from frozen_plate.api import router as frozen_plate_router
-
-    def _frozen_plate_order_snapshot(order_id):
-        _db_required()
-        db = SessionLocal()
-        try:
-            order = db.query(Order).filter(Order.id == order_id, Order.status == "completed").first()
-            if not order or not order.customer_id:
-                raise HTTPException(404, "Completed customer order not found")
-            return {"id": order.id, "customer_id": order.customer_id,
-                    "quote_payload": copy.deepcopy(order.quote_payload)}
-        finally:
-            db.close()
-
     app.include_router(frozen_plate_router(_require_customer_user_id, _rate_limit_admin,
                                           _frozen_plate_order_snapshot))
