@@ -7,6 +7,8 @@ Never prints credentials, tokens, MIME, artifacts, or exception bodies.
 from dataclasses import replace
 from uuid import uuid4
 import json
+from email.parser import BytesParser
+from email import policy
 
 from .staging import StagingRepository
 from .repository import WorkflowError, digest
@@ -18,9 +20,41 @@ def main():
     try:
         repo = StagingRepository()
         with repo.connect() as db:
-            row = db.execute("SELECT current_user AS role").fetchone()
-            checks["restricted_database_login"] = (
-                row["role"] == "frozen_plate_staging_api"
+            row = db.execute(
+                "SELECT current_user AS role, rolsuper,rolbypassrls,rolcreatedb,rolcreaterole,rolreplication FROM pg_roles WHERE rolname=current_user"
+            ).fetchone()
+            checks["restricted_database_login"] = row[
+                "role"
+            ] == "frozen_plate_staging_api" and not any(
+                row[k]
+                for k in (
+                    "rolsuper",
+                    "rolbypassrls",
+                    "rolcreatedb",
+                    "rolcreaterole",
+                    "rolreplication",
+                )
+            )
+            tables = list(
+                db.execute(
+                    "SELECT tablename,rowsecurity,has_table_privilege(current_user,quote_ident(schemaname)||'.'||quote_ident(tablename),'SELECT,INSERT') AS backend,has_table_privilege('anon',quote_ident(schemaname)||'.'||quote_ident(tablename),'SELECT') AS anon_read,has_table_privilege('authenticated',quote_ident(schemaname)||'.'||quote_ident(tablename),'SELECT') AS customer_read,has_table_privilege(current_user,quote_ident(schemaname)||'.'||quote_ident(tablename),'DELETE') AS backend_delete FROM pg_tables WHERE schemaname='frozen_plate_prototype'"
+                )
+            )
+            checks["schema_rls_permissions"] = len(tables) == 8 and all(
+                t["rowsecurity"]
+                and t["backend"]
+                and not t["anon_read"]
+                and not t["customer_read"]
+                and not t["backend_delete"]
+                for t in tables
+            )
+            policies = list(
+                db.execute(
+                    "SELECT roles FROM pg_policies WHERE schemaname='frozen_plate_prototype'"
+                )
+            )
+            checks["role_scoped_rls"] = len(policies) == 17 and all(
+                p["roles"] == ["frozen_plate_staging_api"] for p in policies
             )
         # Bucket provisioning is idempotent, never switches an existing bucket public.
         response = repo.storage.client.get("/bucket/" + repo.storage.bucket)
@@ -87,7 +121,35 @@ def main():
         )
         filename, pdf = repo.customer_pdf(token, customer)
         checks["pdf_hash"] = digest(pdf) == revision["artifacts"]["pdf"]["sha256"]
+        checks["artifact_hashes_sizes"] = all(
+            digest(repo.storage.get(a["object_key"])) == a["sha256"]
+            and len(repo.storage.get(a["object_key"])) == a["size"]
+            for a in revision["artifacts"].values()
+        )
+        captured = repo.storage.get("confirmation/" + delivery["id"] + ".eml")
+        message = BytesParser(policy=policy.default).parsebytes(captured)
+        attachments = list(message.iter_attachments())
+        checks["captured_exact_pdf"] = (
+            captured == delivery["mime"]
+            and len(attachments) == 1
+            and attachments[0].get_payload(decode=True) == pdf
+        )
+
+        def rejects(action):
+            try:
+                action()
+            except WorkflowError:
+                return True
+            return False
+
+        checks["tamper_rejected"] = rejects(lambda: repo.approve(token + "x", customer))
+        checks["wrong_owner_rejected"] = rejects(
+            lambda: repo.approve(token, customer + "other")
+        )
         checks["approval"] = repo.approve(token, customer)["state"] == "approved"
+        checks["approval_idempotent"] = (
+            repo.approve(token, customer)["state"] == "approved"
+        )
         for route in ("SENDCUTSEND", "ALRO", "ROGUE_INTERNAL"):
             checks["route_" + route] = (
                 repo.select_source(revision["id"], route, actor="staging-verification")[
@@ -111,13 +173,28 @@ def main():
             checks["stale_release_blocked"] = False
         except WorkflowError:
             checks["stale_release_blocked"] = True
+        checks["r2_not_approved_by_r1"] = (
+            repo.plate(plate)["lifecycle"] == "READY_FOR_CUSTOMER_CONFIRMATION"
+            and repo.approve(token, customer)["historical"]
+        )
+        r2_delivery = repo.create_delivery(r2["id"])
+        checks["r2_approval"] = (
+            repo.approve(r2_delivery["token"], customer)["context"]["revision"] == "R2"
+        )
         checks["emails_sent"] = False
         checks["vendor_files_submitted"] = False
+        passed = all(
+            value
+            is (False if name in ("emails_sent", "vendor_files_submitted") else True)
+            for name, value in checks.items()
+        )
         print(
             json.dumps(
-                {"verification_completed": True, "checks": checks}, sort_keys=True
+                {"verification_completed": passed, "checks": checks}, sort_keys=True
             )
         )
+        if not passed:
+            raise SystemExit(1)
     except Exception as exc:
         print(
             json.dumps(

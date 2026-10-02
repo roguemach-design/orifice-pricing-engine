@@ -135,6 +135,36 @@ class Repository:
             )
         return plate_id
 
+    def ensure_order_plate(
+        self, *, order_id, line_id, configuration_id, customer_id, actor
+    ):
+        """Serialize identity lookup/creation in the same transaction."""
+        for value in (order_id, line_id, configuration_id, customer_id, actor):
+            identifier(value)
+        with self.transaction() as db:
+            existing = db.execute(
+                "SELECT id,customer_id FROM frozen_plates WHERE order_id=? AND line_id=?",
+                (order_id, line_id),
+            ).fetchone()
+            if existing:
+                if existing["customer_id"] != customer_id:
+                    raise WorkflowError("order ownership mismatch")
+                return existing["id"]
+            plate_id = str(uuid4())
+            db.execute(
+                "INSERT INTO frozen_plates(id,order_id,line_id,configuration_id,customer_id,created_at,created_by) VALUES (?,?,?,?,?,?,?)",
+                (
+                    plate_id,
+                    order_id,
+                    line_id,
+                    configuration_id,
+                    customer_id,
+                    self.now(),
+                    actor,
+                ),
+            )
+            return plate_id
+
     @staticmethod
     def _one(db, query, args):
         row = db.execute(query, args).fetchone()

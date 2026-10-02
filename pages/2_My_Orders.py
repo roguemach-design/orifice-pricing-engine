@@ -8,7 +8,6 @@ import streamlit as st
 
 from auth import render_auth_sidebar, require_login, api_get
 
-
 # ----------------------------
 # Shared sidebar + guardrail
 # ----------------------------
@@ -32,7 +31,9 @@ def _dt(x: str) -> str:
     try:
         if not x:
             return ""
-        return datetime.fromisoformat(x.replace("Z", "+00:00")).strftime("%Y-%m-%d %H:%M")
+        return datetime.fromisoformat(x.replace("Z", "+00:00")).strftime(
+            "%Y-%m-%d %H:%M"
+        )
     except Exception:
         return str(x)
 
@@ -196,6 +197,19 @@ if qp:
 
     st.subheader("Configured inputs")
     st.dataframe(_kv_table(qp), use_container_width=True, hide_index=True)
+    if qp.get("chamfer") and any(
+        qp.get(k) is None
+        for k in (
+            "chamfer_width",
+            "chamfer_angle_degrees",
+            "chamfer_side",
+            "flow_orientation",
+            "chamfer_width_definition",
+        )
+    ):
+        st.warning(
+            "HOLD: chamfer angle, side, flow direction and width convention require review before a drawing can be approved."
+        )
 
 st.divider()
 
@@ -227,27 +241,44 @@ if frozen_response.status_code == 200:
             continue
         session_key = "frozen-confirmation-" + plate["current_revision"]
         if st.button("Review attached drawing", key="review-" + plate["id"]):
-            response = api_post(f"/me/frozen-plates/{plate['id']}/confirmation", payload={})
+            response = api_post(
+                f"/me/frozen-plates/{plate['id']}/confirmation", payload={}
+            )
             if response.status_code == 200:
                 st.session_state[session_key] = response.json()
             else:
-                st.error("This drawing is no longer available for confirmation. Refresh your order.")
+                st.error(
+                    "This drawing is no longer available for confirmation. Refresh your order."
+                )
         confirmation = st.session_state.get(session_key)
         if confirmation:
             context = confirmation["context"]
-            st.write(f"Drawing {context['drawing']} · {context['revision']} · Quantity {context['quantity']}")
-            pdf_response = api_post("/me/frozen-plates/pdf", payload={"token": confirmation["token"]})
+            st.write(
+                f"Drawing {context['drawing']} · {context['revision']} · Quantity {context['quantity']}"
+            )
+            pdf_response = api_post(
+                "/me/frozen-plates/pdf", payload={"token": confirmation["token"]}
+            )
             if pdf_response.status_code != 200:
                 st.error("The drawing could not be verified. Refresh your order.")
                 continue
-            st.download_button("Download drawing PDF", pdf_response.content,
-                               file_name=context["filename"], mime="application/pdf",
-                               key="pdf-" + plate["id"])
+            st.download_button(
+                "Download drawing PDF",
+                pdf_response.content,
+                file_name=context["filename"],
+                mime="application/pdf",
+                key="pdf-" + plate["id"],
+            )
             st.write(APPROVAL_COPY)
             if st.button(BUTTON, key="approve-" + plate["id"]):
-                response = api_post("/me/frozen-plates/approve", payload={"token": confirmation["token"]})
+                response = api_post(
+                    "/me/frozen-plates/approve",
+                    payload={"token": confirmation["token"]},
+                )
                 if response.status_code == 200:
                     st.session_state.pop(session_key, None)
                     st.success("YOUR ORDER IS IN PRODUCTION")
                 else:
-                    st.error("Approval was not recorded. Refresh to review the current drawing.")
+                    st.error(
+                        "Approval was not recorded. Refresh to review the current drawing."
+                    )

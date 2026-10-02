@@ -292,6 +292,8 @@ def _rate_limit_admin(_: None = Depends(_require_admin_key)) -> None:
 
 
 def _send_email(to_email: str, subject: str, html: str) -> None:
+    if APP_ENV == "staging" and os.environ.get("FROZEN_PLATE_EMAIL_MODE") == "capture":
+        return
     if not SENDGRID_API_KEY:
         return
     msg = Mail(from_email=FROM_EMAIL, to_emails=to_email, subject=subject, html_content=html)
@@ -1437,6 +1439,15 @@ async def stripe_webhook(request: Request):
         ) from exc
     finally:
         db.close()
+
+    # Retry-safe staging integration after the completed order has committed.
+    if APP_ENV == "staging" and os.environ.get("FROZEN_PLATE_DATABASE_URL"):
+        from frozen_plate.api import repository as frozen_repository
+        from frozen_plate.orders import complete_order
+        try:
+            complete_order(frozen_repository(), _frozen_plate_order_snapshot(order.id))
+        except Exception:
+            raise HTTPException(503, "Staging drawing capture unavailable; retry completion") from None
 
     # Customer email is a post-commit, best-effort side effect. Replayed
     # webhooks see the completed row and do not send it again.

@@ -176,4 +176,13 @@ class StagingRepository(Repository):
         return result
 
     def create_delivery(self, revision_id, *, base_url=API_ORIGIN):
-        return super().create_delivery(revision_id, base_url=base_url)
+        delivery = super().create_delivery(revision_id, base_url=base_url)
+        object_key = "confirmation/" + delivery["id"] + ".eml"
+        try:
+            self.storage.put(object_key, delivery["mime"])
+            if self.storage.get(object_key) != delivery["mime"]:
+                raise WorkflowError("captured confirmation bytes differ")
+        except Exception:
+            self.storage.remove([object_key])
+            raise WorkflowError("confirmation capture unavailable") from None
+        return delivery

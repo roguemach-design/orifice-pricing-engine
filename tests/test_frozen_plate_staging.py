@@ -15,6 +15,139 @@ from frozen_plate.staging import (
 from prototype_manufacturing import sample_spec
 
 
+def order_snapshot(chamfer=False):
+    return {
+        "id": "order-test",
+        "customer_id": "customer1",
+        "quote_payload": {
+            "paddle_dia": 5.0,
+            "bore_dia": 1.548,
+            "handle_width": 2.0,
+            "handle_length_from_bore": 10.5,
+            "material": "304 Stainless Steel",
+            "thickness": 0.125,
+            "bore_tolerance": 0.002,
+            "chamfer": chamfer,
+            "handle_label": "No label",
+            "quantity": 1,
+        },
+    }
+
+
+def test_completed_order_retries_and_holds(tmp_path):
+    from frozen_plate.orders import complete_order
+
+    repo = Repository(tmp_path, "test-key" * 12)
+    snapshot = order_snapshot()
+    first = complete_order(repo, snapshot)
+    assert first == complete_order(repo, snapshot)
+    assert first[0]["state"] == "FROZEN"
+    with repo.connect() as db:
+        assert (
+            db.execute("SELECT COUNT(*) FROM frozen_plate_revisions").fetchone()[0] == 1
+        )
+    bad = order_snapshot(True)
+    bad["id"] = "incomplete-chamfer"
+    assert complete_order(repo, bad) == [{"line_id": "line-1", "state": "HOLD"}]
+    with repo.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM frozen_plates").fetchone()[0] == 1
+
+
+def test_completed_order_concurrent_identity_and_revision(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from frozen_plate.orders import complete_order
+
+    repo = Repository(tmp_path, "test-key" * 12)
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        results = list(
+            pool.map(lambda _: complete_order(repo, order_snapshot()), range(3))
+        )
+    assert results[0] == results[1] == results[2]
+    with repo.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM frozen_plates").fetchone()[0] == 1
+        assert (
+            db.execute("SELECT COUNT(*) FROM frozen_plate_revisions").fetchone()[0] == 1
+        )
+
+
+def test_safe_email_landing_and_validation_wrapper(tmp_path, monkeypatch):
+    repo = Repository(tmp_path, "test-key" * 12)
+    monkeypatch.setattr(api, "repository", lambda: repo)
+    app = FastAPI()
+    app.include_router(
+        api.router(lambda: "customer1", lambda: None, lambda _: order_snapshot(True))
+    )
+    client = TestClient(app)
+    for method in ("get", "head"):
+        response = getattr(client, method)("/approve/opaque-token")
+        assert response.status_code == 200
+        assert response.headers["referrer-policy"] == "no-referrer"
+        assert "<script" not in response.text and 'method="post"' not in response.text
+    response = client.post(
+        "/admin/frozen-plates/orders/order-test",
+        json={"line_index": 0, "part_identifier": "TEST", "reason": "test"},
+    )
+    assert response.status_code == 409
+    with repo.connect() as db:
+        assert db.execute("SELECT COUNT(*) FROM frozen_plates").fetchone()[0] == 0
+
+
+def test_order_change_requires_explicit_revision(tmp_path):
+    from frozen_plate.orders import complete_order, freeze_line
+
+    repo = Repository(tmp_path, "test-key" * 12)
+    snapshot = order_snapshot()
+    first = complete_order(repo, snapshot)[0]
+    snapshot["quote_payload"]["bore_dia"] = 1.6
+    assert complete_order(repo, snapshot)[0]["state"] == "HOLD"
+    r2 = freeze_line(
+        repo,
+        snapshot,
+        0,
+        "REVIEWED",
+        revision=True,
+        expected_current=first["revision_id"],
+        reason="Reviewed change",
+    )
+    assert r2["number"] == 2 and r2["plate_id"] == first["plate_id"]
+
+
+def test_remote_partial_upload_is_removed_before_readiness(tmp_path):
+    class FailingRemote(Repository):
+        _publish_objects = StagingRepository._publish_objects
+        _remove_uncommitted_objects = StagingRepository._remove_uncommitted_objects
+
+    class Storage:
+        def __init__(self):
+            self.data = {}
+
+        def put(self, key, data):
+            if self.data:
+                raise WorkflowError("injected storage failure")
+            self.data[key] = data
+
+        def get(self, key):
+            return self.data[key]
+
+        def remove(self, keys):
+            for key in keys:
+                self.data.pop(key, None)
+
+    from frozen_plate.orders import complete_order
+
+    repo = FailingRemote(tmp_path, "test-key" * 12)
+    repo.storage = Storage()
+    assert complete_order(repo, order_snapshot())[0]["state"] == "HOLD"
+    assert repo.storage.data == {}
+    with repo.connect() as db:
+        assert (
+            db.execute("SELECT COUNT(*) FROM frozen_plate_revisions").fetchone()[0] == 0
+        )
+        assert (
+            db.execute("SELECT lifecycle FROM frozen_plates").fetchone()[0] == "EMPTY"
+        )
+
+
 def test_storage_rejects_paths_and_hides_error_bodies(monkeypatch):
     monkeypatch.setattr("frozen_plate.staging.httpx.Client", Mock())
     store = PrivateStorage(

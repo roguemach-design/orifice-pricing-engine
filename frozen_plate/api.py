@@ -5,13 +5,16 @@ from hashlib import sha256
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import Response, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from .order_adapter import specification_from_order
 from .repository import WorkflowError, canonical
-from .presentation import success_html
+from .presentation import success_html, page
 from .staging import StagingRepository
+from .orders import freeze_line, complete_order
+from html import escape
+from urllib.parse import quote
 
 
 class FreezeRequest(BaseModel):
@@ -40,6 +43,15 @@ def repository():
 def router(customer_auth, admin_auth, load_order):
     routes = APIRouter()
 
+    def _records(repo, table, revision_id):
+        with repo.connect() as db:
+            return [
+                dict(r)
+                for r in db.execute(
+                    f"SELECT * FROM {table} WHERE revision_id=?", (revision_id,)
+                )
+            ]
+
     def run(action):
         try:
             return action()
@@ -52,37 +64,80 @@ def router(customer_auth, admin_auth, load_order):
         "/admin/frozen-plates/orders/{order_id}", dependencies=[Depends(admin_auth)]
     )
     def freeze(order_id: str, body: FreezeRequest):
-        snapshot = load_order(order_id)
-        spec, source = specification_from_order(
-            snapshot, line_index=body.line_index, part_identifier=body.part_identifier
-        )
-        repo = repository()
-        line_id = "line-" + str(body.line_index + 1)
-        with repo.connect() as db:
-            row = db.execute(
-                "SELECT id FROM frozen_plates WHERE order_id=? AND line_id=?",
-                (order_id, line_id),
-            ).fetchone()
-        plate_id = (
-            row["id"]
-            if row
-            else repo.create_plate(
-                order_id=order_id,
-                line_id=line_id,
-                configuration_id=sha256(canonical(source).encode()).hexdigest()[:40],
-                customer_id=snapshot["customer_id"],
-                actor="staging-admin",
-            )
-        )
         return run(
-            lambda: repo.create_revision(
-                plate_id,
-                spec,
+            lambda: freeze_line(
+                repository(),
+                load_order(order_id),
+                body.line_index,
+                body.part_identifier,
                 expected_current=body.expected_current,
                 reason=body.reason,
-                actor="staging-admin",
-                source_snapshot=source,
+                revision=True,
             )
+        )
+
+    @routes.post(
+        "/admin/frozen-plates/orders/{order_id}/complete",
+        dependencies=[Depends(admin_auth)],
+    )
+    def retry_completed(order_id: str):
+        return run(lambda: complete_order(repository(), load_order(order_id)))
+
+    @routes.api_route("/approve/{token}", methods=["GET", "HEAD"])
+    def landing(token: str):
+        # No token resolution or mutation on passive requests. No automatic approval POST.
+        if len(token) > 2048:
+            raise HTTPException(400, "Invalid link")
+        url = (
+            "https://oplates-customer-ui-staging.onrender.com/Drawing_Approval?token="
+            + quote(token, safe="")
+        )
+        return HTMLResponse(
+            page(
+                '<h1>Review your attached drawing</h1><p>Sign in to review the exact PDF and deliberately approve it.</p><a class="button" href="'
+                + escape(url, quote=True)
+                + '">SIGN IN &amp; REVIEW DRAWING</a>'
+            ),
+            headers={
+                "Cache-Control": "no-store",
+                "Referrer-Policy": "no-referrer",
+                "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'",
+            },
+        )
+
+    @routes.get("/admin/frozen-plates", dependencies=[Depends(admin_auth)])
+    def plates(order_id: str):
+        with repository().connect() as db:
+            return [
+                dict(r)
+                for r in db.execute(
+                    "SELECT * FROM frozen_plates WHERE order_id=? ORDER BY line_id",
+                    (order_id,),
+                )
+            ]
+
+    @routes.get(
+        "/admin/frozen-plates/deliveries/{delivery_id}/capture",
+        dependencies=[Depends(admin_auth)],
+    )
+    def capture(delivery_id: str):
+        def read():
+            repo = repository()
+            with repo.connect() as db:
+                delivery = repo._one(
+                    db,
+                    "SELECT * FROM frozen_plate_deliveries WHERE id=?",
+                    (delivery_id,),
+                )
+            content = repo.storage.get("confirmation/" + delivery["id"] + ".eml")
+            if sha256(content).hexdigest() != delivery["mime_sha256"]:
+                raise WorkflowError("capture integrity failure")
+            return content
+
+        return Response(
+            run(read),
+            media_type="message/rfc822",
+            headers={"Cache-Control": "no-store"},
         )
 
     @routes.get("/me/orders/{order_id}/frozen-plates")
@@ -151,6 +206,15 @@ def router(customer_auth, admin_auth, load_order):
                 repo.revision(plate["current_revision"])
                 if plate["current_revision"]
                 else None
+            ),
+            "deliveries": _records(
+                repo, "frozen_plate_deliveries", plate["current_revision"]
+            ),
+            "approvals": _records(
+                repo, "frozen_plate_approvals", plate["current_revision"]
+            ),
+            "sourcing": _records(
+                repo, "frozen_plate_sourcing", plate["current_revision"]
             ),
         }
 
