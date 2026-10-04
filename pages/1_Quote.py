@@ -1077,6 +1077,7 @@ with right:
             chamfer = st.checkbox("Chamfer", value=False)
             st.session_state[_FORM_KEYS["chamfer"]] = chamfer
         chamfer_width = None
+        chamfer_details = {}
         if chamfer is True:
             chamfer_width = _number_field(
                 "Chamfer Width (in.)",
@@ -1091,6 +1092,34 @@ with right:
                 st.caption(
                     "Enter a chamfer width and press Enter or click outside the field to apply it."
                 )
+            if OWNER_ACCEPTANCE_MODE and not drawing_mode:
+                chamfer_details = {
+                    "chamfer_angle_degrees": st.number_input(
+                        "Chamfer angle from face (degrees)", min_value=0.1,
+                        max_value=89.9, value=None, step=0.1,
+                        key="staging_chamfer_angle", placeholder="Enter angle",
+                    ),
+                    "chamfer_side": st.selectbox(
+                        "Chamfer side", ["upstream", "downstream"], index=None,
+                        key="staging_chamfer_side", placeholder="Select side",
+                    ),
+                    "flow_orientation": st.selectbox(
+                        "Flow orientation in section", ["left-to-right", "right-to-left"],
+                        index=None, key="staging_chamfer_flow", placeholder="Select flow",
+                    ),
+                    "chamfer_width_definition": st.selectbox(
+                        "Chamfer width definition",
+                        ["radial-angle-from-face", "axial-depth-angle-from-face"],
+                        index=None, key="staging_chamfer_definition",
+                        placeholder="Select width definition",
+                        format_func=lambda v: {
+                            "radial-angle-from-face": "Radial width; angle measured from face",
+                            "axial-depth-angle-from-face": "Axial depth; angle measured from face",
+                        }[v],
+                    ),
+                }
+                if any(v is None for v in chamfer_details.values()):
+                    st.warning("Drawing HOLD: complete the explicit chamfer configuration before drawing approval.")
 
         st.caption("DELIVERY")
         ships_in_days = _select_field(
@@ -1338,6 +1367,7 @@ if all(
         "chamfer_width": (float(chamfer_width) if chamfer_width is not None else None),
         "handle_label": (handle_label or "").strip() or "No label",
         "ships_in_days": int(ships_in_days),
+        **chamfer_details,
     }
 
 result = None

@@ -719,6 +719,41 @@ def test_manual_chamfer_waits_for_width_before_requesting_price(
         assert quote_calls[-1]["chamfer_width"] == 0.0625
 
 
+def test_staging_manual_chamfer_requires_explicit_geometry(monkeypatch, active_config):
+    from streamlit.testing.v1 import AppTest
+
+    monkeypatch.setenv("API_BASE", "http://test")
+    monkeypatch.setenv("OPLATES_OWNER_ACCEPTANCE_MODE", "true")
+    monkeypatch.delenv("OPLATES_DRAWING_ASSISTED_ENABLED", raising=False)
+    monkeypatch.setattr(auth, "API_BASE", "http://test")
+    calls = []
+
+    def quote(url, **kwargs):
+        calls.append(kwargs["json"])
+        return _Response({"unit_price": 100.0, "total_price": 100.0, "configuration_id": "test"})
+
+    with patch("requests.get", lambda *a, **k: _Response(active_config)), patch("requests.post", quote):
+        app = AppTest.from_file(str(ROOT / "pages" / "1_Quote.py"), default_timeout=20).run()
+        next(f for f in app.checkbox if f.label == "Chamfer").set_value(True).run()
+        assert app.number_input(key="staging_chamfer_angle").value is None
+        assert app.selectbox(key="staging_chamfer_side").value is None
+        next(f for f in app.number_input if f.label == "Chamfer Width (in.)").set_value(0.02).run()
+        assert any("Drawing HOLD" in w.value for w in app.warning)
+        app.number_input(key="staging_chamfer_angle").set_value(45)
+        app.selectbox(key="staging_chamfer_side").set_value("downstream")
+        app.selectbox(key="staging_chamfer_flow").set_value("left-to-right")
+        app.selectbox(key="staging_chamfer_definition").set_value("radial-angle-from-face")
+        app.run()
+        assert not app.exception
+        assert not any("Drawing HOLD" in w.value for w in app.warning)
+        assert calls[-1]["chamfer_angle_degrees"] == 45
+        assert calls[-1]["chamfer_side"] == "downstream"
+        assert calls[-1]["flow_orientation"] == "left-to-right"
+        assert calls[-1]["chamfer_width_definition"] == "radial-angle-from-face"
+        next(f for f in app.checkbox if f.label == "Chamfer").set_value(False).run()
+        assert "chamfer_angle_degrees" not in calls[-1]
+
+
 def test_signed_out_user_sees_locked_drawing_section(monkeypatch, active_config):
     from streamlit.testing.v1 import AppTest
 

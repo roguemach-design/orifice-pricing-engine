@@ -11,7 +11,7 @@ import secrets
 import time
 from collections import deque
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Literal
 
 import stripe
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -742,6 +742,10 @@ class QuoteRequest(BaseModel):
     # Backward-compatible optional field. The final customer UI reveals this
     # only after Chamfer is selected and never assigns a default width.
     chamfer_width: Optional[float] = Field(default=None)
+    chamfer_angle_degrees: Optional[float] = Field(default=None, gt=0, lt=90, exclude_if=lambda v: v is None)
+    chamfer_side: Optional[Literal["upstream", "downstream"]] = Field(default=None, exclude_if=lambda v: v is None)
+    flow_orientation: Optional[Literal["left-to-right", "right-to-left"]] = Field(default=None, exclude_if=lambda v: v is None)
+    chamfer_width_definition: Optional[Literal["radial-angle-from-face", "axial-depth-angle-from-face"]] = Field(default=None, exclude_if=lambda v: v is None)
 
     @field_validator("handle_label")
     @classmethod
@@ -845,7 +849,7 @@ async def quote(request: Request):
             **result,
             "configuration_id": str(uuid.uuid4()),
             "configuration_schema_version": "1.0",
-            "normalized_configuration": inputs.model_dump(),
+            "normalized_configuration": validated.model_dump(),
             "validation": {"valid": True, "errors": []},
             "warnings": [],
             "currency": "USD",

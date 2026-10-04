@@ -100,6 +100,52 @@ def install_idempotent_stripe(monkeypatch):
     return calls
 
 
+@pytest.mark.parametrize("cart", [False, True])
+def test_complete_chamfer_survives_checkout_and_builds_finished_section(
+    monkeypatch, checkout_client, database, cart
+):
+    from frozen_plate.order_adapter import specification_from_order
+    from section_geometry import build_section_geometry
+
+    install_idempotent_stripe(monkeypatch)
+    monkeypatch.setattr(api_app, "_decode_supabase_user_id_from_bearer", lambda _: "owner-test")
+    values = quote_inputs(
+        chamfer_width=0.02, chamfer_angle_degrees=45,
+        chamfer_side="downstream", flow_orientation="left-to-right",
+        chamfer_width_definition="radial-angle-from-face",
+    )
+    body = {"items": [values]} if cart else {"inputs": values}
+    path = "/checkout/cart/create" if cart else "/checkout/create"
+    response = checkout_client.post(path, json=body, headers={"Authorization": "Bearer test"})
+    assert response.status_code == 200
+    with database() as db:
+        order = db.query(api_app.Order).one()
+        snapshot = {"id": order.id, "customer_id": order.customer_id, "quote_payload": order.quote_payload}
+        spec, _ = specification_from_order(snapshot, line_index=0, part_identifier="STAGING TEST")
+    section = build_section_geometry(spec)
+    assert section.status == "CONFIGURED"
+    assert section.angle_degrees == 45
+    assert section.chamfer_radial_width == 0.02
+    assert section.face == "right"
+
+
+def test_width_only_checkout_preserves_incomplete_chamfer_hold(monkeypatch, checkout_client, database):
+    from frozen_plate.order_adapter import specification_from_order
+    from section_geometry import build_section_geometry
+
+    install_idempotent_stripe(monkeypatch)
+    monkeypatch.setattr(api_app, "_decode_supabase_user_id_from_bearer", lambda _: "owner-test")
+    response = checkout_client.post("/checkout/create", json=checkout_body(), headers={"Authorization": "Bearer test"})
+    assert response.status_code == 200
+    with database() as db:
+        order = db.query(api_app.Order).one()
+        spec, _ = specification_from_order(
+            {"id": order.id, "customer_id": order.customer_id, "quote_payload": order.quote_payload},
+            line_index=0, part_identifier="STAGING HOLD",
+        )
+    assert "HOLD" in build_section_geometry(spec).status
+
+
 def completed_session(session_id="cs_test_1", customer_id=""):
     return {
         "id": session_id,
