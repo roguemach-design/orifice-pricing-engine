@@ -1,0 +1,14 @@
+{
+  "corpus_version": "1.0",
+  "document_id": "synthetic-ambiguous-conflict",
+  "synthetic": true,
+  "categories": ["digital_pdf", "ambiguous", "conflicting_values"],
+  "source_document": "ambiguous_conflict.pdf",
+  "expected_fields": {
+    "outside_diameter": {"status": "detected", "value": 8.0, "unit": "in"},
+    "bore_diameter": {"status": "ambiguous"},
+    "thickness": {"status": "detected", "value": 0.25, "unit": "in"},
+    "material": {"status": "detected", "value": "Carbon Steel"}
+  },
+  "expected_validation_codes": []
+}

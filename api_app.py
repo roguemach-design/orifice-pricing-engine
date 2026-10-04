@@ -1,5 +1,8 @@
+from drawing_intake.checkout_context import verify_context
 # api_app.py
 import os
+import hashlib
+import hmac
 import uuid
 import copy
 import threading
@@ -7,8 +10,8 @@ import re
 import secrets
 import time
 from collections import deque
-from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+from datetime import datetime, timezone, timedelta
+from typing import Optional, List, Dict, Any, Literal
 
 import stripe
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
@@ -94,6 +97,7 @@ _CFG_LOCK = threading.Lock()
 RATE_LIMIT_WINDOW_SECONDS = 60
 CHECKOUT_RATE_LIMIT_REQUESTS = 30
 ADMIN_RATE_LIMIT_REQUESTS = 60
+DRAWING_ACCESS_RATE_LIMIT_REQUESTS = 60
 
 
 class _InMemoryRateLimiter:
@@ -292,6 +296,8 @@ def _rate_limit_admin(_: None = Depends(_require_admin_key)) -> None:
 
 
 def _send_email(to_email: str, subject: str, html: str) -> None:
+    if APP_ENV == "staging" and os.environ.get("FROZEN_PLATE_EMAIL_MODE") == "capture":
+        return
     if not SENDGRID_API_KEY:
         return
     msg = Mail(from_email=FROM_EMAIL, to_emails=to_email, subject=subject, html_content=html)
@@ -410,6 +416,45 @@ def _require_customer_user_id(
     user_id = _decode_supabase_user_id_from_bearer(authorization)
     if not user_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
+    return user_id
+
+
+def _drawing_assisted_feature_enabled() -> bool:
+    return (os.environ.get("OPLATES_DRAWING_ASSISTED_ENABLED") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _drawing_assisted_allowed_user_ids() -> frozenset[str]:
+    return frozenset(
+        value.strip()
+        for value in (
+            os.environ.get("OPLATES_DRAWING_ASSISTED_ALLOWED_USER_IDS") or ""
+        ).split(",")
+        if value.strip()
+    )
+
+
+def _require_internal_drawing_user_id(
+    authorization: Optional[str] = Header(default=None, alias="authorization"),
+) -> str:
+    # Hide an entirely disabled internal capability instead of advertising it.
+    if not _drawing_assisted_feature_enabled():
+        raise HTTPException(status_code=404, detail="Not found")
+    user_id = _decode_supabase_user_id_from_bearer(authorization)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    allowed = _drawing_assisted_allowed_user_ids()
+    if not allowed or user_id not in allowed:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    _RATE_LIMITER.check(
+        f"drawing-access:{user_id}",
+        DRAWING_ACCESS_RATE_LIMIT_REQUESTS,
+        RATE_LIMIT_WINDOW_SECONDS,
+    )
     return user_id
 
 
@@ -697,6 +742,10 @@ class QuoteRequest(BaseModel):
     # Backward-compatible optional field. The final customer UI reveals this
     # only after Chamfer is selected and never assigns a default width.
     chamfer_width: Optional[float] = Field(default=None)
+    chamfer_angle_degrees: Optional[float] = Field(default=None, gt=0, lt=90, exclude_if=lambda v: v is None)
+    chamfer_side: Optional[Literal["upstream", "downstream"]] = Field(default=None, exclude_if=lambda v: v is None)
+    flow_orientation: Optional[Literal["left-to-right", "right-to-left"]] = Field(default=None, exclude_if=lambda v: v is None)
+    chamfer_width_definition: Optional[Literal["radial-angle-from-face", "axial-depth-angle-from-face"]] = Field(default=None, exclude_if=lambda v: v is None)
 
     @field_validator("handle_label")
     @classmethod
@@ -713,6 +762,7 @@ class CheckoutCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     inputs: QuoteRequest
+    recovery_context: Optional[dict] = None
     configuration_id: Optional[str] = None
     pricing_config_version: Optional[str] = None
     idempotency_key: Optional[str] = Field(default=None, min_length=16, max_length=100)
@@ -722,6 +772,7 @@ class CartCheckoutCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: List[QuoteRequest]
+    recovery_contexts: Optional[List[Optional[dict]]] = None
     pricing_config_version: Optional[str] = None
     idempotency_key: Optional[str] = Field(default=None, min_length=16, max_length=100)
 
@@ -732,6 +783,19 @@ class CartCheckoutCreateRequest(BaseModel):
 @app.get("/health")
 def health():
     return {"ok": True}
+
+
+@app.get("/internal/drawing-intake/access")
+def internal_drawing_intake_access(
+    user_id: str = Depends(_require_internal_drawing_user_id),
+):
+    """Server-verified gate for the internal-only Streamlit integration.
+
+    Drawing bytes are not accepted by this endpoint. Local OCR remains inside
+    the customer UI server process and only runs after this gate succeeds.
+    """
+
+    return {"enabled": True, "authorized": True, "user_id": user_id}
 
 
 # Public: UI can fetch what is currently enabled without redeploy
@@ -785,7 +849,7 @@ async def quote(request: Request):
             **result,
             "configuration_id": str(uuid.uuid4()),
             "configuration_schema_version": "1.0",
-            "normalized_configuration": inputs.model_dump(),
+            "normalized_configuration": validated.model_dump(),
             "validation": {"valid": True, "errors": []},
             "warnings": [],
             "currency": "USD",
@@ -806,7 +870,6 @@ async def quote(request: Request):
     except Exception as e:
         # unexpected
         raise HTTPException(status_code=500, detail=f"Unhandled quote error: {type(e).__name__}: {e}")
-
 
 
 # ----------------------------
@@ -895,6 +958,62 @@ def admin_reset_config():
         db.close()
 
 
+def _checkout_recovery_reference(customer_id, idempotency_key, kind):
+    # Enabled only for the existing authenticated, allowlisted owner-test path.
+    if (
+        APP_ENV not in {"preview", "staging"}
+        or not _drawing_assisted_feature_enabled()
+        or customer_id not in _drawing_assisted_allowed_user_ids()
+        or not idempotency_key
+        or not API_KEY
+    ):
+        return None
+    message = f"checkout-recovery:v1:{kind}:{customer_id}:{idempotency_key}"
+    return hmac.new(API_KEY.encode(), message.encode(), hashlib.sha256).hexdigest()
+
+
+@app.get("/checkout/recovery/{reference}")
+def checkout_recovery(
+    reference: str,
+    customer_id: str = Depends(_require_internal_drawing_user_id),
+):
+    """Read an owner's pending snapshot; never mark paid or restore an old price."""
+    if APP_ENV not in {"preview", "staging"} or not re.fullmatch(r"[0-9a-f]{64}", reference):
+        raise HTTPException(status_code=404, detail="Recovery unavailable")
+    _db_required()
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    db = SessionLocal()
+    try:
+        order = (
+            db.query(Order)
+            .filter(
+                Order.customer_id == customer_id,
+                Order.status == "pending",
+                Order.paid_at.is_(None),
+                Order.created_at >= cutoff,
+                Order.quote_payload["_checkout_recovery"]["reference"].as_string()
+                == reference,
+            )
+            .first()
+        )
+        if not order:
+            raise HTTPException(
+                status_code=404, detail="Recovery unavailable or expired"
+            )
+        payload = copy.deepcopy(order.quote_payload)
+        recovery = payload.pop("_checkout_recovery")
+        items = payload.get("cart_items") if recovery["kind"] == "cart" else [payload]
+        # Return only canonical manufacturing inputs, never stored price/payment data.
+        return {
+            "kind": recovery["kind"],
+            "items": [QuoteRequest(**item).model_dump() for item in items],
+            "contexts": recovery.get("contexts", [None] * len(items)),
+            "requires_confirmation": True,
+        }
+    finally:
+        db.close()
+
+
 # ----------------------------
 # Checkout endpoints
 # ----------------------------
@@ -932,10 +1051,33 @@ def checkout_create(
     if missing:
         raise HTTPException(status_code=500, detail=f"Missing shipping fields from pricing engine: {', '.join(missing)}")
 
+    recovery_reference = _checkout_recovery_reference(
+        customer_user_id, req.idempotency_key, "direct"
+    )
+    recovery_contexts = [None]
+    if req.recovery_context is not None:
+        if not recovery_reference:
+            raise HTTPException(
+                status_code=403, detail="Selected-part recovery unavailable"
+            )
+        try:
+            recovery_contexts = [
+                verify_context(
+                    req.recovery_context,
+                    req.inputs.model_dump(),
+                    customer_user_id,
+                    API_KEY,
+                )
+            ]
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail="Invalid selected-part recovery context"
+            )
     checkout_args = dict(
         mode="payment",
         success_url=f"{APP_BASE_URL}/Success?session_id={{CHECKOUT_SESSION_ID}}",
-        cancel_url=f"{APP_BASE_URL}/Quote?checkout=cancelled",
+        cancel_url=f"{APP_BASE_URL}/Quote?checkout=cancelled"
+        + (f"&resume={recovery_reference}" if recovery_reference else ""),
         shipping_address_collection={"allowed_countries": ["US"]},
         line_items=[
             {
@@ -951,7 +1093,10 @@ def checkout_create(
             {
                 "shipping_rate_data": {
                     "type": "fixed_amount",
-                    "fixed_amount": {"amount": int(shipping["ups_ground_cents"]), "currency": "usd"},
+                    "fixed_amount": {
+                        "amount": int(shipping["ups_ground_cents"]),
+                        "currency": "usd",
+                    },
                     "display_name": "UPS Ground",
                     "metadata": {"service": "ups_ground"},
                 }
@@ -959,7 +1104,10 @@ def checkout_create(
             {
                 "shipping_rate_data": {
                     "type": "fixed_amount",
-                    "fixed_amount": {"amount": int(shipping["ups_2day_cents"]), "currency": "usd"},
+                    "fixed_amount": {
+                        "amount": int(shipping["ups_2day_cents"]),
+                        "currency": "usd",
+                    },
                     "display_name": "UPS 2nd Day Air",
                     "metadata": {"service": "ups_2day"},
                 }
@@ -967,7 +1115,10 @@ def checkout_create(
             {
                 "shipping_rate_data": {
                     "type": "fixed_amount",
-                    "fixed_amount": {"amount": int(shipping["ups_nextday_cents"]), "currency": "usd"},
+                    "fixed_amount": {
+                        "amount": int(shipping["ups_nextday_cents"]),
+                        "currency": "usd",
+                    },
                     "display_name": "UPS Next Day Air",
                     "metadata": {"service": "ups_nextday"},
                 }
@@ -985,7 +1136,20 @@ def checkout_create(
 
     _persist_pending_order(
         stripe_session_id=session.id,
-        quote_payload=req.inputs.model_dump(),
+        quote_payload={
+            **req.inputs.model_dump(),
+            **(
+                {
+                    "_checkout_recovery": {
+                        "reference": recovery_reference,
+                        "kind": "direct",
+                        "contexts": recovery_contexts,
+                    }
+                }
+                if recovery_reference
+                else {}
+            ),
+        },
         customer_user_id=customer_user_id,
     )
 
@@ -1039,16 +1203,43 @@ def checkout_cart_create(
 
         normalized_items.append(it.model_dump())
 
+    recovery_reference = _checkout_recovery_reference(
+        customer_user_id, req.idempotency_key, "cart"
+    )
+    recovery_contexts = [None] * len(req.items)
+    if req.recovery_contexts is not None:
+        if not recovery_reference or len(req.recovery_contexts) != len(req.items):
+            raise HTTPException(
+                status_code=400, detail="Invalid selected-part recovery contexts"
+            )
+        try:
+            recovery_contexts = [
+                (
+                    verify_context(
+                        context, item.model_dump(), customer_user_id, API_KEY
+                    )
+                    if context is not None
+                    else None
+                )
+                for context, item in zip(req.recovery_contexts, req.items)
+            ]
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail="Invalid selected-part recovery context"
+            )
     checkout_args = dict(
         mode="payment",
         success_url=f"{APP_BASE_URL}/Success?session_id={{CHECKOUT_SESSION_ID}}",
-        cancel_url=f"{APP_BASE_URL}/Quote_Cart?checkout=cancelled",
+        cancel_url=f"{APP_BASE_URL}/Quote_Cart?checkout=cancelled"
+        + (f"&resume={recovery_reference}" if recovery_reference else ""),
         shipping_address_collection={"allowed_countries": ["US"]},
         line_items=[
             {
                 "price_data": {
                     "currency": "usd",
-                    "product_data": {"name": f"O-Plates Quote Cart ({len(req.items)} items)"},
+                    "product_data": {
+                        "name": f"O-Plates Quote Cart ({len(req.items)} items)"
+                    },
                     "unit_amount": int(total_items_cents),
                 },
                 "quantity": 1,
@@ -1058,7 +1249,10 @@ def checkout_cart_create(
             {
                 "shipping_rate_data": {
                     "type": "fixed_amount",
-                    "fixed_amount": {"amount": int(ship_ground_cents), "currency": "usd"},
+                    "fixed_amount": {
+                        "amount": int(ship_ground_cents),
+                        "currency": "usd",
+                    },
                     "display_name": "UPS Ground",
                     "metadata": {"service": "ups_ground"},
                 }
@@ -1074,7 +1268,10 @@ def checkout_cart_create(
             {
                 "shipping_rate_data": {
                     "type": "fixed_amount",
-                    "fixed_amount": {"amount": int(ship_nextday_cents), "currency": "usd"},
+                    "fixed_amount": {
+                        "amount": int(ship_nextday_cents),
+                        "currency": "usd",
+                    },
                     "display_name": "UPS Next Day Air",
                     "metadata": {"service": "ups_nextday"},
                 }
@@ -1093,7 +1290,20 @@ def checkout_cart_create(
 
     _persist_pending_order(
         stripe_session_id=session.id,
-        quote_payload={"cart_items": normalized_items},
+        quote_payload={
+            "cart_items": normalized_items,
+            **(
+                {
+                    "_checkout_recovery": {
+                        "reference": recovery_reference,
+                        "kind": "cart",
+                        "contexts": recovery_contexts,
+                    }
+                }
+                if recovery_reference
+                else {}
+            ),
+        },
         customer_user_id=customer_user_id,
     )
 
@@ -1337,7 +1547,7 @@ async def stripe_webhook(request: Request):
     try:
         session = stripe.checkout.Session.retrieve(
             session.get("id"),
-            expand=["shipping_cost.shipping_rate", "customer_details", "shipping_details"],
+            expand=["shipping_cost.shipping_rate"],
         )
         if not isinstance(session, dict):
             to_dict = getattr(session, "to_dict_recursive", None) or getattr(
@@ -1401,6 +1611,11 @@ async def stripe_webhook(request: Request):
             )
 
         if order.status == "completed":
+            # A signed replay may repair shipping metadata omitted by an
+            # earlier failed Session expansion, without repeating completion.
+            if not order.shipping_service and shipping_service:
+                order.shipping_service = shipping_service
+                db.commit()
             order_display = _format_order_number(order.order_number) or "OP-????"
         else:
             if not order.customer_id and customer_id:
@@ -1438,6 +1653,15 @@ async def stripe_webhook(request: Request):
     finally:
         db.close()
 
+    # Retry-safe staging integration after the completed order has committed.
+    if APP_ENV == "staging" and os.environ.get("FROZEN_PLATE_DATABASE_URL"):
+        from frozen_plate.api import repository as frozen_repository
+        from frozen_plate.orders import complete_order
+        try:
+            complete_order(frozen_repository(), _frozen_plate_order_snapshot(order.id))
+        except Exception:
+            raise HTTPException(503, "Staging drawing capture unavailable; retry completion") from None
+
     # Customer email is a post-commit, best-effort side effect. Replayed
     # webhooks see the completed row and do not send it again.
     if processed and customer_email:
@@ -1459,3 +1683,23 @@ async def stripe_webhook(request: Request):
         "ok": True,
         "status": "completed" if processed else "already_completed",
     }
+
+def _frozen_plate_order_snapshot(order_id):
+    """Load the committed server-owned order for immutable manufacturing output."""
+    _db_required()
+    db = SessionLocal()
+    try:
+        order = db.query(Order).filter(Order.id == order_id, Order.status == "completed").first()
+        if not order or not order.customer_id:
+            raise HTTPException(404, "Completed customer order not found")
+        return {"id": order.id, "customer_id": order.customer_id,
+                "quote_payload": copy.deepcopy(order.quote_payload)}
+    finally:
+        db.close()
+
+
+# Phase 5 is explicitly staging-only and uses a separate database connection.
+if APP_ENV == "staging" and os.environ.get("FROZEN_PLATE_DATABASE_URL"):
+    from frozen_plate.api import router as frozen_plate_router
+    app.include_router(frozen_plate_router(_require_customer_user_id, _rate_limit_admin,
+                                          _frozen_plate_order_snapshot))

@@ -74,6 +74,7 @@ class Repository:
         self.objects.chmod(0o700)
         self.db_path = self.root / "frozen-plate.sqlite3"
         self.clock, self.ttl_seconds = clock, ttl_seconds
+        self.delivery_origin = "http://127.0.0.1:8765"
         self.signer = URLSafeSerializer(
             signing_key,
             salt="frozen-plate-approval-v1",
@@ -133,6 +134,36 @@ class Repository:
                 ),
             )
         return plate_id
+
+    def ensure_order_plate(
+        self, *, order_id, line_id, configuration_id, customer_id, actor
+    ):
+        """Serialize identity lookup/creation in the same transaction."""
+        for value in (order_id, line_id, configuration_id, customer_id, actor):
+            identifier(value)
+        with self.transaction() as db:
+            existing = db.execute(
+                "SELECT id,customer_id FROM frozen_plates WHERE order_id=? AND line_id=?",
+                (order_id, line_id),
+            ).fetchone()
+            if existing:
+                if existing["customer_id"] != customer_id:
+                    raise WorkflowError("order ownership mismatch")
+                return existing["id"]
+            plate_id = str(uuid4())
+            db.execute(
+                "INSERT INTO frozen_plates(id,order_id,line_id,configuration_id,customer_id,created_at,created_by) VALUES (?,?,?,?,?,?,?)",
+                (
+                    plate_id,
+                    order_id,
+                    line_id,
+                    configuration_id,
+                    customer_id,
+                    self.now(),
+                    actor,
+                ),
+            )
+            return plate_id
 
     @staticmethod
     def _one(db, query, args):
@@ -226,6 +257,7 @@ class Repository:
                         os.fsync(fd)
                     finally:
                         os.close(fd)
+                self._publish_objects(destination)
                 now = self.now()
                 db.execute(
                     "INSERT INTO frozen_plate_revisions VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -283,8 +315,24 @@ class Repository:
                         (revision_id,),
                     ).fetchone()
                 if not exists:
+                    self._remove_uncommitted_objects(destination)
                     shutil.rmtree(destination)
         return self.revision(revision_id)
+
+    def _publish_objects(self, destination):
+        """Storage hook: local bytes are already durably published."""
+
+    def _remove_uncommitted_objects(self, destination):
+        """Storage hook: only called after absence of DB metadata is confirmed."""
+
+    def _read_object(self, key):
+        path = (self.objects / key).resolve()
+        if self.objects not in path.parents:
+            raise WorkflowError("invalid private object key")
+        try:
+            return path.read_bytes()
+        except OSError as exc:
+            raise WorkflowError("artifact unavailable") from exc
 
     def _verified(self, db, revision_id):
         revision = self._one(
@@ -306,13 +354,7 @@ class Repository:
             raise WorkflowError("incomplete frozen artifacts")
         contents = {}
         for kind, artifact in artifacts.items():
-            path = (self.objects / artifact["object_key"]).resolve()
-            if self.objects not in path.parents:
-                raise WorkflowError("invalid private object key")
-            try:
-                content = path.read_bytes()
-            except OSError as exc:
-                raise WorkflowError("artifact unavailable") from exc
+            content = self._read_object(artifact["object_key"])
             if (
                 digest(content) != artifact["sha256"]
                 or len(content) != artifact["size"]
@@ -342,7 +384,7 @@ class Repository:
 
     def create_delivery(self, revision_id, *, base_url="http://127.0.0.1:8765"):
         # Only the local demonstrator origin is allowed. There is no send operation.
-        if base_url != "http://127.0.0.1:8765":
+        if base_url != self.delivery_origin:
             raise WorkflowError("prototype delivery must remain local")
         with self.transaction() as db:
             revision, artifacts, contents = self._verified(db, revision_id)
