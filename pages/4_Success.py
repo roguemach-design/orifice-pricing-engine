@@ -88,7 +88,13 @@ if order.get("shipping_name") or address:
     if address:
         st.text(address)
 
-st.caption("We’ll email the order confirmation and follow up with the approval drawing.")
+if order.get("email_delivery_mode") == "capture":
+    st.caption(
+        "Your order is confirmed. For this staging test, the confirmation email "
+        "and approval drawing are captured internally rather than sent."
+    )
+else:
+    st.caption("We’ll email the order confirmation and follow up with the approval drawing.")
 
 if is_logged_in():
     if st.button("View My Orders"):

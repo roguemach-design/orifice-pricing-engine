@@ -950,6 +950,23 @@ def test_guest_session_confirmation_redacts_customer_pii(database, checkout_clie
     assert "shipping_address" not in response.json()
 
 
+@pytest.mark.parametrize("environment,mode,expected", [
+    ("staging", "capture", "capture"),
+    ("staging", "send", None),
+    ("production", "capture", None),
+])
+def test_success_capture_notice_is_server_scoped(monkeypatch, database, checkout_client,
+                                                environment, mode, expected):
+    monkeypatch.setattr(api_app, "APP_ENV", environment)
+    monkeypatch.setenv("FROZEN_PLATE_EMAIL_MODE", mode)
+    with database() as db:
+        db.add(api_app.Order(id="notice-order", stripe_session_id="cs_notice", status="completed"))
+        db.commit()
+    response = checkout_client.get("/orders/by-session/cs_notice")
+    assert response.status_code == 200
+    assert response.json().get("email_delivery_mode") == expected
+
+
 def test_authenticated_owner_session_confirmation_includes_customer_pii(
     monkeypatch, database, checkout_client
 ):

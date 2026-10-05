@@ -1338,6 +1338,8 @@ def get_order_by_session(
             "paid_at": o.paid_at.isoformat() if o.paid_at else None,
         }
         requester_id = _decode_supabase_user_id_from_bearer(authorization)
+        if APP_ENV == "staging" and os.environ.get("FROZEN_PLATE_EMAIL_MODE") == "capture":
+            response["email_delivery_mode"] = "capture"
         if o.customer_id and requester_id == o.customer_id:
             response.update(
                 {
