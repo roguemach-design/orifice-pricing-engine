@@ -1382,3 +1382,76 @@ def test_unified_completed_order_captures_exact_independent_lines(
         assert spec["finished_od"] == source["paddle_dia"]
         assert spec["finished_bore_diameter"] == source["bore_dia"]
         assert spec["quantity"] == source["quantity"]
+
+
+def test_production_checkout_rejects_test_key_before_creating_session(monkeypatch, checkout_client):
+    monkeypatch.setattr(api_app, "APP_ENV", "production")
+    calls = install_idempotent_stripe(monkeypatch)
+    response = checkout_client.post("/checkout/create", json=checkout_body(), headers={"x-api-key": "test-ui-key"})
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Production checkout requires Stripe live mode."
+    assert not calls
+
+
+def test_live_key_alone_cannot_open_unverified_production_checkout(monkeypatch, checkout_client):
+    monkeypatch.setattr(api_app, "APP_ENV", "production")
+    monkeypatch.setattr(api_app.stripe, "api_key", "rk_live_synthetic")
+    monkeypatch.delenv("FROZEN_PLATE_LIVE_CHECKOUT_READY", raising=False)
+    calls = install_idempotent_stripe(monkeypatch)
+    response = checkout_client.post("/checkout/create", json=checkout_body(), headers={"x-api-key": "test-ui-key"})
+    assert response.status_code == 503
+    assert not calls
+
+
+def test_production_webhook_rejects_test_event_before_order_mutation(monkeypatch, checkout_client, database):
+    monkeypatch.setattr(api_app, "APP_ENV", "production")
+    install_completed_webhook(monkeypatch, completed_session())
+    result = checkout_client.post("/stripe/webhook", content=b"{}", headers={"stripe-signature": "valid"})
+    assert result.status_code == 400
+    with database() as db:
+        assert db.query(api_app.Order).count() == 0
+
+
+def test_production_completion_uses_server_snapshot_and_suppresses_generic_email(monkeypatch, checkout_client, database, tmp_path):
+    from frozen_plate import api as frozen_api, delivery
+    from frozen_plate.repository import Repository
+    from frozen_plate.runtime import PRODUCTION_API
+    monkeypatch.setattr(api_app, "APP_ENV", "production")
+    monkeypatch.setenv("FROZEN_PLATE_ENABLED", "true")
+    monkeypatch.setenv("FROZEN_PLATE_DATABASE_URL", "synthetic-binding")
+    monkeypatch.setattr(api_app, "_send_email", lambda *a, **k: pytest.fail("generic email duplicated exact drawing"))
+    repo = Repository(tmp_path, "synthetic-signing-key" * 6)
+    repo.delivery_origin = PRODUCTION_API
+    repo.part_prefix = "PRD-"
+    captures = []
+    original = repo.create_delivery
+    def capture(revision_id):
+        result = original(revision_id, base_url=PRODUCTION_API)
+        captures.append(result)
+        return result
+    repo.create_delivery = capture
+    monkeypatch.setattr(frozen_api, "repository", lambda: repo)
+    sent = []
+    monkeypatch.setattr(delivery, "deliver_completed_order", lambda r, snapshot, states: sent.append((snapshot, states)))
+    with database() as db:
+        order = api_app.Order(id="production-order", stripe_session_id="cs_live_synthetic", status="pending",
+            customer_id="owner", quote_payload=quote_inputs(chamfer=False, chamfer_width=None))
+        db.add(order)
+        db.commit()
+    session = completed_session("cs_live_synthetic", "owner")
+    session["livemode"] = True
+    event = {"id": "evt_live_synthetic", "type": "checkout.session.completed", "livemode": True,
+             "data": {"object": session}}
+    monkeypatch.setattr(api_app, "WEBHOOK_SECRET", "synthetic-webhook-secret")
+    monkeypatch.setattr(api_app.stripe.Webhook, "construct_event", lambda *args: event)
+    monkeypatch.setattr(api_app.stripe.checkout.Session, "retrieve", lambda *a, **k: session)
+    for _ in range(2):
+        result = checkout_client.post("/stripe/webhook", content=b"{}", headers={"stripe-signature": "valid"})
+        assert result.status_code == 200, result.text
+    assert len(captures) == 1
+    assert len(sent) == 2  # delivery's immutable claim provides per-revision idempotency
+    assert sent[0][0]["customer_id"] == "owner"
+    assert sent[0][0]["customer_email"] == "buyer@example.com"
+    assert sent[0][1][0]["state"] == "FROZEN"
+    assert sent[0][1] == sent[1][1]
+    assert "OP-PRD-" in captures[0]["context"]["drawing"]

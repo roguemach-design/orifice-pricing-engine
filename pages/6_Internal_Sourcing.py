@@ -3,10 +3,11 @@
 import os
 import requests
 import streamlit as st
+from frozen_plate.runtime import ui_enabled
 
 st.set_page_config(page_title="O-Plates Internal Sourcing", layout="wide")
 API = os.environ.get("API_BASE", "").rstrip("/")
-if API != "https://oplates-pricing-api-staging.onrender.com":
+if not ui_enabled():
     st.stop()
 st.title("Frozen Plate — Internal Sourcing")
 st.caption(

@@ -13,12 +13,14 @@ def freeze_line(
     part_identifier,
     *,
     expected_current=None,
-    reason="Completed staging order",
+    reason=None,
     revision=False,
 ):
     spec, source = specification_from_order(
         snapshot, line_index=line_index, part_identifier=part_identifier
     )
+    if reason is None:
+        reason = "Completed production order" if getattr(repo, "order_actor", None) == "completed-order" else "Completed staging order"
     section = build_section_geometry(spec)
     if "HOLD" in section.status:
         raise WorkflowError("HOLD: explicit complete chamfer configuration required")
@@ -27,7 +29,7 @@ def freeze_line(
         line_id=f"line-{line_index + 1}",
         configuration_id=sha256(canonical(source).encode()).hexdigest()[:40],
         customer_id=snapshot["customer_id"],
-        actor="staging-order",
+        actor=getattr(repo, "order_actor", "staging-order"),
     )
     plate = repo.plate(plate_id)
     if not revision and plate["current_revision"]:
@@ -41,7 +43,7 @@ def freeze_line(
             spec,
             expected_current=expected_current,
             reason=reason,
-            actor="staging-order",
+            actor=getattr(repo, "order_actor", "staging-order"),
             source_snapshot=source,
         )
     except WorkflowError:
@@ -65,7 +67,7 @@ def complete_order(repo, snapshot):
         raise WorkflowError("HOLD: empty completed order")
     result = []
     for index in range(count):
-        part = "STG-" + sha256(snapshot["id"].encode()).hexdigest()[:16] + f"-{index+1}"
+        part = getattr(repo, "part_prefix", "STG-") + sha256(snapshot["id"].encode()).hexdigest()[:16] + f"-{index+1}"
         try:
             rev = freeze_line(repo, snapshot, index, part)
         except (WorkflowError, ValueError, KeyError):
