@@ -1,4 +1,5 @@
 from drawing_intake.checkout_context import verify_context
+from frozen_plate.runtime import enabled as frozen_plate_enabled
 # api_app.py
 import os
 import hashlib
@@ -267,6 +268,20 @@ def _stripe_checkout_required() -> None:
             status_code=500,
             detail="Staging checkout requires Stripe test mode.",
         )
+    if APP_ENV == "production" and not secret_key.startswith(("sk_live_", "rk_live_")):
+        raise HTTPException(500, "Production checkout requires Stripe live mode.")
+    if APP_ENV == "production":
+        if (os.environ.get("FROZEN_PLATE_LIVE_CHECKOUT_READY") != "true"
+            or not frozen_plate_enabled(app_env=APP_ENV)
+            or os.environ.get("FROZEN_PLATE_EMAIL_MODE") != "send"
+            or not os.environ.get("SENDGRID_API_KEY")
+            or not ADMIN_API_KEY):
+            raise HTTPException(503, "Production checkout is awaiting activation.")
+        try:
+            from frozen_plate.api import repository as frozen_repository
+            frozen_repository()
+        except Exception:
+            raise HTTPException(503, "Production confirmation configuration unavailable.") from None
 
 
 def _require_api_key(x_api_key: Optional[str] = Header(default=None, alias="x-api-key")) -> None:
@@ -1536,6 +1551,9 @@ async def stripe_webhook(request: Request):
     }:
         return {"ok": True, "status": "ignored"}
 
+    if APP_ENV == "production" and event.get("livemode") is not True:
+        raise HTTPException(400, "Production webhook requires a live event.")
+
     session = event["data"]["object"] or {}
     if not isinstance(session, dict):
         to_dict = getattr(session, "to_dict_recursive", None) or getattr(
@@ -1566,6 +1584,10 @@ async def stripe_webhook(request: Request):
     stripe_session_id = session.get("id")
     if not stripe_session_id:
         raise HTTPException(status_code=400, detail="Stripe session is missing an ID")
+    if APP_ENV == "production" and (
+        session.get("livemode") is not True or not stripe_session_id.startswith("cs_live_")
+    ):
+        raise HTTPException(400, "Production webhook requires a live Checkout session.")
 
     payment_intent = session.get("payment_intent")
     customer_details = session.get("customer_details") or {}
@@ -1655,18 +1677,23 @@ async def stripe_webhook(request: Request):
     finally:
         db.close()
 
-    # Retry-safe staging integration after the completed order has committed.
-    if APP_ENV == "staging" and os.environ.get("FROZEN_PLATE_DATABASE_URL"):
+    # Retry-safe environment-isolated integration after the order has committed.
+    if frozen_plate_enabled(app_env=APP_ENV):
         from frozen_plate.api import repository as frozen_repository
         from frozen_plate.orders import complete_order
         try:
-            complete_order(frozen_repository(), _frozen_plate_order_snapshot(order.id))
+            repo = frozen_repository()
+            snapshot = _frozen_plate_order_snapshot(order.id)
+            states = complete_order(repo, snapshot)
+            if APP_ENV == "production":
+                from frozen_plate.delivery import deliver_completed_order
+                deliver_completed_order(repo, snapshot, states)
         except Exception:
-            raise HTTPException(503, "Staging drawing capture unavailable; retry completion") from None
+            raise HTTPException(503, "Drawing confirmation unavailable; retry completion") from None
 
     # Customer email is a post-commit, best-effort side effect. Replayed
     # webhooks see the completed row and do not send it again.
-    if processed and customer_email:
+    if processed and customer_email and not (APP_ENV == "production" and frozen_plate_enabled(app_env=APP_ENV)):
         try:
             _send_email(
                 to_email=customer_email,
@@ -1694,14 +1721,17 @@ def _frozen_plate_order_snapshot(order_id):
         order = db.query(Order).filter(Order.id == order_id, Order.status == "completed").first()
         if not order or not order.customer_id:
             raise HTTPException(404, "Completed customer order not found")
+        if APP_ENV == "production" and not (order.stripe_session_id or "").startswith("cs_live_"):
+            raise HTTPException(404, "Completed live customer order not found")
         return {"id": order.id, "customer_id": order.customer_id,
+                "customer_email": order.customer_email,
                 "quote_payload": copy.deepcopy(order.quote_payload)}
     finally:
         db.close()
 
 
-# Phase 5 is explicitly staging-only and uses a separate database connection.
-if APP_ENV == "staging" and os.environ.get("FROZEN_PLATE_DATABASE_URL"):
+# Explicit production opt-in; production and staging retain separate bindings.
+if frozen_plate_enabled(app_env=APP_ENV):
     from frozen_plate.api import router as frozen_plate_router
     app.include_router(frozen_plate_router(_require_customer_user_id, _rate_limit_admin,
                                           _frozen_plate_order_snapshot))

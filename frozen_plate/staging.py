@@ -85,6 +85,24 @@ class PrivateStorage:
             "GET", "/object/" + self.bucket + "/" + self.safe_key(key)
         ).content
 
+    def get_optional(self, key):
+        """Only an explicit not-found response means a journal is absent."""
+        try:
+            response = self.client.get("/object/" + self.bucket + "/" + self.safe_key(key))
+        except httpx.HTTPError:
+            raise WorkflowError("private storage unavailable") from None
+        if response.status_code == 404:
+            return None
+        if response.status_code == 400:
+            try:
+                if response.json().get("statusCode") in (404, "404"):
+                    return None
+            except ValueError:
+                pass
+        if not response.is_success:
+            raise WorkflowError("private storage operation failed")
+        return response.content
+
     def remove(self, keys):
         for key in keys:
             self.safe_key(key)

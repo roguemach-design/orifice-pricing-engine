@@ -4,12 +4,10 @@ import os
 import streamlit as st
 from auth import render_auth_sidebar, require_login, api_post
 from frozen_plate.presentation import APPROVAL_COPY, BUTTON
+from frozen_plate.runtime import ui_enabled
 
 st.set_page_config(page_title="O-Plates Drawing Approval")
-if (
-    os.environ.get("API_BASE", "").rstrip("/")
-    != "https://oplates-pricing-api-staging.onrender.com"
-):
+if not ui_enabled():
     st.stop()
 render_auth_sidebar(show_debug=False)
 require_login("Sign in to review and approve your attached drawing.")

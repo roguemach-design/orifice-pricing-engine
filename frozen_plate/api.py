@@ -1,6 +1,7 @@
 """Authenticated staging integration; no email delivery or vendor submission."""
 
 from functools import lru_cache
+import os
 from hashlib import sha256
 import json
 
@@ -11,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .order_adapter import specification_from_order
 from .repository import WorkflowError, canonical
 from .presentation import success_html, page
-from .staging import StagingRepository
+from .runtime import repository as configured_repository, ui_origin
 from .orders import freeze_line, complete_order
 from html import escape
 from urllib.parse import quote
@@ -37,7 +38,7 @@ class RouteRequest(BaseModel):
 
 @lru_cache(maxsize=1)
 def repository():
-    return StagingRepository()
+    return configured_repository()
 
 
 def router(customer_auth, admin_auth, load_order):
@@ -81,7 +82,20 @@ def router(customer_auth, admin_auth, load_order):
         dependencies=[Depends(admin_auth)],
     )
     def retry_completed(order_id: str):
-        return run(lambda: complete_order(repository(), load_order(order_id)))
+        def complete():
+            repo, snapshot = repository(), load_order(order_id)
+            states = complete_order(repo, snapshot)
+            if os.environ.get("APP_ENV") == "production":
+                from .delivery import deliver_completed_order
+                deliver_completed_order(repo, snapshot, states)
+            return states
+        return run(complete)
+
+    @routes.get("/admin/frozen-plates/revisions/{revision_id}/email-status",
+                dependencies=[Depends(admin_auth)])
+    def email_status(revision_id: str):
+        from .delivery import delivery_status
+        return run(lambda: delivery_status(repository(), revision_id))
 
     @routes.api_route("/approve/{token}", methods=["GET", "HEAD"])
     def landing(token: str):
@@ -89,7 +103,7 @@ def router(customer_auth, admin_auth, load_order):
         if len(token) > 2048:
             raise HTTPException(400, "Invalid link")
         url = (
-            "https://oplates-customer-ui-staging.onrender.com/Drawing_Approval?token="
+            ui_origin() + "/Drawing_Approval?token="
             + quote(token, safe="")
         )
         return HTMLResponse(
@@ -225,7 +239,7 @@ def router(customer_auth, admin_auth, load_order):
     def source(revision_id: str, body: RouteRequest):
         return run(
             lambda: repository().select_source(
-                revision_id, body.route, actor="staging-admin"
+                revision_id, body.route, actor=getattr(repository(), "admin_actor", "staging-admin")
             )
         )
 
