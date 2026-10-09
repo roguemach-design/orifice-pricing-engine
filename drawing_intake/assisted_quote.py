@@ -106,6 +106,9 @@ class PricingHandoffPreview(StrictModel):
 
 
 FIELD_LABELS = {
+    "handle_hole_enabled": "Handle Hole",
+    "handle_hole_diameter": "Handle Hole Diameter",
+    "handle_hole_center_from_handle_end": "Handle End to Hole Center",
     "quantity": "Quantity",
     "material": "Material",
     "thickness": "Plate thickness",
@@ -121,6 +124,8 @@ FIELD_LABELS = {
 }
 
 _DIMENSION_FIELDS = {
+    "handle_hole_diameter",
+    "handle_hole_center_from_handle_end",
     "outside_diameter",
     "bore_diameter",
     "thickness",
@@ -132,6 +137,9 @@ _DIMENSION_FIELDS = {
 }
 
 _DIRECT_EXTRACTION_MAPPING = {
+    "handle_hole_enabled": "handle_hole_enabled",
+    "handle_hole_diameter": "handle_hole_diameter",
+    "handle_hole_center_from_handle_end": "handle_hole_center_from_handle_end",
     "outside_diameter": "paddle_dia",
     "bore_diameter": "bore_dia",
     "thickness": "thickness",
@@ -289,6 +297,8 @@ def _proposal_values(
         canonical = _DIRECT_EXTRACTION_MAPPING.get(proposal.extraction_field)
         if canonical is None or not _proposal_is_usable(proposal):
             continue
+        if proposal.extraction_field in {"handle_hole_diameter", "handle_hole_center_from_handle_end"} and proposal.normalized_unit not in {"in", "mm"}:
+            continue
         value = _normalized_proposal_value(proposal)
         if value is None:
             continue
@@ -408,6 +418,9 @@ def _plain_configuration(session: AssistedQuoteSession) -> dict[str, Any]:
     values = {name: state.value for name, state in session.configuration.items()}
     if values.get("chamfer") is False:
         values["chamfer_width"] = None
+    if not values.get("handle_hole_enabled"):
+        for key in ("handle_hole_enabled", "handle_hole_diameter", "handle_hole_center_from_handle_end"):
+            values.pop(key, None)
     if not str(values.get("handle_label") or "").strip():
         values["handle_label"] = "No label"
     return values
@@ -440,6 +453,14 @@ def _validation_errors(
             except (TypeError, ValueError):
                 errors[field] = f"{FIELD_LABELS[field]} must be numeric."
 
+    if values.get("handle_hole_enabled"):
+        from plate_geometry import validate_handle_hole
+        if all(values.get(k) is not None for k in ("paddle_dia", "handle_width", "handle_length_from_bore")):
+            try:
+                validate_handle_hole(values["paddle_dia"], values["handle_width"], values["handle_length_from_bore"],
+                                     True, values.get("handle_hole_diameter"), values.get("handle_hole_center_from_handle_end"))
+            except ValueError as exc:
+                errors["handle_hole_diameter"] = str(exc)
     quantity = values.get("quantity")
     if quantity is not None and (
         not isinstance(quantity, int) or isinstance(quantity, bool) or quantity < 1
@@ -532,6 +553,8 @@ def review_assisted_quote(
     product = availability or local_form_availability()
     values = _plain_configuration(session)
     required = canonical_required_fields(chamfer=values.get("chamfer"))
+    if values.get("handle_hole_enabled"):
+        required += ["handle_hole_diameter", "handle_hole_center_from_handle_end"]
     missing = [
         field
         for field in required

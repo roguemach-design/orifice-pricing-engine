@@ -406,7 +406,7 @@ def test_handoff_uses_exact_quoteinputs_schema_without_pricing_or_checkout(
     confirmed = confirm_configuration(session, availability=availability)
     handoff = build_pricing_handoff_preview(confirmed, availability=availability)
 
-    assert set(handoff.quote_request) == set(QuoteInputs.model_fields)
+    assert set(handoff.quote_request) == set(QuoteInputs.model_fields) - {"handle_hole_enabled", "handle_hole_diameter", "handle_hole_center_from_handle_end"}
     assert handoff.destination.startswith("QuoteRequest -> QuoteInputs")
     assert handoff.pricing_invoked is False
     assert handoff.checkout_invoked is False

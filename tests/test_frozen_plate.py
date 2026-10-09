@@ -53,7 +53,8 @@ def count(repo, table):
 def test_freeze_pair_hashes_and_immutable_history(setup):
     repo, plate, spec = setup
     r1 = freeze(setup)
-    assert json.loads(r1["spec_json"]) == asdict(spec)
+    from plate_geometry import canonical_specification
+    assert json.loads(r1["spec_json"]) == canonical_specification(spec)
     assert digest(r1["spec_json"]) == r1["spec_sha256"]
     for kind, artifact in r1["artifacts"].items():
         raw = (repo.objects / artifact["object_key"]).read_bytes()

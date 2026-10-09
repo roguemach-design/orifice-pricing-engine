@@ -58,6 +58,10 @@ def build_fixed_schema_prompt(document: NormalizedDocument) -> str:
     return f"""You extract requirements from a drawing of one O-Plate/orifice plate.
 Return only JSON matching the supplied schema. Search only for the fixed schema.
 Do not invent dimensions, material, quantity, tolerances, chamfers, or metadata.
+Propose handle_hole_enabled, handle_hole_diameter, and handle_hole_center_from_handle_end
+only with evidence. The handle hole is centered across the handle; its distance is
+from the physical handle end edge to the hole centerline. Do not confuse its diameter
+with the primary plate bore. Missing evidence is not proof that no hole exists.
 Use not_detected when information is absent, ambiguous when multiple readings conflict,
 and unreadable when the source cannot be read. Preserve field-specific confidence,
 raw text, page number, and source bounding boxes when available.
@@ -140,7 +144,9 @@ class NativeTextExtractionProvider(ExtractionProvider):
 
         units = self._extract_global_units(document)
         default_unit = MeasurementUnit(units.value) if units.value else None
+        from .handle_hole import native_handle_hole
         fields = DrawingFields(
+            **native_handle_hole(document, default_unit),
             outside_diameter=self._numeric(
                 document,
                 [

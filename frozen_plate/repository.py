@@ -23,7 +23,7 @@ from itsdangerous import URLSafeSerializer, BadSignature
 from manufacturing_context import DrawingState
 from manufacturing_drawing import DrawingMetadata, GENERATOR_VERSION
 from manufacturing_files import generate_package
-from plate_geometry import PlateSpec, build_plate_geometry, GEOMETRY_VERSION
+from plate_geometry import PlateSpec, build_plate_geometry, GEOMETRY_VERSION, canonical_specification
 from .validation import validate_package
 from .presentation import TEMPLATE_VERSION, mime_email
 
@@ -205,7 +205,7 @@ class Repository:
             raise WorkflowError("validated PlateSpec, reason and actor required")
         geometry = build_plate_geometry(spec)
         source_json = canonical(source_snapshot)
-        spec_json = canonical(asdict(spec))
+        spec_json = canonical(canonical_specification(spec))
         revision_id = str(uuid4())
         destination = self.objects / plate_id / revision_id
         committed = False

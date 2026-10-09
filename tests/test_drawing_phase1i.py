@@ -143,7 +143,7 @@ def test_manual_and_confirmed_drawing_use_identical_api_payload_and_price(
     )
     manual_payload = QuoteInputs(**payload).model_dump()
     assert drawing_payload == manual_payload
-    assert set(drawing_payload) == set(QuoteInputs.model_fields)
+    assert set(drawing_payload) == set(QuoteInputs.model_fields) - {"handle_hole_enabled", "handle_hole_diameter", "handle_hole_center_from_handle_end"}
     assert not any("source" in name or "confidence" in name for name in drawing_payload)
     manual_result = _api_quote(monkeypatch, manual_payload)
     drawing_result = _api_quote(monkeypatch, drawing_payload)

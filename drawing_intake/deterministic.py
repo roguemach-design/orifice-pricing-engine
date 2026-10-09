@@ -1529,7 +1529,27 @@ def _interpret_region(
         )
     }
 
+    from .handle_hole import propose_handle_hole
+    hole_fields = propose_handle_hole([
+        (line.raw_text, SourceEvidence(
+            page_number=line.page_number, raw_text=line.raw_text, bbox=line.bbox,
+            coordinate_unit=line.source_coordinate_unit, extraction_method="scoped_labeled_handle_hole_v1"))
+        for line in base_lines
+    ], handle_units)
+    for name, field in hole_fields.items():
+        results[name] = FieldRecognitionResult(
+            field_name=name, value=field.value, normalized_unit=field.normalized_unit,
+            raw_text=field.raw_text, status=field.status, confidence=field.confidence,
+            evidence_classification=(
+                EvidenceClassification.AMBIGUOUS if field.status == FieldStatus.AMBIGUOUS
+                else EvidenceClassification.REQUIRES_CONFIRMATION if field.evidence
+                else EvidenceClassification.NOT_DETECTED),
+            evidence=[RecognitionEvidence(rule_id="labeled_handle_hole", description="Explicit handle-hole annotation.", source=source)
+                      for source in field.evidence],
+            candidate_values=[field.value] if field.value is not None else [],
+        )
     fields = DrawingFields(
+        **hole_fields,
         outside_diameter=_numeric_field(outside),
         bore_diameter=_numeric_field(bore),
         thickness=_numeric_field(thickness),
@@ -1620,6 +1640,44 @@ def _interpret_region(
         fields = fields.model_copy(
             update={name: field_type.model_validate(field.model_dump())}
         )
+    # Preserve the accepted reference observations, while exposing separate editable
+    # manufacturing proposals only for the established handle leader/end witnesses.
+    for reference, target, rule in (
+        ("tag_hole_diameter", "handle_hole_diameter", "handle_hole_leader_region"),
+        ("tag_hole_position", "handle_hole_center_from_handle_end", "tip_to_secondary_hole_witnesses"),
+    ):
+        source = results[reference]
+        if not any(item.rule_id == rule for item in source.evidence):
+            continue
+        proposed = source.model_copy(update={"field_name": target})
+        current = results[target]
+        if current.value is not None:
+            if source.value is not None and current.value == source.value and current.normalized_unit == source.normalized_unit:
+                proposed = current.model_copy(update={"evidence": [*current.evidence, *source.evidence]})
+            else:
+                proposed = proposed.model_copy(update={
+                    "value": None, "status": "ambiguous", "confidence": None,
+                    "evidence_classification": "ambiguous",
+                    "candidate_values": list(dict.fromkeys([current.value, *source.candidate_values])),
+                    "evidence": [*current.evidence, *source.evidence],
+                    "abstention_reason": "conflicting_labeled_and_spatial_handle_hole",
+                })
+        elif current.status == FieldStatus.AMBIGUOUS:
+            proposed = current
+        results[target] = proposed
+        fields = fields.model_copy(update={target: _numeric_field(proposed)})
+        presence = results["handle_hole_enabled"]
+        results["handle_hole_enabled"] = FieldRecognitionResult(
+            field_name="handle_hole_enabled", value=True, raw_text=source.raw_text,
+            confidence=source.confidence, status=FieldStatus.LOW_CONFIDENCE,
+            evidence_classification=EvidenceClassification.REQUIRES_CONFIRMATION,
+            evidence=[*presence.evidence, *source.evidence], candidate_values=[True])
+        fields = fields.model_copy(update={"handle_hole_enabled": BooleanField(
+            value=True, confidence=source.confidence, raw_text=source.raw_text,
+            status=FieldStatus.LOW_CONFIDENCE,
+            evidence=[item.source for item in results["handle_hole_enabled"].evidence if item.source],
+            warnings=["Secondary-hole evidence requires review before enabling manufacturing geometry."])})
+
     extraction = DrawingExtractionResult(
         document=DocumentReference(
             filename=document.filename,

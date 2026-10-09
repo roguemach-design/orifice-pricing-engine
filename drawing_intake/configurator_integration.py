@@ -514,6 +514,8 @@ def synchronize_session_from_form(
     for field in QuoteInputs.model_fields:
         before = previous_values.get(field)
         after = values.get(field)
+        if field == "handle_hole_enabled":
+            before, after = bool(before), bool(after)
         if _equivalent(before, after):
             continue
         origins[field] = FormValueOrigin.CUSTOMER
