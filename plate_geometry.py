@@ -29,6 +29,9 @@ class PlateSpec:
     marking: str | None = None
     quantity: int = 1
     part_identifier: str = "sample-plate"
+    handle_hole_enabled: bool = False
+    handle_hole_diameter: float | None = None
+    handle_hole_center_from_handle_end: float | None = None
     application: PlateApplication = PlateApplication.RESTRICTION_GENERAL
 
     def __post_init__(self):
@@ -57,6 +60,11 @@ class PlateSpec:
                 or value <= 0
             ):
                 raise ValueError(f"{name} must be finite and positive")
+        validate_handle_hole(
+            self.finished_od, self.handle_width, self.centerline_to_handle_end,
+            self.handle_hole_enabled, self.handle_hole_diameter,
+            self.handle_hole_center_from_handle_end,
+        )
         if self.finished_bore_diameter >= self.finished_od:
             raise ValueError("finished bore must be smaller than OD")
         if self.handle_width >= self.finished_od:
@@ -129,8 +137,53 @@ class PlateSpec:
             marking=data.get("handle_label"),
             quantity=data.get("quantity", 1),
             part_identifier=part_identifier,
+            handle_hole_enabled=data.get("handle_hole_enabled", False),
+            handle_hole_diameter=data.get("handle_hole_diameter"),
+            handle_hole_center_from_handle_end=data.get("handle_hole_center_from_handle_end"),
             application=data.get("application", PlateApplication.RESTRICTION_GENERAL),
         )
+
+
+def validate_handle_hole(od, width, length, enabled=False, diameter=None, distance=None):
+    """Validate the nominal circle against the canonical straight handle envelope."""
+    if type(enabled) is not bool:
+        raise ValueError("Handle hole must be enabled or disabled.")
+    if not enabled:
+        if diameter is not None or distance is not None:
+            raise ValueError("Handle hole dimensions require Handle Hole to be enabled.")
+        return
+    for label, value in (("Handle hole diameter", diameter), ("Handle end to hole center", distance)):
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not isfinite(value) or value <= 0:
+            raise ValueError(f"{label} is required and must be finite and greater than zero.")
+    if Decimal(str(diameter)) > Decimal(str(width)) * Decimal("0.90"):
+        raise ValueError("Handle hole diameter cannot exceed 90% of handle width.")
+    radius = diameter / 2
+    if distance - radius <= 0:
+        raise ValueError("Handle hole must remain inside the handle end.")
+    R, h, r = od / 2, width / 2, CORNER_RADIUS
+    if h <= r or h >= R:
+        raise ValueError("Handle dimensions do not support canonical geometry.")
+    neck_x = sqrt((R - h) * (R + h + 2 * r))
+    center_x = length - distance
+    # Straight region begins at the actual neck tangent; exclude the plate body too.
+    if center_x - radius <= max(neck_x, R):
+        raise ValueError("Handle hole must clear the neck transition and circular plate body.")
+    # Rounded tip: require the circle inside the rounded rectangle, not only its bbox.
+    clearance = h - radius
+    if center_x > length - r and clearance < r:
+        dx = center_x - (length - r)
+        dy = max(0.0, radius - (h - r))
+        if dx * dx + dy * dy >= r * r:
+            raise ValueError("Handle hole must clear the rounded handle tip.")
+
+
+def canonical_specification(spec):
+    """Omit disabled feature keys, preserving historical no-hole bytes and hashes."""
+    record = asdict(spec)
+    if not spec.handle_hole_enabled:
+        for name in ("handle_hole_enabled", "handle_hole_diameter", "handle_hole_center_from_handle_end"):
+            record.pop(name)
+    return record
 
 
 @dataclass(frozen=True)
@@ -235,7 +288,7 @@ def manufacturing_record(geometry: PlateGeometry):
         "schema_version": 4,
         "application_context": application_context(geometry.spec.application),
         "status": "PROTOTYPE - NOT RELEASED FOR MANUFACTURE",
-        "specification": asdict(geometry.spec),
+        "specification": canonical_specification(geometry.spec),
         "geometry": geometry.to_dict(),
         "manufacturing": {
             "rough_bore_diameter": rough_bore_diameter(geometry.spec),

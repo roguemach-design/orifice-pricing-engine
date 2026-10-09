@@ -17,7 +17,7 @@ from typing import Optional, List, Dict, Any, Literal
 import stripe
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import model_validator, BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from pricing_engine import QuoteInputs, calculate_quote
 
@@ -752,6 +752,18 @@ class QuoteRequest(BaseModel):
     bore_tolerance: float
     chamfer: bool
     ships_in_days: int
+
+    handle_hole_enabled: bool = Field(default=False, strict=True, exclude_if=lambda v: not v)
+    handle_hole_diameter: Optional[float] = Field(default=None, exclude_if=lambda v: v is None)
+    handle_hole_center_from_handle_end: Optional[float] = Field(default=None, exclude_if=lambda v: v is None)
+
+    @model_validator(mode="after")
+    def validate_handle_hole_configuration(self):
+        from plate_geometry import validate_handle_hole
+        validate_handle_hole(self.paddle_dia, self.handle_width, self.handle_length_from_bore,
+                             self.handle_hole_enabled, self.handle_hole_diameter,
+                             self.handle_hole_center_from_handle_end)
+        return self
 
     handle_label: str = Field(default="No label")
     # Backward-compatible optional field. The final customer UI reveals this
