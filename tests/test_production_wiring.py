@@ -107,6 +107,12 @@ def test_production_activation_is_explicit_and_ui_keeps_known_origins():
     assert not enabled({**env, "FROZEN_PLATE_ENABLED": "false"})
     assert not enabled({**env, "FROZEN_PLATE_DATABASE_URL": ""})
     assert ui_enabled({**env, "API_BASE": PRODUCTION_API})
+    private_ui = {**env, "API_BASE": "http://orifice-pricing-api:10000",
+                  "RENDER_SERVICE_ID": "srv-d530k8re5dus73ahqr0g"}
+    assert ui_enabled(private_ui)
+    assert not ui_enabled({**private_ui, "RENDER_SERVICE_ID": "staging-ui"})
+    assert not ui_enabled({**private_ui, "APP_ENV": "staging"})
+    assert not ui_enabled({**private_ui, "FROZEN_PLATE_ENABLED": "false"})
     assert not ui_enabled({**env, "API_BASE": "https://attacker.example.test"})
     assert not ui_enabled({"API_BASE": PRODUCTION_API})
     assert not ui_enabled(
