@@ -88,6 +88,8 @@ def _radius_bands(scores: list[tuple[int, float]]) -> list[list[tuple[int, float
 
 def _broken_centerline_profiles(
     image: Image.Image,
+    *,
+    maximum_fraction: float = 0.20,
 ) -> list[tuple[int, int, int]]:
     """Find paired concentric contours when dashed centerlines have no long runs.
 
@@ -110,11 +112,12 @@ def _broken_centerline_profiles(
             thick |= padded[dy : dy + coarse_height, dx : dx + coarse_width]
 
     minimum_radius = max(10, round(min(coarse_width, coarse_height) * 0.025))
-    maximum_radius = round(min(coarse_width, coarse_height) * 0.20)
+    maximum_radius = round(min(coarse_width, coarse_height) * maximum_fraction)
     if maximum_radius <= minimum_radius:
         return []
-    xs = np.arange(maximum_radius, coarse_width - maximum_radius, 3)
-    ys = np.arange(maximum_radius, coarse_height - maximum_radius, 3)
+    margin = minimum_radius if maximum_fraction > 0.20 else maximum_radius
+    xs = np.arange(margin, coarse_width - margin, 3)
+    ys = np.arange(margin, coarse_height - margin, 3)
     if not len(xs) or not len(ys):
         return []
     xx, yy = np.meshgrid(xs, ys)
@@ -126,7 +129,16 @@ def _broken_centerline_profiles(
     for index, radius in enumerate(radii):
         sample_x = np.rint(centers[:, 0, None] + radius * cosine).astype(int)
         sample_y = np.rint(centers[:, 1, None] + radius * sine).astype(int)
-        scores[:, index] = np.mean(thick[sample_y, sample_x], axis=1)
+        inside = (
+            (sample_x >= 0)
+            & (sample_x < coarse_width)
+            & (sample_y >= 0)
+            & (sample_y < coarse_height)
+        ).all(axis=1)
+        scores[:, index] = 0
+        scores[inside, index] = np.mean(
+            thick[sample_y[inside], sample_x[inside]], axis=1
+        )
 
     proposals: list[tuple[float, int, int, int, int]] = []
     minimum_outer = min(coarse_width, coarse_height) * 0.095
@@ -341,6 +353,28 @@ def detect_raster_plate_structure(
                     bbox=source_bbox,
                     coordinate_unit=rendered.region.coordinate_unit,
                     detection_method="raster_two_concentric_perimeters_without_centerline_v1",
+                )
+            )
+    if not candidates:
+        # Cropped detail views can devote most of the page height to one plate.
+        # Retain the original-pixel two-perimeter checks; text alone never
+        # creates a profile. Classification separately establishes specificity.
+        for center_x, center_y, outer_radius in _broken_centerline_profiles(
+            image, maximum_fraction=0.45
+        ):
+            candidates.append(
+                CandidateRegionHint(
+                    page_number=rendered.region.page_number,
+                    bbox=rendered.transform.pixel_bbox_to_pdf(
+                        (
+                            center_x - outer_radius,
+                            center_y - outer_radius,
+                            center_x + outer_radius,
+                            center_y + outer_radius,
+                        )
+                    ),
+                    coordinate_unit=rendered.region.coordinate_unit,
+                    detection_method="raster_cropped_two_concentric_perimeters_v1",
                 )
             )
     candidates.sort(key=lambda item: (item.bbox[1], item.bbox[0]))

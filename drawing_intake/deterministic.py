@@ -82,6 +82,7 @@ class FieldRecognitionResult(StrictModel):
     candidate_values: list[float | int | str | bool] = Field(default_factory=list)
     abstention_reason: str | None = None
     normalization_rules: list[str] = Field(default_factory=list)
+    confidence: float | None = Field(default=None, ge=0, le=1)
 
 
 class RecognitionTimings(StrictModel):
@@ -854,6 +855,16 @@ def _resolve_tolerance(
             not in normalize_engineering_text(line.normalized_text).normalized_text
         ):
             continue
+        # A nominal mixed number must not become a minus tolerance.
+        if re.search(r'\d+-\d+/\d+\s*["″°]?\s*BORE', line.normalized_text):
+            continue
+        if (
+            re.search(r'^\s*-\s*\d+/\d+\s*["″°]?\s*BORE', line.normalized_text)
+            and "TOL" not in line.normalized_text
+        ):
+            # A crop beginning with a fractional tail is not evidence of a
+            # minus tolerance. It requires full nominal/tolerance context.
+            continue
         parsed = parse_tolerance(
             line.normalized_text, default_unit=MeasurementUnit.INCH
         )
@@ -1357,7 +1368,7 @@ def _numeric_field(result: FieldRecognitionResult) -> NumericField:
         value=float(result.value) if isinstance(result.value, (int, float)) else None,
         normalized_unit=result.normalized_unit,
         raw_text=result.raw_text,
-        confidence=None,
+        confidence=result.confidence,
         status=_field_status(result),
         evidence=[item.source for item in result.evidence if item.source is not None],
         warnings=[
@@ -1372,7 +1383,7 @@ def _string_field(result: FieldRecognitionResult) -> StringField:
     return StringField(
         value=str(result.value) if result.value is not None else None,
         raw_text=result.raw_text,
-        confidence=None,
+        confidence=result.confidence,
         status=_field_status(result),
         evidence=[item.source for item in result.evidence if item.source is not None],
         warnings=[
@@ -1391,14 +1402,16 @@ def _interpret_region(
 ) -> tuple[dict[str, FieldRecognitionResult], DrawingExtractionResult]:
     tokens = [token for token in ocr.tokens if token.region_id == region.region_id]
     base_tokens = [
-        token for token in tokens if not token.engine_pass.startswith("target.")
+        token
+        for token in tokens
+        if not token.engine_pass.startswith(("target.", "material."))
     ]
 
     def scoped(purpose: str) -> list[OcrTokenObservation]:
         return [
             token
             for token in tokens
-            if not token.engine_pass.startswith("target.")
+            if not token.engine_pass.startswith(("target.", "material."))
             or token.engine_pass.startswith(f"target.{purpose}.")
         ]
 
@@ -1510,6 +1523,9 @@ def _interpret_region(
             not_detected("customer_part_number", "no_unambiguous_customer_part_number"),
             drawing_number,
             revision,
+            not_detected("tag_hole_diameter", "no_supported_secondary_hole_callout"),
+            not_detected("tag_hole_position", "no_supported_secondary_hole_witnesses"),
+            not_detected("neck_radius", "no_supported_transition_radius_callout"),
         )
     }
 
@@ -1571,6 +1587,39 @@ def _interpret_region(
         drawing_number=_string_field(drawing_number),
         revision=_string_field(revision),
     )
+    from .cropped_detail import observations
+
+    for name, proposed in observations(region, ocr, rendered, document).items():
+        current = results.get(name)
+        if current is not None and current.value is not None:
+            if proposed.value is None and not proposed.candidate_values:
+                # Unreadable handwriting cannot erase a printed thickness.
+                current.evidence.extend(proposed.evidence)
+                continue
+            if proposed.value is not None and current.value != proposed.value:
+                proposed = proposed.model_copy(
+                    update={
+                        "value": None,
+                        "status": "ambiguous",
+                        "evidence_classification": "ambiguous",
+                        "confidence": None,
+                        "candidate_values": list(
+                            dict.fromkeys([current.value, *proposed.candidate_values])
+                        ),
+                        "evidence": [*current.evidence, *proposed.evidence],
+                        "abstention_reason": "conflicting_labeled_and_spatial_values",
+                    }
+                )
+        results[name] = proposed
+        field_type = type(getattr(fields, name))
+        field = (
+            _string_field(proposed)
+            if field_type in {StringField, UnitField}
+            else _numeric_field(proposed)
+        )
+        fields = fields.model_copy(
+            update={name: field_type.model_validate(field.model_dump())}
+        )
     extraction = DrawingExtractionResult(
         document=DocumentReference(
             filename=document.filename,
@@ -1627,6 +1676,11 @@ class DeterministicRegionRecognizer:
         ocr, handle_seconds = augment_vertical_handle_ocr(
             document, region, ocr, self.ocr_engine
         )
+        from .cropped_detail import rotated_material_ocr
+
+        ocr, material_seconds = rotated_material_ocr(
+            document, region, ocr, self.ocr_engine
+        )
         interpretation_started = time.perf_counter()
         field_results, extraction = _interpret_region(
             document, region, ocr, geometry, rendered
@@ -1646,7 +1700,9 @@ class DeterministicRegionRecognizer:
             timings=RecognitionTimings(
                 rendering_seconds=rendered.render_seconds,
                 ocr_seconds=base_ocr_seconds,
-                targeted_ocr_seconds=targeted_seconds + handle_seconds,
+                targeted_ocr_seconds=targeted_seconds
+                + handle_seconds
+                + material_seconds,
                 interpretation_seconds=interpretation_seconds,
                 total_seconds=time.perf_counter() - started,
             ),
