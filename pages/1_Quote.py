@@ -1210,6 +1210,46 @@ if active_assisted_session is not None:
         with form_col:
             st.divider()
             st.subheader("Review your drawing-assisted configuration")
+            with st.expander("Drawing evidence and fields needing review"):
+                st.caption(
+                    "Drawing readings are proposals. Review and correct the configuration before confirming it."
+                )
+                st.dataframe(
+                    [
+                        {
+                            "Field": proposal.extraction_field.replace(
+                                "_", " "
+                            ).title(),
+                            "Proposed value": (
+                                str(proposal.proposed_value)
+                                if proposal.proposed_value is not None
+                                else "Unresolved"
+                            ),
+                            "Units": proposal.normalized_unit or "",
+                            "Evidence": proposal.raw_text or "",
+                            "Source": (proposal.source_type or "unspecified").replace(
+                                "_", " "
+                            ),
+                            "Review": (
+                                "Conflict / alternatives: "
+                                + str(proposal.competing_values)
+                                if len(proposal.competing_values) > 1
+                                else str(proposal.evidence_status).replace("_", " ")
+                            ),
+                            "Use": (
+                                "Configuration proposal"
+                                if proposal.canonical_field
+                                else "Reference only"
+                            ),
+                        }
+                        for proposal in active_assisted_session.proposals
+                    ],
+                    hide_index=True,
+                    width="stretch",
+                )
+                st.caption(
+                    "Secondary holes and transition radii are reference observations; this form does not configure those features. Unreadable notes require manual entry."
+                )
             if assisted_review.attention:
                 for attention in assisted_review.attention:
                     message = f"**{attention.label}:** {attention.message}"

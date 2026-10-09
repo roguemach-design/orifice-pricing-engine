@@ -101,6 +101,33 @@ def classify_drawing_document(
             reason="Multiple dimensioned plate-like profile regions require selection.",
         )
     if structure.status == "single_candidate":
+        if any(
+            r.detection_method == "raster_cropped_two_concentric_perimeters_v1"
+            for r in structure.candidate_regions
+        ):
+            identified = bool(re.search(r"\bTAG\s+[A-Z0-9][A-Z0-9 .]*\d", text))
+            if catalog_language or not (identified and "BORE" in text):
+                return DocumentClassificationResult(
+                    document_class=DrawingDocumentClass.AMBIGUOUS_DOCUMENT,
+                    quote_specific=False,
+                    candidate_count=1,
+                    evidence_rules=[
+                        "cropped_concentric_profiles",
+                        "missing_specific_part_context",
+                    ],
+                    reason="A cropped profile requires a labeled tag and bore context; manual entry remains available.",
+                )
+            return DocumentClassificationResult(
+                document_class=DrawingDocumentClass.SINGLE_PLATE_DRAWING,
+                quote_specific=True,
+                candidate_count=1,
+                evidence_rules=[
+                    "cropped_concentric_profiles",
+                    "labeled_tag",
+                    "bore_context",
+                ],
+                reason="One cropped concentric plate detail has a labeled tag and bore context; all proposed values require review.",
+            )
         raster_without_centerline = any(
             region.detection_method
             == "raster_two_concentric_perimeters_without_centerline_v1"
