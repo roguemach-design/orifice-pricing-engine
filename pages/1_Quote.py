@@ -191,6 +191,9 @@ _FORM_KEYS = {
         "thickness",
         "handle_width",
         "handle_length_from_bore",
+        "handle_hole_enabled",
+        "handle_hole_diameter",
+        "handle_hole_center_from_handle_end",
         "paddle_dia",
         "bore_dia",
         "bore_tolerance",
@@ -470,6 +473,9 @@ default_form_values = {
     "quantity": 1,
     "material": default_material,
     "thickness": default_thickness_options[0],
+    "handle_hole_enabled": False,
+    "handle_hole_diameter": None,
+    "handle_hole_center_from_handle_end": None,
     "handle_width": 1.5,
     "handle_length_from_bore": 9.0,
     "paddle_dia": 3.0,
@@ -513,6 +519,9 @@ def _install_form_integration(result) -> None:
             # Explicit None clears the previously rendered manual default. Merely
             # removing the key lets Streamlit restore its old widget value.
             st.session_state[key] = value
+    for field in ("handle_hole_diameter", "handle_hole_center_from_handle_end"):
+        value = result.values.get(field)
+        st.session_state[_FORM_KEYS[field] + "_text"] = "" if value is None else str(value)
     st.session_state[_FORM_ORIGINS_KEY] = {
         field: origin.value if isinstance(origin, FormValueOrigin) else str(origin)
         for field, origin in result.origins.items()
@@ -537,6 +546,8 @@ def _reset_to_manual_defaults() -> None:
         st.session_state.pop(key, None)
     for field, value in default_form_values.items():
         key = _FORM_KEYS[field]
+        if field in ("handle_hole_diameter", "handle_hole_center_from_handle_end"):
+            st.session_state[key + "_text"] = ""
         if value is None:
             st.session_state.pop(key, None)
         else:
@@ -648,6 +659,9 @@ if (
             values = recovered["items"][0]
             for field in _FORM_KEYS:
                 st.session_state[_FORM_KEYS[field]] = values.get(field)
+                if field in ("handle_hole_diameter", "handle_hole_center_from_handle_end"):
+                    value = values.get(field)
+                    st.session_state[_FORM_KEYS[field] + "_text"] = "" if value is None else str(value)
             st.session_state[_FORM_ORIGINS_KEY] = {
                 field: FormValueOrigin.CUSTOMER.value for field in _FORM_KEYS
             }
@@ -1048,6 +1062,27 @@ with right:
                 help="Distance from the bore center to the end of the handle.",
             )
 
+        if st.session_state.get(_FORM_KEYS["handle_hole_enabled"]) is None:
+            st.session_state[_FORM_KEYS["handle_hole_enabled"]] = False
+        handle_hole_enabled = st.checkbox("Handle Hole", key=_FORM_KEYS["handle_hole_enabled"])
+        handle_hole_diameter = None
+        handle_hole_center_from_handle_end = None
+        if handle_hole_enabled:
+            from drawing_intake.value_normalization import parse_number
+            for field, label, help_text in (
+                ("handle_hole_diameter", "Handle Hole Diameter (in.)", "Finished diameter of the laser/waterjet-cut hole in the handle."),
+                ("handle_hole_center_from_handle_end", "Handle End to Hole Center (in.)", "Distance from the end edge of the handle to the centerline of the hole."),
+            ):
+                raw = st.text_input(label, value=str(st.session_state.get(_FORM_KEYS[field]) or ""),
+                                    key=_FORM_KEYS[field] + "_text", help=help_text)
+                try:
+                    value = parse_number(raw) if raw.strip() else None
+                except (ValueError, ZeroDivisionError):
+                    value = None
+                st.session_state[_FORM_KEYS[field]] = value
+            handle_hole_diameter = st.session_state.get(_FORM_KEYS["handle_hole_diameter"])
+            handle_hole_center_from_handle_end = st.session_state.get(_FORM_KEYS["handle_hole_center_from_handle_end"])
+
         st.caption("REQUIREMENTS")
         bore_tolerance = _select_field(
             "Bore tolerance (± in.)",
@@ -1133,6 +1168,9 @@ with right:
 
 
 current_form_values = {
+    "handle_hole_enabled": handle_hole_enabled,
+    "handle_hole_diameter": handle_hole_diameter,
+    "handle_hole_center_from_handle_end": handle_hole_center_from_handle_end,
     "quantity": quantity,
     "material": material,
     "thickness": thickness,
@@ -1152,7 +1190,8 @@ form_origins = st.session_state.get(_FORM_ORIGINS_KEY, {})
 active_assisted_session = st.session_state.get(_DRAWING_SESSION_KEY)
 if active_assisted_session is not None:
     form_changed = any(
-        previous_form_values.get(field) != value
+        (bool(previous_form_values.get(field)) != bool(value)
+         if field == "handle_hole_enabled" else previous_form_values.get(field) != value)
         for field, value in current_form_values.items()
     )
     synchronized = synchronize_session_from_form(
@@ -1377,6 +1416,15 @@ if (
 if handle_width is not None and handle_width <= 0:
     errors.append("Handle width must be greater than zero.")
 
+if handle_hole_enabled:
+    from plate_geometry import validate_handle_hole
+    if all(v is not None for v in (paddle_dia, handle_width, handle_length)):
+        try:
+            validate_handle_hole(paddle_dia, handle_width, handle_length, True,
+                                 handle_hole_diameter, handle_hole_center_from_handle_end)
+        except ValueError as exc:
+            errors.append("Drawing HOLD: " + str(exc))
+
 if errors:
     with right:
         st.divider()
@@ -1392,7 +1440,7 @@ payload_inputs = None
 if all(
     value is not None
     for field, value in current_form_values.items()
-    if field != "chamfer_width"
+    if field not in {"chamfer_width", "handle_hole_diameter", "handle_hole_center_from_handle_end"}
 ) and (chamfer is not True or chamfer_width is not None):
     payload_inputs = {
         "quantity": int(quantity),
@@ -1408,6 +1456,11 @@ if all(
         "handle_label": (handle_label or "").strip() or "No label",
         "ships_in_days": int(ships_in_days),
         **chamfer_details,
+        **({
+            "handle_hole_enabled": True,
+            "handle_hole_diameter": handle_hole_diameter,
+            "handle_hole_center_from_handle_end": handle_hole_center_from_handle_end,
+        } if handle_hole_enabled else {}),
     }
 
 result = None
@@ -1455,6 +1508,9 @@ with left:
     if preview_ready:
         components.html(
             render_plate_svg(
+                handle_hole_enabled=handle_hole_enabled,
+                handle_hole_diameter=handle_hole_diameter,
+                handle_hole_center_from_handle_end=handle_hole_center_from_handle_end,
                 paddle_dia=paddle_dia,
                 bore_dia=bore_dia,
                 handle_width=handle_width,

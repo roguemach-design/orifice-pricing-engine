@@ -17,6 +17,9 @@ from .models import (
 from .value_normalization import to_inches
 
 EXTRACTION_TO_CANONICAL = {
+    "handle_hole_enabled": "handle_hole_enabled",
+    "handle_hole_diameter": "handle_hole_diameter",
+    "handle_hole_center_from_handle_end": "handle_hole_center_from_handle_end",
     "outside_diameter": "paddle_dia",
     "bore_diameter": "bore_dia",
     "thickness": "thickness",
@@ -31,6 +34,7 @@ EXTRACTION_TO_CANONICAL = {
     "marking_text": "handle_label",
 }
 NORMALIZED_INCH_FIELDS = {
+    "handle_hole_diameter", "handle_hole_center_from_handle_end",
     "outside_diameter",
     "bore_diameter",
     "thickness",

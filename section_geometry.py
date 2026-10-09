@@ -99,8 +99,15 @@ def build_section_geometry(spec):
         else:
             upper = ((0, b), (t - d, b), (t, b + w), (t, top), (0, top))
             lower = ((0, -R), (t, -R), (t, -b - w), (t - d, -b), (0, -b))
+    polygons = (upper, lower)
+    if s.handle_hole_enabled:
+        center = s.centerline_to_handle_end - s.handle_hole_center_from_handle_end
+        low, high = center - s.handle_hole_diameter / 2, center + s.handle_hole_diameter / 2
+        upper = tuple((x, low if y == s.centerline_to_handle_end else y) for x, y in upper)
+        tip = ((0, high), (t, high), (t, s.centerline_to_handle_end), (0, s.centerline_to_handle_end))
+        polygons = (upper, lower, tip)
     return SectionGeometry(
-        (upper, lower),
+        polygons,
         status,
         missing,
         t,

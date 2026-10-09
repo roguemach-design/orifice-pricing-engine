@@ -116,6 +116,9 @@ class UnitField(ExtractedField):
 
 
 class DrawingFields(StrictModel):
+    handle_hole_enabled: BooleanField = Field(default_factory=BooleanField)
+    handle_hole_diameter: NumericField = Field(default_factory=NumericField)
+    handle_hole_center_from_handle_end: NumericField = Field(default_factory=NumericField)
     outside_diameter: NumericField = Field(default_factory=NumericField)
     bore_diameter: NumericField = Field(default_factory=NumericField)
     thickness: NumericField = Field(default_factory=NumericField)

@@ -16,9 +16,9 @@ def validate_package(g, metadata, outputs):
     if audit.errors or audit.fixes or doc.units != 1:
         raise ValueError("DXF audit/units failed")
     entities = list(doc.modelspace())
-    if len(entities) != 2:
+    if len(entities) != (3 if g.spec.handle_hole_enabled else 2):
         raise ValueError("unexpected cutting entities")
-    outer, bore = entities
+    outer, bore = entities[:2]
     if (
         outer.dxftype() != "LWPOLYLINE"
         or not outer.closed
@@ -41,6 +41,13 @@ def validate_package(g, metadata, outputs):
         bore.dxf.center
     ) != (0, 0, 0):
         raise ValueError("rough bore differs from canonical rule")
+    if g.spec.handle_hole_enabled:
+        hole = entities[2]
+        if (hole.dxftype() != "CIRCLE" or hole.dxf.layer != "CUT_HANDLE_HOLE"
+            or not close(hole.dxf.radius * 2, g.spec.handle_hole_diameter)
+            or not close(hole.dxf.center.x, g.spec.centerline_to_handle_end - g.spec.handle_hole_center_from_handle_end)
+            or tuple(hole.dxf.center)[1:] != (0, 0)):
+            raise ValueError("Handle hole differs from frozen finished dimensions")
     record = json.loads(outputs["json"])
     expected = json.loads(json.dumps(manufacturing_record(g)))
     if any(record[k] != v for k, v in expected.items() if k != "status"):
@@ -53,6 +60,11 @@ def validate_package(g, metadata, outputs):
     if len(reader.pages) != 1:
         raise ValueError("expected one drawing sheet")
     text = reader.pages[0].extract_text()
+    if g.spec.handle_hole_enabled:
+        for label in (f"HANDLE HOLE Ø{g.spec.handle_hole_diameter:.4f}",
+                      f"{g.spec.handle_hole_center_from_handle_end:.4f} HANDLE END TO HOLE C/L"):
+            if label not in text:
+                raise ValueError("PDF missing finished handle hole requirement")
     for label in (
         f"Ø{g.spec.finished_bore_diameter:.3f}",
         "OP-" + g.spec.part_identifier,

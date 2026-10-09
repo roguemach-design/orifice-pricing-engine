@@ -58,6 +58,12 @@ def recovered_quote_session(values, context=None):
 
 def restore_quote_editor(state, values, context=None):
     """Install a purchaser snapshot before widgets render, without cached price/evidence."""
+    # Each editor snapshot owns its optional cut features, including legacy OFF.
+    state["quote_field_handle_hole_enabled"] = values.get("handle_hole_enabled", False)
+    for field in ("handle_hole_diameter", "handle_hole_center_from_handle_end"):
+        value = values.get(field)
+        state[f"quote_field_{field}"] = value
+        state[f"quote_field_{field}_text"] = "" if value is None else str(value)
     for field, value in values.items():
         state[f"quote_field_{field}"] = value
     state["phase1g_form_origins"] = {field: "customer" for field in values}
