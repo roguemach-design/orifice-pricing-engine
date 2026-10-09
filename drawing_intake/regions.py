@@ -120,7 +120,10 @@ def derive_candidate_regions(
             len(structure.candidate_regions) == 1
             and len(candidates) == 1
             and candidates[0].detection_method
-            == "raster_two_concentric_perimeters_without_centerline_v1"
+            in {
+                "raster_two_concentric_perimeters_without_centerline_v1",
+                "raster_cropped_two_concentric_perimeters_v1",
+            }
         ):
             candidate = candidates[0]
             output.append(

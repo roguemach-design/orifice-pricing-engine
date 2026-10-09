@@ -67,6 +67,7 @@ class SourceEvidence(StrictModel):
     bbox: tuple[float, float, float, float] | None = None
     coordinate_unit: CoordinateUnit | None = None
     extraction_method: str
+    source_type: str | None = None
 
 
 ScalarValue = float | int | str | bool
@@ -134,6 +135,9 @@ class DrawingFields(StrictModel):
     customer_part_number: StringField = Field(default_factory=StringField)
     drawing_number: StringField = Field(default_factory=StringField)
     revision: StringField = Field(default_factory=StringField)
+    tag_hole_diameter: NumericField = Field(default_factory=NumericField)
+    tag_hole_position: NumericField = Field(default_factory=NumericField)
+    neck_radius: NumericField = Field(default_factory=NumericField)
 
 
 class ProviderDataHandling(StrictModel):

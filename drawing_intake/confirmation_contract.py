@@ -51,6 +51,8 @@ class ConfirmationFieldProposal(StrictModel):
     confirmation_required: bool
     unsupported: bool
     competing_values: list[ScalarValue] = Field(default_factory=list)
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    source_type: str | None = None
     customer_decision: CustomerDecision = CustomerDecision.PENDING
     customer_value: ScalarValue | None = None
     decision_reason: str | None = None
@@ -74,6 +76,9 @@ class CustomerConfirmationContract(StrictModel):
 
 
 _MANUAL_ONLY_OBSERVATIONS = {
+    "tag_hole_diameter",
+    "tag_hole_position",
+    "neck_radius",
     "chamfer_present",
     "chamfer_width",
     "chamfer_depth",
@@ -163,6 +168,8 @@ def build_customer_confirmation_contract(
                 confirmation_required=confirmation_required,
                 unsupported=unsupported,
                 competing_values=result.candidate_values,
+                confidence=extracted.confidence,
+                source_type=source.source_type if source else None,
             )
         )
     contract = CustomerConfirmationContract(

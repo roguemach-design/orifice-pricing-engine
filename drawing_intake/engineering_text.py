@@ -52,7 +52,7 @@ class ParsedChamfer(StrictModel):
     normalization_rules: list[str] = Field(default_factory=list)
 
 
-_NUMBER = r"(?:\d+\s+\d+\s*/\s*\d+|\d+\s*/\s*\d+|(?:\d+(?:\.\d*)?|\.\d+))"
+_NUMBER = r"(?:\d+[ -]+\d+\s*/\s*\d+|\d+\s*/\s*\d+|(?:\d+(?:\.\d*)?|\.\d+))"
 
 
 def normalize_engineering_text(
@@ -340,6 +340,7 @@ def parse_chamfer_notation(
 
 def parse_material(raw: str) -> str | None:
     text = normalize_engineering_text(raw).normalized_text
+    text = re.sub(r"\bS\s*/\s*S\b", "SS", text)
     compact = " ".join(re.sub(r"[^A-Z0-9]+", " ", text).split())
     known_patterns = (
         r"\b304\s+(?:SS|STAINLESS(?:\s+STEEL)?)\b",
