@@ -1,15 +1,11 @@
-import os
-
 import requests
 import streamlit as st
 
-from auth import auth_headers, is_logged_in, render_auth_sidebar
+from auth import API_BASE, auth_headers, is_logged_in, render_auth_sidebar
 
 
 st.set_page_config(page_title="O-Plates Order Confirmation", layout="centered")
 render_auth_sidebar(show_debug=False)
-
-API_BASE = (os.environ.get("API_BASE") or "").strip().rstrip("/")
 
 if not API_BASE:
     st.error("The O-Plates pricing service is not configured.")
@@ -92,7 +88,13 @@ if order.get("shipping_name") or address:
     if address:
         st.text(address)
 
-st.caption("We’ll email the order confirmation and follow up with the approval drawing.")
+if order.get("email_delivery_mode") == "capture":
+    st.caption(
+        "Your order is confirmed. For this staging test, the confirmation email "
+        "and approval drawing are captured internally rather than sent."
+    )
+else:
+    st.caption("We’ll email the order confirmation and follow up with the approval drawing.")
 
 if is_logged_in():
     if st.button("View My Orders"):

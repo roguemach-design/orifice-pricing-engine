@@ -1,0 +1,59 @@
+{
+  "handle-hole-off": {
+    "sha256": {
+      "dxf": "57dad248d8081b6870a5d4c669b97e95c60affad9be766faa29c86f455c4f12c",
+      "json": "e383fbdb63ac321bf212118b2c316df04fd09cd806b1695550b4c05537d0dabd",
+      "pdf": "e443fb7c906bbf67834b2a23f3c065c8ef1c2c98ed27a142045a7a774abcac97",
+      "svg": "65076f294ad75659de6896e38ef27e327c18b68418c1f879963a5e64104a7968"
+    },
+    "spec": {
+      "application": "restriction-general",
+      "bore_tolerance": 0.005,
+      "centerline_to_handle_end": 10.5,
+      "chamfer": false,
+      "chamfer_angle_degrees": null,
+      "chamfer_side": null,
+      "chamfer_width": null,
+      "chamfer_width_definition": null,
+      "finished_bore_diameter": 1.548,
+      "finished_od": 5.0,
+      "flow_orientation": null,
+      "handle_width": 1,
+      "marking": null,
+      "material": "304 stainless steel",
+      "part_identifier": "HANDLE-HOLE-REVIEW",
+      "quantity": 1,
+      "thickness": 0.125
+    }
+  },
+  "handle-hole-on": {
+    "sha256": {
+      "dxf": "475db8652ede44ff4ee56afbb6ef4178f6a89d8853eeb03775462e4c106f6fb0",
+      "json": "abd76131688756f2c26dc87da23913be7c01a7736bfb80829af9932880f0a8fc",
+      "pdf": "918fa6875b630491db4e6bbb69e49d7e8c5e0b43eb2d42616f9d9be3c8dba92e",
+      "svg": "d59d139bec2ceac7342e47d898bfbdac459942bfd7e10ea620b49275324af183"
+    },
+    "spec": {
+      "application": "restriction-general",
+      "bore_tolerance": 0.005,
+      "centerline_to_handle_end": 10.5,
+      "chamfer": false,
+      "chamfer_angle_degrees": null,
+      "chamfer_side": null,
+      "chamfer_width": null,
+      "chamfer_width_definition": null,
+      "finished_bore_diameter": 1.548,
+      "finished_od": 5.0,
+      "flow_orientation": null,
+      "handle_hole_center_from_handle_end": 0.75,
+      "handle_hole_diameter": 0.375,
+      "handle_hole_enabled": true,
+      "handle_width": 1,
+      "marking": null,
+      "material": "304 stainless steel",
+      "part_identifier": "HANDLE-HOLE-REVIEW",
+      "quantity": 1,
+      "thickness": 0.125
+    }
+  }
+}

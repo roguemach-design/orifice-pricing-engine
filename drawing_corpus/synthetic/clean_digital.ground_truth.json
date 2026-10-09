@@ -1,0 +1,25 @@
+{
+  "corpus_version": "1.0",
+  "document_id": "synthetic-clean-digital",
+  "synthetic": true,
+  "categories": ["digital_pdf", "complete", "inch"],
+  "source_document": "clean_digital.pdf",
+  "expected_fields": {
+    "global_units": {"status": "detected", "value": "in", "unit": "in"},
+    "outside_diameter": {"status": "detected", "value": 8.0, "unit": "in"},
+    "bore_diameter": {"status": "detected", "value": 2.375, "unit": "in"},
+    "thickness": {"status": "detected", "value": 0.25, "unit": "in"},
+    "material": {"status": "detected", "value": "316"},
+    "quantity": {"status": "detected", "value": 4, "unit": "count"},
+    "bore_tolerance_plus": {"status": "detected", "value": 0.002, "unit": "in"},
+    "bore_tolerance_minus": {"status": "detected", "value": 0.002, "unit": "in"},
+    "chamfer_present": {"status": "detected", "value": true},
+    "chamfer_width": {"status": "detected", "value": 0.03, "unit": "in"},
+    "chamfer_angle": {"status": "detected", "value": 45.0, "unit": "deg"},
+    "marking_text": {"status": "detected", "value": "FE-101"},
+    "customer_part_number": {"status": "detected", "value": "CP-1001"},
+    "drawing_number": {"status": "detected", "value": "DWG-1001"},
+    "revision": {"status": "detected", "value": "B"}
+  },
+  "expected_validation_codes": []
+}

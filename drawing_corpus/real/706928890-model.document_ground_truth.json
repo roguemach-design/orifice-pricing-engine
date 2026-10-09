@@ -1,0 +1,12 @@
+{
+  "ground_truth_version": "1.0",
+  "corpus_id": "real-706928890-model-base",
+  "drawing_number": "706928890",
+  "revision": "-",
+  "page_count": 1,
+  "multi_part": true,
+  "visible_plate_region_count": 8,
+  "expected_document_status": "multiple_candidates",
+  "expected_production_behavior": "abstain_requires_part_selection",
+  "expected_abstention_reason": "unsupported_multi_part_sheet_requires_part_selection"
+}
