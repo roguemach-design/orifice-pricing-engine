@@ -1,7 +1,5 @@
-"""Compatibility entrypoint for the pre-multipage customer UI service."""
+"""Legacy service command uses the same customer routing and navigation."""
 
-import streamlit as st
+from customer_navigation import run_customer_app
 
-
-st.set_page_config(page_title="O-Plates", layout="wide")
-st.switch_page("pages/1_Quote.py")
+run_customer_app()

@@ -329,7 +329,14 @@ def render_auth_sidebar(*, show_debug: bool = False) -> None:
     _restore_auth_from_cookie_if_needed()
     _refresh_session_if_needed()
 
-    with st.sidebar:
+    # Embedded customers need an Account control in the page itself; iframe
+    # presentation can hide Streamlit's sidebar toolbar. Authentication is unchanged.
+    account_container = (
+        st.expander("Account", expanded=False)
+        if st.session_state.get("integrated_landing")
+        else st.sidebar
+    )
+    with account_container:
         if show_debug:
             _render_connection_debug()
             st.divider()

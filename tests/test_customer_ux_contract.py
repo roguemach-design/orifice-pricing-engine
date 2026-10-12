@@ -32,7 +32,7 @@ def test_marketing_start_quote_links_directly_to_configurator():
     marketing_html = (ROOT / "o-plates landing" / "index.html").read_text()
 
     assert (
-        'class="btn btn--primary btn--lg" href="https://quote.o-plates.com/Quote"'
+        'class="btn btn--primary btn--lg" href="#configurator"'
         in marketing_html
     )
 
@@ -40,7 +40,9 @@ def test_marketing_start_quote_links_directly_to_configurator():
 def test_application_root_routes_directly_to_quote_without_interstitial():
     root_app = (ROOT / "app.py").read_text()
 
-    assert root_app.rstrip().endswith('st.switch_page("pages/1_Quote.py")')
+    assert "run_customer_app()" in root_app
+    navigation = (ROOT / "customer_navigation.py").read_text()
+    assert '"pages/1_Quote.py"' in navigation
     assert 'st.title("O-Plates")' not in root_app
     assert "Build a Plate" not in root_app
     assert "My Orders" not in root_app
@@ -91,7 +93,7 @@ def test_quote_keeps_lean_owner_approved_controls():
     quote_source = (ROOT / "pages" / "1_Quote.py").read_text()
 
     assert '"Plate style"' not in quote_source
-    assert 'st.checkbox("Chamfer", value=False)' in quote_source
+    assert '"Chamfer", "chamfer", [False, True]' in quote_source
     assert '"Chamfer Width (in.)"' in quote_source
     assert "value=None" in quote_source
     assert '"Lead time"' in quote_source
@@ -122,7 +124,7 @@ def test_customer_entrypoints_do_not_fall_back_to_production_api():
 
 def test_legacy_entrypoints_are_routing_only_compatibility_shims():
     expected_routes = {
-        "ui_app.py": 'st.switch_page("pages/1_Quote.py")',
+        "ui_app.py": "run_customer_app()",
         "customer_portal.py": 'st.switch_page("pages/2_My_Orders.py")',
         "my_orders_app.py": 'st.switch_page("pages/2_My_Orders.py")',
         "quote_cart_app.py": 'st.switch_page("pages/3_Quote_Cart.py")',

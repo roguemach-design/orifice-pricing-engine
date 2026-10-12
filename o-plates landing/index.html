@@ -29,7 +29,7 @@
       </nav>
       <div class="topbar__actions">
         <a class="btn btn--ghost" href="mailto:sales@o-plates.com">Contact Us</a>
-        <a class="btn btn--primary" href="https://quote.o-plates.com/Quote">Start a Quote</a>
+        <a class="btn btn--primary" href="#configurator">Configure your plate</a>
       </div>
     </div>
   </header>
@@ -38,10 +38,11 @@
     <section class="hero" aria-labelledby="page-title">
       <div class="hero__copy">
         <div class="hero__top">
+          <p class="eyebrow">Built from your known dimensions.</p>
           <h1 id="page-title">Configure, price, and purchase custom orifice plates in minutes.</h1>
           <p class="muted hero__lede">Instant pricing, selectable lead times, and shipping options—then proceed directly to checkout or generate a PDF quote for purchasing.</p>
           <div class="hero__cta">
-            <a class="btn btn--primary btn--lg" href="https://quote.o-plates.com/Quote">Start a Quote →</a>
+            <a class="btn btn--primary btn--lg" href="#configurator">CONFIGURE YOUR PLATE →</a>
             <a class="btn btn--ghost btn--lg" href="#how">How it works</a>
           </div>
         </div>
@@ -69,6 +70,12 @@
           </div>
         </div>
       </div>
+    </section>
+
+    <section id="configurator" class="configurator-section" aria-labelledby="configure-title" tabindex="-1">
+      <div class="section-heading"><p class="section-label">Build from your known dimensions</p><h2 id="configure-title">Configure your plate</h2><p class="muted">Enter dimensions or upload a drawing, review the live preview, and see your verified price.</p></div>
+      <iframe id="plate-configurator" class="configurator-frame" title="O-Plates plate configurator, live drawing and pricing" src="https://quote.o-plates.com/Quote?embed=true&amp;integrated=1" loading="lazy"></iframe>
+      <p class="fineprint muted">Having trouble loading the configurator? <a href="https://quote.o-plates.com/Quote">Open the configurator directly</a>.</p>
     </section>
 
     <section id="how" class="card section-card" aria-labelledby="how-title">
@@ -101,10 +108,10 @@
 
     <section id="contact" class="card contact-card">
       <div><h2>Start with the dimensions you already know.</h2><p class="muted">Questions or special requirements can be reviewed before you order.</p></div>
-      <div class="contact-actions"><a class="btn btn--primary" href="https://quote.o-plates.com/Quote">Configure a Plate</a><a class="btn btn--ghost" href="mailto:sales@o-plates.com">sales@o-plates.com</a></div>
+      <div class="contact-actions"><a class="btn btn--primary" href="#configurator">Configure a Plate</a><a class="btn btn--ghost" href="mailto:sales@o-plates.com">sales@o-plates.com</a></div>
     </section>
     <footer class="footer"><div class="footer__left muted">© <span id="y"></span> O-Plates</div><div class="footer__right"><a class="navlink" href="mailto:sales@o-plates.com">sales@o-plates.com</a></div></footer>
   </main>
-  <script>document.getElementById("y").textContent=new Date().getFullYear();</script>
+  <script src="configurator.js"></script>
 </body>
 </html>

@@ -1,0 +1,74 @@
+# Landing page and configurator convergence
+
+The accepted public landing copy remains in `o-plates landing/index.html`.
+Its three configure CTAs now scroll to an embedded instance of the canonical
+customer configurator, immediately after the hero. `/Quote` remains a direct,
+compatible route; success, approval, account, cart, recovery, and internal
+sourcing URL paths are retained.
+
+## Source and scope
+
+- Branch: `work/landing-configurator-convergence`.
+- Accepted configurator/analyzer/handle-hole baseline: `a97a664686ca91d8edaa42f223542ac284b78c34`.
+- Existing production private API binding retained from `d55a682af59cb52966abf1455360a0af6c26a15a`.
+- Landing copy retained from `80b288fc10e34c6270968fcddb8666a14fe96bb4`, matching fetched public HTML.
+- The requested eyebrow is restored; existing purchasing, documentation, FAQ,
+  engineering contact, and How it works copy is preserved.
+
+Material, thickness, tolerance, lead time, chamfer, and handle-hole selections
+use native single-select segmented controls, with wrapping and required
+selection semantics. Unresolved analyzer values remain unresolved. Options
+come from the same active availability configuration. Explicit chamfer side,
+flow orientation, and width-definition choices also use buttons. Dimensions,
+marking, quantity, fraction parsing, and analyzer review remain unchanged.
+
+Customer navigation advertises Configure your plate, My Orders, and Quote Cart.
+Success, Drawing Approval, and Internal Sourcing are registered hidden routes;
+their server authorization and deliberate approval checks are unchanged.
+Embedded customers receive an in-page Account panel using the existing session
+restore, refresh, and login code. Standalone customers retain their sidebar.
+
+## Embed behavior
+
+The static page embeds `https://quote.o-plates.com/Quote?embed=true&integrated=1`.
+The configurator emits only content height, never form, order, or authentication
+data. The parent accepts heights only from its own configurator frame or direct
+child component with the exact quote origin and a bounded finite value. The
+fallback frame is generous and remains scrollable if automatic sizing fails.
+The direct configurator link remains available. No auth tokens are placed in
+the frame URL.
+
+## Validation
+
+The unchanged accepted baseline passed 617 tests with five private-corpus skips.
+The baseline fixture records actual pre-change UI requests for:
+
+1. 304 / 0.125 inch / ±0.005 / 21 days / no chamfer / no hole.
+2. 316 / 0.250 inch / ±0.002 / 14 days / no chamfer / handle hole.
+3. Carbon steel / 0.375 inch / ±0.001 / 21 days / explicit chamfer / handle hole.
+
+New controls reproduce those exact request dictionaries, pricing results,
+canonical spec hashes, and SVG/PDF/DXF fingerprints. Existing analyzer,
+manual fallback, confirmation invalidation, order recovery, auth, approval,
+sourcing authorization, and Frozen Plate tests remain included in the full suite.
+The final local suite passed **626 tests with five private-corpus skips**.
+Python compilation, JavaScript syntax, and whitespace checks passed.
+
+Additional checks cover material-specific thickness availability, unresolved
+choices, root routing, compatible hidden routes, and embed message validation.
+
+## Public deployment pending
+
+The connected Render account returned only workspace `roguemachine`
+(`roguemach@gmail.com`, `tea-d51l4np5pdvs73eakerg`). The owner selected
+**Different workspace**. No Render workspace was selected or mutated, and no
+public deployment ran. Identify/connect the intended account and workspace,
+then inspect the actual service bindings and deployed SHAs before proceeding.
+
+Deploy the customer UI commit first without changing any environment variables;
+then deploy the static landing from this branch. Preserve API deployment,
+checkout closure, maintenance state, Stripe LIVE, SendGrid, and sourcing.
+Post-deploy checks must include real desktop/tablet/mobile rendering, automatic
+frame height, keyboard controls, embedded session restore, analyzer access,
+My Orders, exact approval links, and checkout remaining closed. These live
+checks are pending; local browser rendering was unavailable in this session.

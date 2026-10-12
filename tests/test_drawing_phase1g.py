@@ -693,7 +693,7 @@ def test_manual_chamfer_waits_for_width_before_requesting_price(
         app = AppTest.from_file(str(ROOT / "pages" / "1_Quote.py"), default_timeout=20)
         app.run()
         initial_count = len(quote_calls)
-        next(field for field in app.checkbox if field.label == "Chamfer").set_value(
+        next(field for field in app.button_group if field.label == "Chamfer").set_value(
             True
         ).run()
         assert not app.exception
@@ -734,15 +734,15 @@ def test_staging_manual_chamfer_requires_explicit_geometry(monkeypatch, active_c
 
     with patch("requests.get", lambda *a, **k: _Response(active_config)), patch("requests.post", quote):
         app = AppTest.from_file(str(ROOT / "pages" / "1_Quote.py"), default_timeout=20).run()
-        next(f for f in app.checkbox if f.label == "Chamfer").set_value(True).run()
+        next(f for f in app.button_group if f.label == "Chamfer").set_value(True).run()
         assert app.number_input(key="staging_chamfer_angle").value is None
-        assert app.selectbox(key="staging_chamfer_side").value is None
+        assert app.button_group(key="staging_chamfer_side").value is None
         next(f for f in app.number_input if f.label == "Chamfer Width (in.)").set_value(0.02).run()
         assert any("Drawing HOLD" in w.value for w in app.warning)
         app.number_input(key="staging_chamfer_angle").set_value(45)
-        app.selectbox(key="staging_chamfer_side").set_value("downstream")
-        app.selectbox(key="staging_chamfer_flow").set_value("left-to-right")
-        app.selectbox(key="staging_chamfer_definition").set_value("radial-angle-from-face")
+        app.button_group(key="staging_chamfer_side").set_value("downstream")
+        app.button_group(key="staging_chamfer_flow").set_value("left-to-right")
+        app.button_group(key="staging_chamfer_definition").set_value("radial-angle-from-face")
         app.run()
         assert not app.exception
         assert not any("Drawing HOLD" in w.value for w in app.warning)
@@ -750,7 +750,7 @@ def test_staging_manual_chamfer_requires_explicit_geometry(monkeypatch, active_c
         assert calls[-1]["chamfer_side"] == "downstream"
         assert calls[-1]["flow_orientation"] == "left-to-right"
         assert calls[-1]["chamfer_width_definition"] == "radial-angle-from-face"
-        next(f for f in app.checkbox if f.label == "Chamfer").set_value(False).run()
+        next(f for f in app.button_group if f.label == "Chamfer").set_value(False).run()
         assert "chamfer_angle_degrees" not in calls[-1]
 
 
@@ -779,7 +779,7 @@ def test_signed_out_user_sees_locked_drawing_section(monkeypatch, active_config)
         next(
             button for button in app.button if button.label == "Sign in to upload"
         ).click().run()
-        assert any("Account sidebar" in item.value for item in app.info)
+        assert any("Open Account" in item.value for item in app.info)
         inspect_upload.assert_not_called()
 
 
@@ -1007,7 +1007,7 @@ def test_internal_real_form_upload_populate_complete_confirm_then_price(
             is None
         )
         assert (
-            next(field for field in app.selectbox if field.label == "Lead time").value
+            next(field for field in app.button_group if field.label == "Lead time").value
             is None
         )
         assert app.session_state["quote_field_handle_width"] is None
@@ -1025,14 +1025,14 @@ def test_internal_real_form_upload_populate_complete_confirm_then_price(
         assert ".st-key-quote_field_paddle_dia" not in highlight
         assert ".st-key-quote_field_handle_label" not in highlight
 
-        next(field for field in app.selectbox if field.label == "Chamfer").set_value(
+        next(field for field in app.button_group if field.label == "Chamfer").set_value(
             True
         ).run()
         assert not app.exception
         assert any(
             ".st-key-quote_field_chamfer_width" in item.value for item in app.markdown
         )
-        next(field for field in app.selectbox if field.label == "Chamfer").set_value(
+        next(field for field in app.button_group if field.label == "Chamfer").set_value(
             False
         ).run()
         assert not app.exception
@@ -1066,7 +1066,7 @@ def test_internal_real_form_upload_populate_complete_confirm_then_price(
             for field in app.number_input
             if field.label == "Handle Length (From Bore Center) (in.)"
         ).set_value(9.0)
-        next(field for field in app.selectbox if field.label == "Lead time").set_value(
+        next(field for field in app.button_group if field.label == "Lead time").set_value(
             14
         )
         app.run()
@@ -1230,7 +1230,7 @@ def test_source_contract_has_no_upload_api_or_drawing_pricing_path():
     assert "confirmed_drawing_quote_inputs" in quote_source
     assert "drawing" not in pricing_source.lower()
     assert 'st.subheader("Configuration Drawing")' in quote_source
-    assert 'st.checkbox("Chamfer", value=False)' in quote_source
+    assert '"Chamfer", "chamfer", [False, True]' in quote_source
 
 
 def test_candidate_metadata_remains_explicit_and_source_scoped(active_config):

@@ -58,6 +58,7 @@ from drawing_intake.owner_acceptance import (
     update_run,
 )
 from plate_preview import render_plate_svg
+from customer_controls import choice_buttons
 
 # -----------------------------
 # Page setup (MUST be first Streamlit call)
@@ -94,7 +95,6 @@ st.markdown(
 )
 
 # ---- EASY TUNING KNOBS ----
-RIGHT_FORM_WIDTH = 0.72  # 0.55 - 0.85 (smaller = narrower input column)
 IMAGE_TOP_SPACER_PX = 10  # move image down more/less
 LEFT_TIGHTEN = True  # tighter left column spacing
 PAY_BUTTON_HEIGHT_PX = 56  # taller button
@@ -144,7 +144,7 @@ from datetime import datetime, timezone
 if "cart" not in st.session_state or not isinstance(st.session_state.cart, list):
     st.session_state.cart = []
 
-st.markdown("<h1>Orifice Plate Instant Quote</h1>", unsafe_allow_html=True)
+st.markdown("<h2>Configure your plate</h2>", unsafe_allow_html=True)
 st.markdown(
     "<p style='text-align:center;color:#526174;margin-top:-0.25rem'>"
     "Enter the part dimensions shown in the drawing. Your verified price updates automatically."
@@ -691,7 +691,7 @@ if DRAWING_ASSISTED_ENABLED and not drawing_access_allowed:
             st.info("Sign in to upload and analyze your drawing.")
             if st.button("Sign in to upload", key="drawing_sign_in_cta"):
                 st.info(
-                    "Open the Account sidebar, enter your email, and select Send code. "
+                    "Open Account, enter your email, and select Send code. "
                     "Then enter the email verification code and select Verify code."
                 )
         else:
@@ -984,27 +984,19 @@ def _number_field(label: str, field: str, **kwargs):
 
 
 def _select_field(label: str, field: str, options, **kwargs):
-    key = _FORM_KEYS[field]
-    if key in st.session_state and st.session_state.get(key) in options:
-        return st.selectbox(label, options=options, key=key, **kwargs)
-    st.session_state[key] = None
-    return st.selectbox(label, options=options, index=None, key=key, **kwargs)
+    # Keep canonical values and unresolved analyzer fields; only selection UX changes.
+    return choice_buttons(label, options, key=_FORM_KEYS[field], **kwargs)
 
 
 with right:
     attention_style = st.empty() if drawing_mode else None
-    _spacer, form_col = st.columns(
-        [1 - RIGHT_FORM_WIDTH, RIGHT_FORM_WIDTH], gap="medium"
-    )
+    form_col = st.container()
 
     with form_col:
         attention_prompt = st.empty() if drawing_mode else None
         st.caption("PRODUCT")
-        r1c1, r1c2 = st.columns([1, 2])
-        with r1c1:
-            quantity = _number_field("Quantity", "quantity", min_value=1, step=1)
-        with r1c2:
-            material = _select_field("Material", "material", material_options)
+        quantity = _number_field("Quantity", "quantity", min_value=1, step=1)
+        material = _select_field("Material", "material", material_options)
 
         thickness_options = _thickness_options(material)
         existing_thickness = st.session_state.get(_FORM_KEYS["thickness"])
@@ -1019,6 +1011,7 @@ with right:
             thickness_options,
             placeholder="Select plate thickness",
             help="Finished nominal plate thickness.",
+            format_func=lambda value: f'{value:g}"',
         )
 
         st.caption("DIMENSIONS")
@@ -1064,7 +1057,10 @@ with right:
 
         if st.session_state.get(_FORM_KEYS["handle_hole_enabled"]) is None:
             st.session_state[_FORM_KEYS["handle_hole_enabled"]] = False
-        handle_hole_enabled = st.checkbox("Handle Hole", key=_FORM_KEYS["handle_hole_enabled"])
+        handle_hole_enabled = _select_field(
+            "Handle Hole", "handle_hole_enabled", [False, True],
+            format_func=lambda value: "HANDLE HOLE" if value else "NO HANDLE HOLE",
+        )
         handle_hole_diameter = None
         handle_hole_center_from_handle_end = None
         if handle_hole_enabled:
@@ -1090,6 +1086,7 @@ with right:
             tol_options,
             placeholder="Select bore tolerance",
             help="Permitted variation from the specified finished bore diameter.",
+            format_func=lambda value: f"±{value:g} in.",
         )
 
         handle_label = st.text_input(
@@ -1100,17 +1097,10 @@ with right:
             help=f"Maximum {max_handle_label_chars} characters. Letters, numbers, spaces, and standard shop-marking punctuation only.",
         )
 
-        if drawing_mode:
-            chamfer = _select_field(
-                "Chamfer",
-                "chamfer",
-                [False, True],
-                placeholder="Select yes or no",
-                format_func=lambda value: "Yes" if value else "No",
-            )
-        else:
-            chamfer = st.checkbox("Chamfer", value=False)
-            st.session_state[_FORM_KEYS["chamfer"]] = chamfer
+        chamfer = _select_field(
+            "Chamfer", "chamfer", [False, True],
+            format_func=lambda value: "CHAMFER" if value else "NO CHAMFER",
+        )
         chamfer_width = None
         chamfer_details = {}
         if chamfer is True:
@@ -1134,18 +1124,17 @@ with right:
                         max_value=89.9, value=None, step=0.1,
                         key="staging_chamfer_angle", placeholder="Enter angle",
                     ),
-                    "chamfer_side": st.selectbox(
-                        "Chamfer side", ["upstream", "downstream"], index=None,
+                    "chamfer_side": choice_buttons(
+                        "Chamfer side", ["upstream", "downstream"],
                         key="staging_chamfer_side", placeholder="Select side",
                     ),
-                    "flow_orientation": st.selectbox(
-                        "Flow orientation in section", ["left-to-right", "right-to-left"],
-                        index=None, key="staging_chamfer_flow", placeholder="Select flow",
+                    "flow_orientation": choice_buttons(
+                        "Flow orientation in section", ["left-to-right", "right-to-left"], key="staging_chamfer_flow", placeholder="Select flow",
                     ),
-                    "chamfer_width_definition": st.selectbox(
+                    "chamfer_width_definition": choice_buttons(
                         "Chamfer width definition",
                         ["radial-angle-from-face", "axial-depth-angle-from-face"],
-                        index=None, key="staging_chamfer_definition",
+                        key="staging_chamfer_definition",
                         placeholder="Select width definition",
                         format_func=lambda v: {
                             "radial-angle-from-face": "Radial width; angle measured from face",
@@ -1157,6 +1146,7 @@ with right:
                     st.warning("Drawing HOLD: complete the explicit chamfer configuration before drawing approval.")
 
         st.caption("DELIVERY")
+        st.caption("Lead-time selection updates the verified quote total below.")
         ships_in_days = _select_field(
             "Lead time",
             "ships_in_days",
@@ -1610,9 +1600,7 @@ def _add_to_cart(payload_inputs: dict, result: dict, *, assisted: bool = False) 
 with right:
     st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
-    _spacer, form_col = st.columns(
-        [1 - RIGHT_FORM_WIDTH, RIGHT_FORM_WIDTH], gap="large"
-    )
+    form_col = st.container()
     with form_col:
         # Logged-in indicator (ties the order to account)
         if is_logged_in():
