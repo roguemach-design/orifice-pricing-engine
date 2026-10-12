@@ -60,7 +60,8 @@ def test_connection_details_are_hidden_in_customer_sidebar():
     assert "if show_debug:\n            _render_connection_debug()" in auth_source
     for page in customer_pages:
         assert "render_auth_sidebar(show_debug=False)" in page.read_text()
-    assert 'st.subheader("Account")' in auth_source
+    assert 'st.expander("Account", expanded=False)' in auth_source
+    assert 'st.subheader("Account")' not in auth_source
 
 
 def test_quote_keeps_engineering_workflow_and_prominent_summary():

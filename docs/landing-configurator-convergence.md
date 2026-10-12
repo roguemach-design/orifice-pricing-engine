@@ -78,3 +78,36 @@ The production API remains at `a97a664686ca91d8edaa42f223542ac284b78c34`, with
 maintenance ON. UI maintenance remains OFF. Checkout was visibly disabled on
 the public configurator. The embedded frame loaded and resized automatically.
 Final corrected UI deployment and authenticated/responsive checks are pending.
+
+
+## Focused configurator UX refinement
+
+Based on the verified convergence head `917e1cbc526aeb1e7c730e8a96cccee89efde87e`.
+Signed-in customers receive an inline identity and tertiary Log out control.
+Signed-out customers retain the existing OTP form in a compact Account expander,
+without a duplicate heading. Cookie restore, refresh, OTP calls, authorization,
+and logout/session clearing are unchanged.
+
+Configure your plate is the primary heading below customer navigation and account
+status. The upload area is an unbordered section with customer-facing instructions,
+file selection/status and Analyze drawing controls. The existing upload validation,
+auth gate, analyzer review, failure handling and manual reset remain intact.
+
+Material uses the same required, single-select native control and state key with
+richer selectable card labels and scoped texture/selected-state styling. Only
+options supplied by current availability are rendered; canonical values remain
+`304`, `316`, and `Carbon Steel`. Thickness, tolerance, delivery, chamfer and handle
+hole controls remain unchanged. Pricing, geometry, artifacts, spec hashes and
+Frozen Plate implementation are untouched.
+
+Deployment is currently blocked: the Render connector cannot specify the new
+commit, while the exact-commit Dashboard deployment path requires a signed-in
+session. Both production UI and landing remain on `917e1cbc526a`. No environment,
+maintenance, API, Stripe, SendGrid or sourcing settings were modified. No vendor
+submission or manufacturing release occurred. Owner sign-in and public browser
+verification were not requested or performed in this refinement task.
+
+Validation: final suite **629 passed, 5 private-corpus skips**. All three
+accepted pricing/request and SVG/PDF/DXF/spec golden cases remain identical.
+Compact signed-in status/logout and unresolved/canonical material-card selection
+are covered by application tests. Python compilation and whitespace checks pass.

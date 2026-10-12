@@ -273,3 +273,40 @@ def test_cold_direct_embedded_quote_initializes_customer_shell(monkeypatch):
     assert (
         "showSidebarNavigation=false" in (ROOT / ".streamlit/config.toml").read_text()
     )
+
+
+def test_signed_in_account_is_compact_and_logout_still_clears_session(monkeypatch):
+    import auth
+    st.cache_data.clear()
+    monkeypatch.setenv("API_BASE", "http://offline-fixture")
+    monkeypatch.delenv("OPLATES_DRAWING_ASSISTED_ENABLED", raising=False)
+    monkeypatch.setattr(requests, "get", lambda *a, **k: response(CONFIG))
+    monkeypatch.setattr(requests, "post", lambda *a, **k: response(dict(unit_price=1.0, total_price=1.0)))
+    monkeypatch.setattr(auth, "_restore_auth_from_cookie_if_needed", lambda: None)
+    monkeypatch.setattr(auth, "_refresh_session_if_needed", lambda: None)
+    monkeypatch.setattr(auth, "_cookie_clear", lambda: None)
+    app = customer_page_test("pages/1_Quote.py")
+    app.session_state["auth"] = dict(access_token="fixture", refresh_token=None, user=None, email="customer@example.test")
+    app.run()
+    assert not app.exception
+    assert any(x.value == "Signed in as: customer@example.test" for x in app.caption)
+    assert not any("Logged in as" in x.value for x in app.success)
+    assert not any(x.label == "Account" for x in app.expander)
+    assert app.title[0].value == "Configure your plate"
+    app.button(key="account_log_out").click().run()
+    assert not app.exception
+    assert app.session_state["auth"]["access_token"] is None
+    assert any(x.label == "Account" for x in app.expander)
+
+
+def test_material_cards_keep_required_unresolved_selection():
+    def render():
+        from customer_controls import material_cards
+        material_cards(["304", "316", "Carbon Steel"], key="material")
+    app = AppTest.from_function(render).run()
+    assert not app.exception
+    assert app.button_group(key="material").value is None
+    for value in ("304", "316", "Carbon Steel"):
+        app.button_group(key="material").set_value(value).run()
+        assert not app.exception
+        assert app.session_state["material"] == value

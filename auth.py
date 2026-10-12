@@ -331,19 +331,19 @@ def render_auth_sidebar(*, show_debug: bool = False) -> None:
     _restore_auth_from_cookie_if_needed()
     _refresh_session_if_needed()
 
-    # Embedded customers need an Account control in the page itself; iframe
-    # presentation can hide Streamlit's sidebar toolbar. Authentication is unchanged.
-    account_container = (
-        st.expander("Account", expanded=False)
-        if st.session_state.get("integrated_landing")
-        else st.sidebar
-    )
+    # Signed-in identity is a utility row on every customer page.
+    if is_logged_in() and not show_debug:
+        with st.container(horizontal=True, key="account_utility"):
+            st.caption(f"Signed in as: {st.session_state.auth.get('email')}")
+            if st.button("Log out", key="account_log_out", type="tertiary"):
+                logout()
+        return
+
+    account_container = st.expander("Account", expanded=False)
     with account_container:
         if show_debug:
             _render_connection_debug()
             st.divider()
-
-        st.subheader("Account")
 
         if not is_logged_in():
             email = st.text_input(
@@ -418,7 +418,7 @@ def render_auth_sidebar(*, show_debug: bool = False) -> None:
                         )
 
         else:
-            st.success(f"Logged in as {st.session_state.auth.get('email')}")
+            st.caption(f"Signed in as: {st.session_state.auth.get('email')}")
             if st.button("Log out"):
                 logout()
 

@@ -771,7 +771,7 @@ def test_signed_out_user_sees_locked_drawing_section(monkeypatch, active_config)
         app = customer_page_test("pages/1_Quote.py", default_timeout=20
         ).run()
         assert not app.exception
-        assert any(item.label == "Upload a Drawing" for item in app.expander)
+        assert any(item.value == "Upload a drawing" for item in app.subheader)
         assert any("Sign in to upload and analyze" in item.value for item in app.info)
         assert not app.get("file_uploader")
         assert not any(button.label == "Analyze drawing" for button in app.button)
@@ -817,7 +817,7 @@ def test_internal_entry_point_requires_server_verified_access(
 
     assert not app.exception
     assert not app.get("file_uploader")
-    assert any(item.label == "Upload a Drawing" for item in app.expander)
+    assert any(item.value == "Upload a drawing" for item in app.subheader)
     assert any("approved test users only" in item.value for item in app.info)
 
 

@@ -58,7 +58,7 @@ from drawing_intake.owner_acceptance import (
     update_run,
 )
 from plate_preview import render_plate_svg
-from customer_controls import choice_buttons
+from customer_controls import choice_buttons, material_cards
 
 # -----------------------------
 # Page setup (MUST be first Streamlit call)
@@ -95,7 +95,7 @@ st.markdown(
 )
 
 # ---- EASY TUNING KNOBS ----
-IMAGE_TOP_SPACER_PX = 10  # move image down more/less
+IMAGE_TOP_SPACER_PX = 0  # move image down more/less
 LEFT_TIGHTEN = True  # tighter left column spacing
 PAY_BUTTON_HEIGHT_PX = 56  # taller button
 PAY_BUTTON_FONT_PX = 18
@@ -105,13 +105,14 @@ PAY_BUTTON_WIDTH_RATIO = 0.56  # how wide button is (0.40-0.80) of the input col
 st.markdown(
     f"""
     <style>
-    /* Centered H1 */
+    /* Dominant configurator heading */
     h1 {{
       font-family: Arial, sans-serif;
       font-weight: 800;
       letter-spacing: 0.2px;
       margin-bottom: 0.25rem;
-      text-align: center;
+      text-align: left;
+      font-size: 2rem;
     }}
 
     /* tighten vertical spacing between widgets */
@@ -144,9 +145,9 @@ from datetime import datetime, timezone
 if "cart" not in st.session_state or not isinstance(st.session_state.cart, list):
     st.session_state.cart = []
 
-st.markdown("<h2>Configure your plate</h2>", unsafe_allow_html=True)
+st.title("Configure your plate")
 st.markdown(
-    "<p style='text-align:center;color:#b2bed3;margin-top:-0.25rem'>"
+    "<p style='margin-top:0;margin-bottom:0.5rem'>"
     "Enter the part dimensions shown in the drawing. Your verified price updates automatically."
     "</p>",
     unsafe_allow_html=True,
@@ -685,8 +686,10 @@ owner_test_checkout_allowed = bool(
 )
 
 if DRAWING_ASSISTED_ENABLED and not drawing_access_allowed:
-    with st.expander("Upload a Drawing", expanded=True):
-        st.write("Upload your print and we'll fill in the details we can identify.")
+    with st.container(border=False, key="drawing_upload"):
+        st.subheader("Upload a drawing")
+        st.write("Upload your print and we’ll identify what we can.")
+        st.caption("Supports PDF, PNG, and JPG. Files are processed locally for analysis and are not stored.")
         if not is_logged_in():
             st.info("Sign in to upload and analyze your drawing.")
             if st.button("Sign in to upload", key="drawing_sign_in_cta"):
@@ -700,24 +703,24 @@ if DRAWING_ASSISTED_ENABLED and not drawing_access_allowed:
             )
 
 if drawing_access_allowed:
-    with st.expander(
-        "Upload a Drawing",
-        expanded=_DRAWING_SESSION_KEY not in st.session_state,
-    ):
-        st.write("Upload your print and we'll fill in the details we can identify.")
+    with st.container(border=False, key="drawing_upload"):
+        st.subheader("Upload a drawing")
+        st.write("Upload your print and we’ll identify what we can.")
         st.caption(
-            "Internal acceptance only · PDF, PNG, or JPEG · local processing · no drawing storage"
+            "Supports PDF, PNG, and JPG. Files are processed locally for analysis and are not stored."
         )
         if st.session_state.pop(_DRAWING_RESET_UPLOAD_KEY, False):
             st.session_state.pop("phase1g_uploaded_drawing", None)
             st.session_state.pop("phase1g_candidate_label", None)
-        uploaded_drawing = st.file_uploader(
+        upload_column, analyze_column = st.columns([3, 1], vertical_alignment="bottom")
+        uploaded_drawing = upload_column.file_uploader(
             "Drawing file",
             type=["pdf", "png", "jpg", "jpeg"],
             key="phase1g_uploaded_drawing",
+            label_visibility="collapsed",
         )
 
-        if st.button(
+        if analyze_column.button(
             "Analyze drawing",
             disabled=uploaded_drawing is None,
             key="phase1g_analyze_drawing",
@@ -770,7 +773,7 @@ if drawing_access_allowed:
                 st.error(str(exc))
             except DrawingProcessingBusyError:
                 st.error(
-                    "Another internal drawing test is processing. Try again when it finishes; your form is unchanged."
+                    "Another drawing is processing. Try again when it finishes; your form is unchanged."
                 )
             except DrawingProcessingTimeoutError:
                 st.error(
@@ -846,7 +849,7 @@ if drawing_access_allowed:
                         st.rerun()
                     except DrawingProcessingBusyError:
                         st.error(
-                            "Another internal drawing test is processing. Try again when it finishes; your form is unchanged."
+                            "Another drawing is processing. Try again when it finishes; your form is unchanged."
                         )
                     except DrawingProcessingTimeoutError:
                         st.error(
@@ -996,7 +999,7 @@ with right:
         attention_prompt = st.empty() if drawing_mode else None
         st.caption("PRODUCT")
         quantity = _number_field("Quantity", "quantity", min_value=1, step=1)
-        material = _select_field("Material", "material", material_options)
+        material = material_cards(material_options, key=_FORM_KEYS["material"])
 
         thickness_options = _thickness_options(material)
         existing_thickness = st.session_state.get(_FORM_KEYS["thickness"])
