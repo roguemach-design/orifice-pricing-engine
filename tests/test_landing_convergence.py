@@ -1,3 +1,5 @@
+from ui_harness import customer_page_test
+
 """Customer selections preserve accepted request values and artifact fingerprints."""
 
 import json
@@ -149,7 +151,7 @@ def test_choices_match_accepted_baseline(monkeypatch, index):
         )
 
     monkeypatch.setattr(requests, "post", post)
-    app = AppTest.from_file(str(ROOT / "pages/1_Quote.py"), default_timeout=20)
+    app = customer_page_test("pages/1_Quote.py", default_timeout=20)
     exercise(app, CASES[index])
     golden = json.loads((ROOT / "tests/fixtures/convergence-baseline.json").read_text())
     assert fingerprints(calls[-1]) == golden["cases"][index]
@@ -176,13 +178,13 @@ def test_dynamic_availability_keeps_unresolved_choices(monkeypatch):
             calls.append(k["json"]) or response(dict(unit_price=1.0, total_price=1.0))
         ),
     )
-    app = AppTest.from_file(str(ROOT / "pages/1_Quote.py")).run()
+    app = customer_page_test("pages/1_Quote.py").run()
     app.button_group(key="quote_field_thickness").set_value(0.25).run()
     app.button_group(key="quote_field_material").set_value("316").run()
     assert app.button_group(key="quote_field_thickness").value == 0.125
     assert calls[-1]["thickness"] == 0.125
     # Analyzer/recovery may intentionally leave a field unresolved before first render.
-    unresolved = AppTest.from_file(str(ROOT / "pages/1_Quote.py"))
+    unresolved = customer_page_test("pages/1_Quote.py")
     unresolved.session_state["phase1g_form_origins"] = {}
     unresolved.session_state["quote_field_bore_tolerance"] = None
     before = len(calls)
@@ -243,3 +245,31 @@ def test_customer_entrypoint_retains_routes_and_guest_gates(monkeypatch, path):
         # An unbound environment fails closed before requesting credentials/data.
         assert not app.text_input
         assert not app.get("dataframe")
+
+
+def test_cold_direct_embedded_quote_initializes_customer_shell(monkeypatch):
+    st.cache_data.clear()
+    monkeypatch.setenv("API_BASE", "http://offline-fixture")
+    monkeypatch.delenv("OPLATES_DRAWING_ASSISTED_ENABLED", raising=False)
+    monkeypatch.setattr(requests, "get", lambda *a, **k: response(CONFIG))
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda *a, **k: response(dict(unit_price=1.0, total_price=1.0)),
+    )
+    app = customer_page_test("pages/1_Quote.py")
+    app.query_params["integrated"] = "1"
+    app.run()
+    assert not app.exception
+    assert app.session_state["integrated_landing"] is True
+    assert any(x.label == "Account" for x in app.expander)
+    assert not app.sidebar.text_input
+    page_links = app.get("page_link")
+    assert [x.proto.label for x in page_links] == [
+        "Configure your plate",
+        "My Orders",
+        "Quote Cart",
+    ]
+    assert (
+        "showSidebarNavigation=false" in (ROOT / ".streamlit/config.toml").read_text()
+    )

@@ -1,3 +1,4 @@
+from ui_harness import customer_page_test
 """Owner-test cart handoff and access gates, without live payment calls."""
 
 from pathlib import Path
@@ -213,7 +214,7 @@ def _quote_app(monkeypatch, *, checkout_enabled, confirmed=True, authorized=True
         patch("requests.post", fake_post),
         patch("streamlit.switch_page"),
     ):
-        app = AppTest.from_file(str(ROOT / "pages" / "1_Quote.py"), default_timeout=20)
+        app = customer_page_test("pages/1_Quote.py", default_timeout=20)
         app.session_state["auth"] = {
             "access_token": _jwt(),
             "refresh_token": None,
@@ -362,7 +363,7 @@ def test_owner_cart_freezes_confirmed_line_and_reprices_each_snapshot(monkeypatc
         patch("requests.post", fake_post),
         patch("streamlit.switch_page"),
     ):
-        app = AppTest.from_file(str(ROOT / "pages" / "3_Quote_Cart.py"))
+        app = customer_page_test("pages/3_Quote_Cart.py")
         app.session_state["auth"] = {
             "access_token": _jwt(),
             "refresh_token": None,
@@ -419,7 +420,7 @@ def test_owner_cart_checkout_remains_disabled_without_switch_or_access(monkeypat
                 ),
             ),
         ):
-            app = AppTest.from_file(str(ROOT / "pages" / "3_Quote_Cart.py"))
+            app = customer_page_test("pages/3_Quote_Cart.py")
             app.session_state["auth"] = {
                 "access_token": _jwt(),
                 "refresh_token": None,
@@ -487,7 +488,7 @@ def test_fresh_quote_session_recovers_corrected_checkout_snapshot(monkeypatch):
         ),
         patch("streamlit.switch_page"),
     ):
-        app = AppTest.from_file(str(ROOT / "pages" / "1_Quote.py"), default_timeout=20)
+        app = customer_page_test("pages/1_Quote.py", default_timeout=20)
         app.session_state["auth"] = {
             "access_token": _jwt(),
             "refresh_token": None,
@@ -550,8 +551,7 @@ def test_fresh_cart_session_recovers_independent_lines_and_editor(monkeypatch):
         ),
         patch("streamlit.switch_page"),
     ):
-        app = AppTest.from_file(
-            str(ROOT / "pages" / "3_Quote_Cart.py"), default_timeout=20
+        app = customer_page_test("pages/3_Quote_Cart.py", default_timeout=20
         )
         app.session_state["auth"] = {
             "access_token": _jwt(),

@@ -57,18 +57,24 @@ Python compilation, JavaScript syntax, and whitespace checks passed.
 Additional checks cover material-specific thickness availability, unresolved
 choices, root routing, compatible hidden routes, and embed message validation.
 
-## Public deployment pending
+## Deployment verification
 
-The connected Render account returned only workspace `roguemachine`
-(`roguemach@gmail.com`, `tea-d51l4np5pdvs73eakerg`). The owner selected
-**Different workspace**. No Render workspace was selected or mutated, and no
-public deployment ran. Identify/connect the intended account and workspace,
-then inspect the actual service bindings and deployed SHAs before proceeding.
+The owner confirmed Render workspace `roguemachine`
+(`roguemach@gmail.com`, `tea-d51l4np5pdvs73eakerg`). The original integration
+commit `98f7f0e4fb8db4b49298eb47817b8a284c3762b2` was deployed to the production
+UI and landing services using exact-commit manual deployment. No service branch,
+environment variable, API deployment, or maintenance setting was changed.
 
-Deploy the customer UI commit first without changing any environment variables;
-then deploy the static landing from this branch. Preserve API deployment,
-checkout closure, maintenance state, Stripe LIVE, SendGrid, and sourcing.
-Post-deploy checks must include real desktop/tablet/mobile rendering, automatic
-frame height, keyboard controls, embedded session restore, analyzer access,
-My Orders, exact approval links, and checkout remaining closed. These live
-checks are pending; local browser rendering was unavailable in this session.
+Live verification exposed a cold-start defect: direct `/Quote` entry could run
+before the root initialized `st.navigation`, exposing legacy navigation and
+omitting the integrated shell. Customer shell rendering now runs from the shared
+account renderer on every customer page, and Streamlit legacy sidebar navigation
+is disabled at configuration level. Session, authorization, pricing, and artifact
+behavior remain unchanged. Customer UI tests now register the actual route set,
+rather than treating individual page scripts as isolated applications. The fix
+passed 128 focused navigation/auth/configurator/analyzer/cart/handle-hole tests.
+
+The production API remains at `a97a664686ca91d8edaa42f223542ac284b78c34`, with
+maintenance ON. UI maintenance remains OFF. Checkout was visibly disabled on
+the public configurator. The embedded frame loaded and resized automatically.
+Final corrected UI deployment and authenticated/responsive checks are pending.

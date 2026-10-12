@@ -1,3 +1,4 @@
+from ui_harness import customer_page_test
 import base64
 import io
 import json
@@ -650,8 +651,7 @@ def test_real_page_keeps_manual_pricing_and_existing_svg_when_feature_disabled(
         )
 
     with patch("requests.get", fake_get), patch("requests.post", fake_post):
-        app = AppTest.from_file(
-            str(ROOT / "pages" / "1_Quote.py"), default_timeout=20
+        app = customer_page_test("pages/1_Quote.py", default_timeout=20
         ).run()
 
     assert not app.exception
@@ -690,7 +690,7 @@ def test_manual_chamfer_waits_for_width_before_requesting_price(
         )
 
     with patch("requests.get", fake_get), patch("requests.post", fake_post):
-        app = AppTest.from_file(str(ROOT / "pages" / "1_Quote.py"), default_timeout=20)
+        app = customer_page_test("pages/1_Quote.py", default_timeout=20)
         app.run()
         initial_count = len(quote_calls)
         next(field for field in app.button_group if field.label == "Chamfer").set_value(
@@ -733,7 +733,7 @@ def test_staging_manual_chamfer_requires_explicit_geometry(monkeypatch, active_c
         return _Response({"unit_price": 100.0, "total_price": 100.0, "configuration_id": "test"})
 
     with patch("requests.get", lambda *a, **k: _Response(active_config)), patch("requests.post", quote):
-        app = AppTest.from_file(str(ROOT / "pages" / "1_Quote.py"), default_timeout=20).run()
+        app = customer_page_test("pages/1_Quote.py", default_timeout=20).run()
         next(f for f in app.button_group if f.label == "Chamfer").set_value(True).run()
         assert app.number_input(key="staging_chamfer_angle").value is None
         assert app.button_group(key="staging_chamfer_side").value is None
@@ -768,8 +768,7 @@ def test_signed_out_user_sees_locked_drawing_section(monkeypatch, active_config)
     ), patch(
         "drawing_intake.configurator_integration.inspect_validated_upload"
     ) as inspect_upload:
-        app = AppTest.from_file(
-            str(ROOT / "pages" / "1_Quote.py"), default_timeout=20
+        app = customer_page_test("pages/1_Quote.py", default_timeout=20
         ).run()
         assert not app.exception
         assert any(item.label == "Upload a Drawing" for item in app.expander)
@@ -807,7 +806,7 @@ def test_internal_entry_point_requires_server_verified_access(
             }
         ),
     ):
-        app = AppTest.from_file(str(ROOT / "pages" / "1_Quote.py"), default_timeout=20)
+        app = customer_page_test("pages/1_Quote.py", default_timeout=20)
         app.session_state["auth"] = {
             "access_token": _jwt("ordinary-user"),
             "refresh_token": None,
@@ -854,7 +853,7 @@ def test_invalid_upload_preserves_existing_manual_configuration(
         )
 
     with patch("requests.get", fake_get), patch("requests.post", fake_post):
-        app = AppTest.from_file(str(ROOT / "pages" / "1_Quote.py"), default_timeout=20)
+        app = customer_page_test("pages/1_Quote.py", default_timeout=20)
         app.session_state["auth"] = {
             "access_token": _jwt("internal-user"),
             "refresh_token": None,
@@ -961,7 +960,7 @@ def test_internal_real_form_upload_populate_complete_confirm_then_price(
             return_value=recognized,
         ),
     ):
-        app = AppTest.from_file(str(ROOT / "pages" / "1_Quote.py"), default_timeout=30)
+        app = customer_page_test("pages/1_Quote.py", default_timeout=30)
         app.session_state["auth"] = {
             "access_token": _jwt("internal-user"),
             "refresh_token": None,

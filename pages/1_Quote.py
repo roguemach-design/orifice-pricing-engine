@@ -146,7 +146,7 @@ if "cart" not in st.session_state or not isinstance(st.session_state.cart, list)
 
 st.markdown("<h2>Configure your plate</h2>", unsafe_allow_html=True)
 st.markdown(
-    "<p style='text-align:center;color:#526174;margin-top:-0.25rem'>"
+    "<p style='text-align:center;color:#b2bed3;margin-top:-0.25rem'>"
     "Enter the part dimensions shown in the drawing. Your verified price updates automatically."
     "</p>",
     unsafe_allow_html=True,
@@ -1607,7 +1607,7 @@ with right:
             st.success("You’re logged in — this order will be saved to your account.")
         else:
             st.info(
-                "Checkout as guest — log in from the sidebar to save orders to your account."
+                "Checkout as guest — open Account to save orders to your account."
             )
 
         if OWNER_ACCEPTANCE_MODE and not owner_test_checkout_allowed:

@@ -7,3 +7,7 @@ backgroundColor="#0e1117"
 secondaryBackgroundColor="#161b22"
 textColor="#e6edf3"
 font="sans serif"
+
+# Hide legacy discovery navigation even before the root initializes st.navigation.
+[client]
+showSidebarNavigation=false

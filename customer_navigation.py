@@ -1,5 +1,7 @@
 """Customer routes; internal tools retain their own authorization and URLs."""
 
+from pathlib import Path
+
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -35,6 +37,11 @@ def run_customer_app():
         ],
         position="hidden",
     )
+    selected.run()
+
+
+def render_customer_shell():
+    """Render on direct page entry as well as initialized root navigation."""
     st.markdown(
         """<style>
         [data-testid="stMainBlockContainer"]{max-width:1500px}
@@ -71,7 +78,14 @@ def run_customer_app():
             height=0,
         )
     with st.container(horizontal=True):
-        st.page_link("pages/1_Quote.py", label="Configure your plate")
-        st.page_link("pages/2_My_Orders.py", label="My Orders")
-        st.page_link("pages/3_Quote_Cart.py", label="Quote Cart")
-    selected.run()
+        st.page_link(
+            Path(__file__).resolve().parent / "pages/1_Quote.py",
+            label="Configure your plate",
+        )
+        st.page_link(
+            Path(__file__).resolve().parent / "pages/2_My_Orders.py", label="My Orders"
+        )
+        st.page_link(
+            Path(__file__).resolve().parent / "pages/3_Quote_Cart.py",
+            label="Quote Cart",
+        )

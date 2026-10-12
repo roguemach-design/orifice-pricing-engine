@@ -25,7 +25,7 @@ from drawing_intake.configurator_integration import feature_flag_enabled
 from drawing_intake.owner_access import verified_owner_access
 
 render_auth_sidebar(show_debug=False)
-require_login("Log in in the sidebar to manage quote carts.")
+require_login("Open Account and log in to manage quote carts.")
 
 st.title("Quote Cart")
 st.caption("Build a multi-line quote with multiple configured plates. PDF + checkout included.")

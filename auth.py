@@ -324,6 +324,8 @@ def _render_connection_debug() -> None:
 
 
 def render_auth_sidebar(*, show_debug: bool = False) -> None:
+    from customer_navigation import render_customer_shell
+    render_customer_shell()
     # ✅ IMPORTANT: restore BEFORE widgets
     _ensure_auth_state()
     _restore_auth_from_cookie_if_needed()
