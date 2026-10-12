@@ -1229,7 +1229,10 @@ def test_source_contract_has_no_upload_api_or_drawing_pricing_path():
     assert "confirmed_drawing_quote_inputs" in quote_source
     assert "drawing" not in pricing_source.lower()
     assert 'st.subheader("Configuration Drawing")' in quote_source
-    assert '"Chamfer", "chamfer", [False, True]' in quote_source
+    assert 'bore_edge_choice(key=_FORM_KEYS["chamfer"])' in quote_source
+    assert '"Chamfer", [False, True]' in " ".join(
+        (ROOT / "bore_edge_control.py").read_text().split()
+    )
 
 
 def test_candidate_metadata_remains_explicit_and_source_scoped(active_config):

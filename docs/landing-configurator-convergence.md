@@ -111,3 +111,20 @@ Validation: final suite **629 passed, 5 private-corpus skips**. All three
 accepted pricing/request and SVG/PDF/DXF/spec golden cases remain identical.
 Compact signed-in status/logout and unresolved/canonical material-card selection
 are covered by application tests. Python compilation and whitespace checks pass.
+
+
+## Bore Edge Type selection aid
+
+The approved uploaded Bore Edge Type panel is reproduced as compact native SVG
+illustrations in the existing native single-select chamfer control. No Chamfer
+maps to `False`; Chamfered Bore maps to `True`. The existing session key, required
+selection semantics, unresolved analyzer state, detail-input conditional and HOLD
+behavior remain unchanged. The illustrative plan/section diagrams contain no
+numerical dimensions or angle claims and never feed manufacturing geometry.
+The native buttons retain keyboard access and pressed state; scoped styling
+provides clear selected/focus outlines and stacks the options below 600px.
+Pricing and manufacturing source remain unchanged.
+
+Focused validation: **151 passed, zero skipped** across bore-edge, convergence
+goldens, analyzer/chamfer review, handle-hole and checkout workflows. The accepted
+full suite at the parent passed 629 with five private-corpus skips.

@@ -59,6 +59,7 @@ from drawing_intake.owner_acceptance import (
 )
 from plate_preview import render_plate_svg
 from customer_controls import choice_buttons, material_cards
+from bore_edge_control import bore_edge_choice
 
 # -----------------------------
 # Page setup (MUST be first Streamlit call)
@@ -1100,10 +1101,7 @@ with right:
             help=f"Maximum {max_handle_label_chars} characters. Letters, numbers, spaces, and standard shop-marking punctuation only.",
         )
 
-        chamfer = _select_field(
-            "Chamfer", "chamfer", [False, True],
-            format_func=lambda value: "CHAMFER" if value else "NO CHAMFER",
-        )
+        chamfer = bore_edge_choice(key=_FORM_KEYS["chamfer"])
         chamfer_width = None
         chamfer_details = {}
         if chamfer is True:
