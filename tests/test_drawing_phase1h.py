@@ -1,3 +1,4 @@
+from ui_harness import customer_page_test
 import json
 from pathlib import Path
 from unittest.mock import patch
@@ -164,8 +165,8 @@ def test_owner_acceptance_environment_disables_manual_checkout(monkeypatch):
     with patch("requests.get", return_value=Response(active_config)), patch(
         "requests.post", return_value=Response(price)
     ):
-        app = AppTest.from_file(
-            str(Path(__file__).resolve().parents[1] / "pages" / "1_Quote.py"),
+        app = customer_page_test(
+            "pages/1_Quote.py",
             default_timeout=20,
         ).run()
 
