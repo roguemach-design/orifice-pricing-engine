@@ -123,7 +123,6 @@ st.markdown(
 
     /* Compact secondary upload path and aligned configurator start. */
     .st-key-drawing_upload [data-testid="stVerticalBlock"] {{gap:0.2rem}}
-    .st-key-drawing_upload p {{margin:0}}
     .st-key-drawing_upload [data-testid="stButton"] button {{
         height:auto;min-height:36px;padding:.35rem .75rem;font-size:.875rem;
     }}
