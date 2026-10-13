@@ -120,13 +120,17 @@ def router(customer_auth, admin_auth, load_order):
         )
 
     @routes.get("/admin/frozen-plates", dependencies=[Depends(admin_auth)])
-    def plates(order_id: str):
+    def plates(order_id: str | None = None):
         with repository().connect() as db:
             return [
                 dict(r)
                 for r in db.execute(
-                    "SELECT * FROM frozen_plates WHERE order_id=? ORDER BY line_id",
-                    (order_id,),
+                    (
+                        "SELECT * FROM frozen_plates WHERE order_id=? ORDER BY line_id"
+                        if order_id
+                        else "SELECT * FROM frozen_plates ORDER BY created_at DESC LIMIT 200"
+                    ),
+                    (order_id,) if order_id else (),
                 )
             ]
 
@@ -210,26 +214,64 @@ def router(customer_auth, admin_auth, load_order):
             ),
         }
 
+    @routes.get(
+        "/admin/frozen-plates/{plate_id}/revisions", dependencies=[Depends(admin_auth)]
+    )
+    def revision_history(plate_id: str):
+        repo = repository()
+        run(lambda: repo.plate(plate_id))
+        with repo.connect() as db:
+            ids = [
+                r["id"]
+                for r in db.execute(
+                    "SELECT id FROM frozen_plate_revisions WHERE plate_id=? ORDER BY number DESC",
+                    (plate_id,),
+                )
+            ]
+        return [repo.revision(rid) for rid in ids]
+
+    @routes.get(
+        "/admin/frozen-plates/revisions/{revision_id}/artifact/{kind}",
+        dependencies=[Depends(admin_auth)],
+    )
+    def review_artifact(revision_id: str, kind: str):
+        # Historical PDFs/specs are reviewable; DXF retains the existing current-approval gate.
+        if kind not in {"pdf", "json"}:
+            raise HTTPException(404, "Not found")
+        repo = repository()
+
+        def read():
+            with repo.connect() as db:
+                revision, artifacts, contents = repo._verified(db, revision_id)
+                return revision, artifacts[kind], contents[kind]
+
+        revision, artifact, content = run(read)
+        return Response(
+            content,
+            media_type={"pdf": "application/pdf", "json": "application/json"}[kind],
+            headers={
+                "Content-Disposition": f'attachment; filename="{artifact["filename"]}"',
+                "X-Artifact-SHA256": artifact["sha256"],
+                "X-Spec-SHA256": revision["spec_sha256"],
+                "X-Frozen-Revision": revision_id,
+                "Cache-Control": "no-store",
+            },
+        )
+
     @routes.get("/admin/frozen-plates/{plate_id}", dependencies=[Depends(admin_auth)])
-    def internal(plate_id: str):
+    def internal(plate_id: str, revision_id: str | None = None):
         repo = repository()
         plate = run(lambda: repo.plate(plate_id))
+        selected = revision_id or plate["current_revision"]
+        revision = run(lambda: repo.revision(selected)) if selected else None
+        if revision and revision["plate_id"] != plate_id:
+            raise HTTPException(404, "Not found")
         return {
             "plate": plate,
-            "revision": (
-                repo.revision(plate["current_revision"])
-                if plate["current_revision"]
-                else None
-            ),
-            "deliveries": _records(
-                repo, "frozen_plate_deliveries", plate["current_revision"]
-            ),
-            "approvals": _records(
-                repo, "frozen_plate_approvals", plate["current_revision"]
-            ),
-            "sourcing": _records(
-                repo, "frozen_plate_sourcing", plate["current_revision"]
-            ),
+            "revision": revision,
+            "deliveries": _records(repo, "frozen_plate_deliveries", selected),
+            "approvals": _records(repo, "frozen_plate_approvals", selected),
+            "sourcing": _records(repo, "frozen_plate_sourcing", selected),
         }
 
     @routes.post(
