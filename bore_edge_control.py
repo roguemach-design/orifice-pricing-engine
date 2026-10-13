@@ -2,6 +2,9 @@
 
 import base64
 from pathlib import Path
+from io import BytesIO
+
+from PIL import Image
 
 import streamlit as st
 
@@ -12,14 +15,19 @@ BORE_EDGE_IMAGE = Path(__file__).resolve().parent / "assets" / "bore-edge-type.p
 
 @st.cache_data
 def _graphic_background():
-    return base64.b64encode(BORE_EDGE_IMAGE.read_bytes()).decode("ascii")
+    # Crop only the illustrations; exclude raster labels, borders and state dots.
+    with Image.open(BORE_EDGE_IMAGE) as source:
+        graphics = []
+        for box in ((230, 150, 930, 555), (1080, 150, 1780, 555)):
+            output = BytesIO()
+            source.crop(box).save(output, format="PNG")
+            graphics.append(base64.b64encode(output.getvalue()).decode("ascii"))
+    return tuple(graphics)
 
 
 def bore_edge_choice(*, key):
     """Use two graphic cards as the single required canonical boolean selector."""
-    # Show the interiors of the original cards, excluding their baked-in borders.
-    # Native button state supplies the border and covers the static selection dot.
-    graphic = _graphic_background()
+    left_graphic, right_graphic = _graphic_background()
     st.markdown(
         """<style>
       .st-key-bore_edge_choice [data-testid="stElementContainer"]:has([data-testid="stButtonGroup"]) {width:100%!important}
@@ -27,15 +35,23 @@ def bore_edge_choice(*, key):
       .st-key-bore_edge_choice [data-testid="stButtonGroup"] > div {width:100%;max-width:none;gap:1rem;flex-wrap:nowrap}
       .st-key-bore_edge_choice [data-testid="stButtonGroup"] button {
         position:relative;flex:1 1 0;min-width:0;max-width:100%;height:auto;
-        aspect-ratio:797/552;padding:0;border:2px solid #343e49;border-radius:10px;
-        background-image:url(data:image/png;base64,""" + graphic + """);
-        background-size:256.9636% 135.5072%;background-repeat:no-repeat;
-        background-position:16.7866% 65.8163%;overflow:hidden;
+        display:flex;flex-direction:column;align-items:stretch;justify-content:flex-start;
+        padding:1rem;text-align:left;border:2px solid #343e49;border-radius:10px;
+        background:#0d141c;overflow:hidden;
       }
-      .st-key-bore_edge_choice [data-testid="stButtonGroup"] button:nth-of-type(2) {background-position:83.4532% 65.8163%}
+      .st-key-bore_edge_choice [data-testid="stButtonGroup"] button::before {
+        content:"";display:block;width:100%;aspect-ratio:700/405;flex-shrink:0;
+        background-image:url(data:image/png;base64,""" + left_graphic + """);
+        background-size:contain;background-position:center;background-repeat:no-repeat;
+      }
+      .st-key-bore_edge_choice [data-testid="stButtonGroup"] button:nth-of-type(2)::before {
+        background-image:url(data:image/png;base64,""" + right_graphic + """);
+      }
       .st-key-bore_edge_choice [data-testid="stButtonGroup"] button p {
-        position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
-        clip-path:inset(50%);white-space:nowrap;
+        white-space:normal;font-size:1rem;line-height:1.4;margin:.5rem 0 0;color:#dbe1e7;
+      }
+      .st-key-bore_edge_choice [data-testid="stButtonGroup"] button strong {
+        font-size:1.15rem;color:#fff;
       }
       .st-key-bore_edge_choice [data-testid="stButtonGroup"] button::after {
         content:"";position:absolute;top:3%;right:3.3%;width:6%;aspect-ratio:1;
@@ -63,6 +79,9 @@ def bore_edge_choice(*, key):
             "Chamfer",
             [False, True],
             key=key,
-            format_func=lambda value: "CHAMFERED BORE" if value else "NO CHAMFER",
+            format_func=lambda value: (
+                "**CHAMFERED BORE**\n\nAdd a chamfer to the bore edge."
+                if value else "**NO CHAMFER**\n\nSquare bore edge."
+            ),
             label_visibility="collapsed",
         )

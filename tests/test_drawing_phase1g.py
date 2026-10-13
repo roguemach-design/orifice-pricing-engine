@@ -719,7 +719,7 @@ def test_manual_chamfer_waits_for_width_before_requesting_price(
         assert quote_calls[-1]["chamfer_width"] == 0.0625
 
 
-def test_staging_manual_chamfer_hides_geometry_controls_and_preserves_hold(monkeypatch, active_config):
+def test_staging_manual_chamfer_size_needs_no_hidden_geometry_fields(monkeypatch, active_config):
     from streamlit.testing.v1 import AppTest
 
     monkeypatch.setenv("API_BASE", "http://test")
@@ -738,7 +738,10 @@ def test_staging_manual_chamfer_hides_geometry_controls_and_preserves_hold(monke
         assert not any(f.key == "staging_chamfer_angle" for f in app.number_input)
         assert not any(f.key.startswith("staging_chamfer_") for f in app.button_group)
         next(f for f in app.number_input if f.label == "Chamfer Width (in.)").set_value(0.02).run()
-        assert any("Drawing HOLD" in w.value for w in app.warning)
+        assert not app.exception
+        assert not any("Drawing HOLD" in w.value for w in app.warning)
+        assert not any(key.startswith("chamfer_") and key != "chamfer_width"
+                       for key in calls[-1])
         app.session_state["staging_chamfer_angle"] = 45
         app.session_state["staging_chamfer_side"] = "downstream"
         app.session_state["staging_chamfer_flow"] = "left-to-right"

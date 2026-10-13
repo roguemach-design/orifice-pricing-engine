@@ -1119,16 +1119,17 @@ with right:
                     "Enter a chamfer width and press Enter or click outside the field to apply it."
                 )
             if OWNER_ACCEPTANCE_MODE and not drawing_mode:
-                # Presentation only: retain existing explicit geometry state without
-                # inventing manufacturing values or exposing additional controls.
+                # Optional explicit geometry remains supported, but the public
+                # YES/NO + size contract never requires hidden legacy fields.
                 chamfer_details = {
                     "chamfer_angle_degrees": st.session_state.get("staging_chamfer_angle"),
                     "chamfer_side": st.session_state.get("staging_chamfer_side"),
                     "flow_orientation": st.session_state.get("staging_chamfer_flow"),
                     "chamfer_width_definition": st.session_state.get("staging_chamfer_definition"),
                 }
-                if any(v is None for v in chamfer_details.values()):
-                    st.warning("Drawing HOLD: chamfer geometry requires engineering review before drawing approval.")
+                chamfer_details = {
+                    key: value for key, value in chamfer_details.items() if value is not None
+                }
 
         st.caption("DELIVERY")
         st.caption("Lead-time selection updates the verified quote total below.")
