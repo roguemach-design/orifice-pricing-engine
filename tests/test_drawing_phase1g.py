@@ -719,7 +719,7 @@ def test_manual_chamfer_waits_for_width_before_requesting_price(
         assert quote_calls[-1]["chamfer_width"] == 0.0625
 
 
-def test_staging_manual_chamfer_requires_explicit_geometry(monkeypatch, active_config):
+def test_staging_manual_chamfer_hides_geometry_controls_and_preserves_hold(monkeypatch, active_config):
     from streamlit.testing.v1 import AppTest
 
     monkeypatch.setenv("API_BASE", "http://test")
@@ -735,14 +735,14 @@ def test_staging_manual_chamfer_requires_explicit_geometry(monkeypatch, active_c
     with patch("requests.get", lambda *a, **k: _Response(active_config)), patch("requests.post", quote):
         app = customer_page_test("pages/1_Quote.py", default_timeout=20).run()
         next(f for f in app.button_group if f.label == "Chamfer").set_value(True).run()
-        assert app.number_input(key="staging_chamfer_angle").value is None
-        assert app.button_group(key="staging_chamfer_side").value is None
+        assert not any(f.key == "staging_chamfer_angle" for f in app.number_input)
+        assert not any(f.key.startswith("staging_chamfer_") for f in app.button_group)
         next(f for f in app.number_input if f.label == "Chamfer Width (in.)").set_value(0.02).run()
         assert any("Drawing HOLD" in w.value for w in app.warning)
-        app.number_input(key="staging_chamfer_angle").set_value(45)
-        app.button_group(key="staging_chamfer_side").set_value("downstream")
-        app.button_group(key="staging_chamfer_flow").set_value("left-to-right")
-        app.button_group(key="staging_chamfer_definition").set_value("radial-angle-from-face")
+        app.session_state["staging_chamfer_angle"] = 45
+        app.session_state["staging_chamfer_side"] = "downstream"
+        app.session_state["staging_chamfer_flow"] = "left-to-right"
+        app.session_state["staging_chamfer_definition"] = "radial-angle-from-face"
         app.run()
         assert not app.exception
         assert not any("Drawing HOLD" in w.value for w in app.warning)

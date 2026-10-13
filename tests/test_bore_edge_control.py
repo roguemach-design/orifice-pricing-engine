@@ -1,11 +1,11 @@
 """Bore-edge presentation keeps required canonical booleans."""
 
-import xml.etree.ElementTree as ET
+import hashlib
 from pathlib import Path
 
 from streamlit.testing.v1 import AppTest
 
-from bore_edge_control import bore_edge_svg
+from bore_edge_control import BORE_EDGE_IMAGE
 
 
 def test_bore_edge_selector_preserves_unresolved_and_boolean_state():
@@ -32,14 +32,5 @@ def test_bore_edge_selector_preserves_unresolved_and_boolean_state():
     assert not app.number_input
 
 
-def test_bore_edge_illustrations_are_scalable_and_have_no_dimensional_claims():
-    for chamfered in (False, True):
-        svg = bore_edge_svg(chamfered)
-        root = ET.fromstring(svg)
-        assert root.attrib["viewBox"] == "0 0 300 180"
-        assert "width" not in root.attrib
-        assert "height" not in root.attrib
-        assert root.find("{http://www.w3.org/2000/svg}title") is not None
-        assert "45" not in "".join(root.itertext())
-        assert "DEPTH" not in svg
-    assert bore_edge_svg(False) != bore_edge_svg(True)
+def test_bore_edge_graphic_is_exact_uploaded_image():
+    assert hashlib.sha256(BORE_EDGE_IMAGE.read_bytes()).hexdigest() == "c752ddc2c2952c8dd2bd50ac9897c28e5b8e442d8ac5194d94a1d455ceecb322"
