@@ -149,6 +149,10 @@ st.markdown(
     /* Hide the source feedback only after the trusted landing host enables its sticky copy. */
     html.oplates-parent-preview .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {{visibility:hidden;pointer-events:none}}
 
+    /* Streamlit captions explicitly set visibility; suppress the source copy only on the landing host. */
+    html.oplates-parent-preview .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stCaptionContainer"],
+    html.oplates-parent-preview .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stCaptionContainer"] * {{visibility:hidden!important}}
+
     .st-key-configurator_starter {{border:1px solid #2b3c50;border-radius:16px;
       padding:1.1rem 1.25rem;background:linear-gradient(115deg,#111d2a,#0e1620)}}
     .st-key-configurator_starter [data-testid="stVerticalBlock"] {{gap:.4rem}}
