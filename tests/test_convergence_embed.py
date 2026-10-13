@@ -21,8 +21,8 @@ def test_embed_accepts_only_finite_heights_from_its_own_origin_and_frame():
       const fs=require('fs'),vm=require('vm'),assert=require('assert');
       const child={},configWindow={0:child,length:1},frame={contentWindow:configWindow,style:{}};
       let handler;
-      const context={document:{getElementById:id=>id==='y'?{}:frame,querySelectorAll:()=>[]},
-        window:{addEventListener:(name,fn)=>handler=fn}};
+      const context={document:{getElementById:id=>id==='y'?{}:(id==='plate-configurator'?frame:null),querySelectorAll:()=>[]},
+        window:{addEventListener:(name,fn)=>{if(name==='message')handler=fn}}};
       vm.runInNewContext(fs.readFileSync('o-plates landing/configurator.js','utf8'),context);
       const event={origin:'https://quote.o-plates.com',source:child,data:{type:'oplates:height',height:1400}};
       handler({...event,origin:'https://untrusted.example'});assert.strictEqual(frame.style.height,undefined);
@@ -39,4 +39,41 @@ def test_embed_accepts_only_finite_heights_from_its_own_origin_and_frame():
         capture_output=True,
         text=True,
     )
+    assert result.returncode == 0, result.stderr
+
+
+
+def test_feedback_projection_is_trusted_display_only_and_falls_back_on_narrow_screens():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is unavailable for the embed message test")
+    result = subprocess.run([node, "-e", r"""
+      const fs=require('fs'),vm=require('vm'),assert=require('assert');
+      const listeners={},messages=[];
+      const element=()=>({children:[],style:{setProperty(k,v){this[k]=v}},classList:{toggle(k,v){this[k]=v}},
+        append(...items){this.children.push(...items)},replaceChildren(...items){this.children=items}});
+      const stage=element(),rail=element();rail.hidden=true;
+      const source={length:0,postMessage:(data,origin)=>messages.push({data,origin})};
+      const frame={contentWindow:source,style:{},clientWidth:1080,offsetTop:20,offsetLeft:0};
+      const context={document:{getElementById:id=>({y:{},'plate-configurator':frame,'configurator-stage':stage,'configurator-feedback':rail}[id]),
+        querySelector:()=>({getBoundingClientRect:()=>({height:68})}),querySelectorAll:()=>[],createElement:element},
+        DOMParser:class{parseFromString(){return {documentElement:{localName:'parsererror'},querySelector:()=>null}}},
+        window:{innerWidth:1363,addEventListener:(name,fn)=>listeners[name]=fn}};
+      vm.runInNewContext(fs.readFileSync('o-plates landing/configurator.js','utf8'),context);
+      const data={type:'oplates:layout',height:2400,feedback:{top:220,left:40,width:430,svg:'',
+        prices:[{label:'Unit price',value:'$12.34'},{label:'Total price',value:'$24.68'}],
+        previewNotice:'Complete dimensions.',priceNotice:'',shipping:'14 days · 1.14 lb'}};
+      const event={origin:'https://quote.o-plates.com',source,data};
+      listeners.message({...event,origin:'https://untrusted.example'});assert.equal(rail.hidden,true);
+      listeners.message({...event,source:{}});assert.equal(rail.hidden,true);
+      listeners.message(event);assert.equal(rail.hidden,false);assert.equal(rail.style.marginTop,'240px');
+      assert.equal(stage.style['--preview-top'],'80px');
+      assert.equal(rail.children[2].children[0].children[1].textContent,'$12.34');
+      assert.equal(messages.at(-1).data.enabled,true);
+      context.window.innerWidth=390;frame.clientWidth=350;listeners.resize();
+      assert.equal(rail.hidden,true);assert.equal(messages.at(-1).data.enabled,false);
+      context.window.innerWidth=1363;frame.clientWidth=1080;listeners.resize();assert.equal(rail.hidden,false);
+      listeners.message({...event,data:{type:'oplates:layout',height:2400,feedback:null}});
+      assert.equal(rail.hidden,true);assert.equal(messages.at(-1).data.enabled,false);
+    """], cwd=ROOT, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr

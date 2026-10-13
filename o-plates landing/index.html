@@ -74,7 +74,10 @@
 
     <section id="configurator" class="configurator-section" aria-labelledby="configure-title" tabindex="-1">
       <div class="section-heading"><p class="section-label">Build from your known dimensions</p><h2 id="configure-title">Configure your plate</h2><p class="muted">Upload a drawing or enter dimensions below. Your verified price updates automatically.</p></div>
+      <div id="configurator-stage" class="configurator-stage">
       <iframe id="plate-configurator" class="configurator-frame" title="O-Plates plate configurator, live drawing and pricing" src="https://quote.o-plates.com/Quote?embed=true&amp;integrated=1" loading="lazy"></iframe>
+        <aside id="configurator-feedback" class="sticky-feedback" aria-label="Live configuration preview and verified price" hidden></aside>
+      </div>
       <p class="fineprint muted">Having trouble loading the configurator? <a href="https://quote.o-plates.com/Quote">Open the configurator directly</a>.</p>
     </section>
 

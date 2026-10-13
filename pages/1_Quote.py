@@ -135,8 +135,7 @@ st.markdown(
       .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] {{align-items:flex-start}}
       .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {{
         position:sticky;top:4rem;align-self:flex-start;min-width:0;
-        max-height:calc(100dvh - 5.5rem);overflow-y:auto;overflow-x:hidden;
-        overscroll-behavior:contain;padding-right:.25rem;
+        overflow:visible;padding-right:.25rem;
       }}
     }}
     @media (max-width: 900px) {{
@@ -146,6 +145,9 @@ st.markdown(
         max-height:none;overflow:visible;padding-right:0;
       }}
     }}
+
+    /* Hide the source feedback only after the trusted landing host enables its sticky copy. */
+    html.oplates-parent-preview .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {{visibility:hidden;pointer-events:none}}
 
     .st-key-configurator_starter {{border:1px solid #2b3c50;border-radius:16px;
       padding:1.1rem 1.25rem;background:linear-gradient(115deg,#111d2a,#0e1620)}}

@@ -60,21 +60,7 @@ def render_customer_shell():
         st.session_state["integrated_landing"] = True
     if st.session_state.get("integrated_landing"):
         components.html(
-            """<script>
-          const app = window.parent;
-          const block = app.document.querySelector('[data-testid="stMainBlockContainer"]');
-          let previous = 0;
-          function resize() {
-            if (!block) return;
-            const height = Math.ceil(block.getBoundingClientRect().height + 100);
-            if (Math.abs(height - previous) < 4) return;
-            previous = height;
-            for (const origin of ['https://www.o-plates.com','https://o-plates.com']) {
-              app.parent.postMessage({type:'oplates:height',height},origin);
-            }
-          }
-          if (block) {new ResizeObserver(resize).observe(block); resize();}
-        </script>""",
+            "<script>" + (Path(__file__).resolve().parent / "assets" / "configurator-layout-bridge.js").read_text() + "</script>",
             height=0,
         )
     with st.container(horizontal=True):
