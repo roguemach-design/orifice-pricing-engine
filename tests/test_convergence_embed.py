@@ -21,7 +21,7 @@ def test_embed_accepts_only_finite_heights_from_its_own_origin_and_frame():
       const fs=require('fs'),vm=require('vm'),assert=require('assert');
       const child={},configWindow={0:child,length:1},frame={contentWindow:configWindow,style:{}};
       let handler;
-      const context={document:{getElementById:id=>id==='y'?{}:(id==='plate-configurator'?frame:null),querySelectorAll:()=>[]},
+      const context={document:{documentElement:{classList:{contains:()=>false}},getElementById:id=>id==='y'?{}:(id==='plate-configurator'?frame:null),querySelectorAll:()=>[]},
         window:{addEventListener:(name,fn)=>{if(name==='message')handler=fn}}};
       vm.runInNewContext(fs.readFileSync('o-plates landing/configurator.js','utf8'),context);
       const event={origin:'https://quote.o-plates.com',source:child,data:{type:'oplates:height',height:1400}};
@@ -52,10 +52,11 @@ def test_feedback_projection_is_trusted_display_only_and_falls_back_on_narrow_sc
       const listeners={},messages=[];
       const element=()=>({children:[],style:{setProperty(k,v){this[k]=v}},classList:{toggle(k,v){this[k]=v}},
         append(...items){this.children.push(...items)},replaceChildren(...items){this.children=items}});
-      const stage=element(),rail=element();rail.hidden=true;
+      const stage=element(),rail=element();stage.getBoundingClientRect=()=>({height:2400});rail.hidden=true;
+      const rootClasses={contains(k){return !!this[k]},toggle(k,v){this[k]=v}};
       const source={length:0,postMessage:(data,origin)=>messages.push({data,origin})};
       const frame={contentWindow:source,style:{},clientWidth:1080,offsetTop:20,offsetLeft:0};
-      const context={document:{getElementById:id=>({y:{},'plate-configurator':frame,'configurator-stage':stage,'configurator-feedback':rail}[id]),
+      const context={document:{documentElement:{classList:rootClasses},getElementById:id=>({y:{},'plate-configurator':frame,'configurator-stage':stage,'configurator-feedback':rail}[id]),
         querySelector:()=>({getBoundingClientRect:()=>({height:68})}),querySelectorAll:()=>[],createElement:element},
         DOMParser:class{parseFromString(){return {documentElement:{localName:'parsererror'},querySelector:()=>null}}},
         window:{innerWidth:1363,addEventListener:(name,fn)=>listeners[name]=fn}};
@@ -78,6 +79,16 @@ def test_feedback_projection_is_trusted_display_only_and_falls_back_on_narrow_sc
       assert.equal(summary.children[1].textContent,'Shipping estimates');
       assert.equal(summary.children[2].children[0].children[1].textContent,'2.28 lb');
       assert.equal(summary.children[2].children[1].children[1].textContent,'14.5 × 7.0 × 1.0 in.');
+      listeners.message({...event,origin:'https://untrusted.example',data:{...data,modalOpen:true}});
+      assert.equal(rootClasses.contains('oplates-modal-open'),false);
+      listeners.message({...event,data:{...data,height:500,modalOpen:true}});
+      assert.equal(rootClasses.contains('oplates-modal-open'),true);
+      assert.equal(stage.style['--modal-stage-height'],'2400px');
+      assert.equal(frame.style.height,'2400px');
+      assert.equal(rail.children[3],summary); // Modal opening preserves the preview content.
+      listeners.message({...event,data:{...data,modalOpen:false}});
+      assert.equal(rootClasses.contains('oplates-modal-open'),false);
+      assert.equal(stage.style['--preview-top'],'80px');
       context.window.innerWidth=390;frame.clientWidth=350;listeners.resize();
       assert.equal(rail.hidden,true);assert.equal(messages.at(-1).data.enabled,false);
       context.window.innerWidth=1363;frame.clientWidth=1080;listeners.resize();assert.equal(rail.hidden,false);

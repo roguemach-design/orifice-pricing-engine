@@ -37,6 +37,14 @@ function syncLayout() {
   }
   frame.contentWindow?.postMessage({type:'oplates:preview-layout', enabled}, 'https://quote.o-plates.com');
 }
+// Elevate the existing iframe; moving it into a new DOM parent would reset auth UI state.
+function syncModal(open) {
+  if (!stage || typeof open !== 'boolean') return;
+  const active = document.documentElement.classList.contains('oplates-modal-open');
+  if (open === active) return;
+  if (open) stage.style.setProperty('--modal-stage-height', `${stage.getBoundingClientRect().height}px`);
+  document.documentElement.classList.toggle('oplates-modal-open', open);
+}
 function renderFeedback(data) {
   if (!rail || !stage || !data || ![data.top, data.left, data.width].every(Number.isFinite) || data.top < 0 || data.top > 30000 || data.left < 0 || data.width < 100 || data.width > frame.clientWidth) return;
   if (!Array.isArray(data.prices) || data.prices.length > 2 || data.prices.some(item => !item || typeof item.label !== 'string' || typeof item.value !== 'string' || item.label.length > 100 || item.value.length > 100)) return;
@@ -77,9 +85,10 @@ window.addEventListener("message", (event) => {
   let trusted = event.source === frame.contentWindow;
   for (let i = 0; !trusted && i < frame.contentWindow.length; i++) trusted = event.source === frame.contentWindow[i];
   if (!trusted || !['oplates:height', 'oplates:layout'].includes(event.data?.type)) return;
+  syncModal(event.data.modalOpen);
   const height = event.data.height;
-  if (typeof height === "number" && Number.isFinite(height) && height >= 400 && height <= 30000) frame.style.height = `${Math.ceil(height)}px`;
-  if (event.data.type === 'oplates:layout') {
+  if (!document.documentElement.classList.contains('oplates-modal-open') && typeof height === "number" && Number.isFinite(height) && height >= 400 && height <= 30000) frame.style.height = `${Math.ceil(height)}px`;
+  if (event.data.type === 'oplates:layout' && event.data.modalOpen !== true) {
     if (event.data.feedback === null) { feedback = null; rail?.replaceChildren(); syncLayout(); }
     else renderFeedback(event.data.feedback);
   }

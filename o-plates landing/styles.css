@@ -31,3 +31,9 @@
 .sticky-feedback__fulfillment h4{font-size:1rem;margin:16px 0 10px}
 .sticky-feedback__estimates{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:16px}
 @media(max-width:1100px){.sticky-feedback__estimates{grid-template-columns:1fr}}
+
+/* Keep the native iframe modal above the host preview without changing the sticky rail. */
+html.oplates-modal-open{overflow:hidden}
+html.oplates-modal-open .configurator-stage::before{content:"";grid-column:1/-1;grid-row:1;height:var(--modal-stage-height);pointer-events:none}
+html.oplates-modal-open .configurator-frame{position:fixed;inset:0;z-index:1000060;width:100vw;height:100dvh!important;margin:0;border:0;border-radius:0;background:transparent}
+@media(max-width:900px){html.oplates-modal-open .configurator-stage::before{display:block}}

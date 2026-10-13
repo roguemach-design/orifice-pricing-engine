@@ -5,16 +5,18 @@
   const origins = ['https://www.o-plates.com', 'https://o-plates.com'];
   const selector = '.st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child';
   app.__oplatesLayoutCleanup?.();
-  let previous = '', scheduled = false;
+  let previous = '', scheduled = false, lastFeedback = null;
   const frames = new WeakSet();
   function send() {
     scheduled = false;
     const block = app.document.querySelector('[data-testid="stMainBlockContainer"]');
     if (!block) return;
+    const modalOpen = Boolean(app.document.querySelector('[data-testid="stDialog"] [role="dialog"]'));
+    app.document.documentElement.classList.toggle('oplates-viewport-modal', modalOpen);
     const height = Math.ceil(block.getBoundingClientRect().height + 100);
     const column = app.document.querySelector(selector);
-    let feedback = null;
-    if (column) {
+    let feedback = modalOpen ? lastFeedback : null;
+    if (column && !modalOpen) {
       const rect = column.getBoundingClientRect();
       const main = app.document.querySelector('[data-testid="stMain"]');
       let svg = '';
@@ -39,7 +41,8 @@
         shipping: captions.find(text => text.startsWith('Estimated shipping ·')) || '', fulfillment
       };
     }
-    const payload = { type: 'oplates:layout', height, feedback };
+    lastFeedback = feedback;
+    const payload = { type: 'oplates:layout', height, feedback, modalOpen };
     const next = JSON.stringify(payload);
     if (next === previous) return;
     previous = next;
@@ -58,7 +61,7 @@
   const block = app.document.querySelector('[data-testid="stMainBlockContainer"]');
   const resize = new ResizeObserver(schedule);
   const mutations = new MutationObserver(schedule);
-  if (block) { resize.observe(block); mutations.observe(block, {childList:true, subtree:true, characterData:true, attributes:true}); }
+  if (block) { resize.observe(block); mutations.observe(app.document.body, {childList:true, subtree:true, characterData:true, attributes:true}); }
   app.addEventListener('message', receive);
   app.addEventListener('resize', schedule);
   app.__oplatesLayoutCleanup = () => { resize.disconnect(); mutations.disconnect(); app.removeEventListener('message', receive); app.removeEventListener('resize', schedule); };
