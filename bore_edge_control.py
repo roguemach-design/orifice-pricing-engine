@@ -22,6 +22,7 @@ def bore_edge_choice(*, key):
     graphic = _graphic_background()
     st.markdown(
         """<style>
+      .st-key-bore_edge_choice [data-testid="stElementContainer"]:has([data-testid="stButtonGroup"]) {width:100%!important}
       .st-key-bore_edge_choice [data-testid="stButtonGroup"] {width:100%}
       .st-key-bore_edge_choice [data-testid="stButtonGroup"] > div {width:100%;gap:1rem;flex-wrap:nowrap}
       .st-key-bore_edge_choice [data-testid="stButtonGroup"] button {
