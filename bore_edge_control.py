@@ -24,7 +24,7 @@ def bore_edge_choice(*, key):
         """<style>
       .st-key-bore_edge_choice [data-testid="stElementContainer"]:has([data-testid="stButtonGroup"]) {width:100%!important}
       .st-key-bore_edge_choice [data-testid="stButtonGroup"] {width:100%}
-      .st-key-bore_edge_choice [data-testid="stButtonGroup"] > div {width:100%;gap:1rem;flex-wrap:nowrap}
+      .st-key-bore_edge_choice [data-testid="stButtonGroup"] > div {width:100%;max-width:none;gap:1rem;flex-wrap:nowrap}
       .st-key-bore_edge_choice [data-testid="stButtonGroup"] button {
         position:relative;flex:1 1 0;min-width:0;max-width:100%;height:auto;
         aspect-ratio:797/552;padding:0;border:2px solid #343e49;border-radius:10px;
