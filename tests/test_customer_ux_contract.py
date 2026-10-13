@@ -99,7 +99,9 @@ def test_quote_keeps_lean_owner_approved_controls():
     assert "value=None" in quote_source
     assert '"Lead time"' in quote_source
     assert 'format_func=lambda days: f"{days} calendar days"' in quote_source
-    assert quote_source.count("Estimated shipping ·") == 1
+    assert quote_source.count('st.metric("Estimated ship time"') == 1
+    assert 'shipping_weight.metric("Estimated total weight"' in quote_source
+    assert '"Estimated package"' in quote_source
 
 
 def test_success_page_allows_guest_confirmation():

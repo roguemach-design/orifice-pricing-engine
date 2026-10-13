@@ -24,3 +24,10 @@
 .sticky-feedback__price div{flex:1;min-width:0}.sticky-feedback__price span{display:block;font-size:.8rem;color:#b9c1cc}.sticky-feedback__price strong{display:block;font-weight:600;font-size:clamp(1.35rem,2.6vw,2rem)}
 .sticky-feedback__shipping{font-size:.8rem;color:#b9c1cc;line-height:1.4;margin:10px 0 0;overflow-wrap:anywhere}
 @media(max-width:900px){.configurator-stage{display:block}.sticky-feedback{display:none!important;position:static}}
+
+.sticky-feedback__fulfillment{margin-top:14px}
+.sticky-feedback__fulfillment span{display:block;font-size:.8rem;color:#b9c1cc;margin-bottom:4px}
+.sticky-feedback__fulfillment strong{display:block;font-size:1.5rem;font-weight:600;line-height:1.25;overflow-wrap:anywhere}
+.sticky-feedback__fulfillment h4{font-size:1rem;margin:16px 0 10px}
+.sticky-feedback__estimates{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:16px}
+@media(max-width:1100px){.sticky-feedback__estimates{grid-template-columns:1fr}}

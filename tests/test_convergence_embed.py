@@ -62,7 +62,10 @@ def test_feedback_projection_is_trusted_display_only_and_falls_back_on_narrow_sc
       vm.runInNewContext(fs.readFileSync('o-plates landing/configurator.js','utf8'),context);
       const data={type:'oplates:layout',height:2400,feedback:{top:220,left:40,width:430,svg:'',
         prices:[{label:'Unit price',value:'$12.34'},{label:'Total price',value:'$24.68'}],
-        previewNotice:'Complete dimensions.',priceNotice:'',shipping:'14 days · 1.14 lb'}};
+        previewNotice:'Complete dimensions.',priceNotice:'',shipping:'',fulfillment:[
+          {label:'Estimated ship time',value:'21 calendar days'},
+          {label:'Estimated total weight',value:'2.28 lb'},
+          {label:'Estimated package',value:'14.5 × 7.0 × 1.0 in.'}]}};
       const event={origin:'https://quote.o-plates.com',source,data};
       listeners.message({...event,origin:'https://untrusted.example'});assert.equal(rail.hidden,true);
       listeners.message({...event,source:{}});assert.equal(rail.hidden,true);
@@ -70,6 +73,11 @@ def test_feedback_projection_is_trusted_display_only_and_falls_back_on_narrow_sc
       assert.equal(stage.style['--preview-top'],'80px');
       assert.equal(rail.children[2].children[0].children[1].textContent,'$12.34');
       assert.equal(messages.at(-1).data.enabled,true);
+      const summary=rail.children[3];
+      assert.equal(summary.children[0].children[1].textContent,'21 calendar days');
+      assert.equal(summary.children[1].textContent,'Shipping estimates');
+      assert.equal(summary.children[2].children[0].children[1].textContent,'2.28 lb');
+      assert.equal(summary.children[2].children[1].children[1].textContent,'14.5 × 7.0 × 1.0 in.');
       context.window.innerWidth=390;frame.clientWidth=350;listeners.resize();
       assert.equal(rail.hidden,true);assert.equal(messages.at(-1).data.enabled,false);
       context.window.innerWidth=1363;frame.clientWidth=1080;listeners.resize();assert.equal(rail.hidden,false);

@@ -153,6 +153,11 @@ st.markdown(
     html.oplates-parent-preview .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stCaptionContainer"],
     html.oplates-parent-preview .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stCaptionContainer"] * {{visibility:hidden!important}}
 
+    .st-key-preview_fulfillment [data-testid="stMetricValue"] {{font-size:1.5rem;line-height:1.25}}
+    .st-key-preview_fulfillment [data-testid="stMetricValue"] > div {{white-space:normal;overflow-wrap:anywhere}}
+    html.oplates-parent-preview .st-key-preview_fulfillment,
+    html.oplates-parent-preview .st-key-preview_fulfillment * {{visibility:hidden!important}}
+
     .st-key-configurator_starter {{border:1px solid #2b3c50;border-radius:16px;
       padding:1.1rem 1.25rem;background:linear-gradient(115deg,#111d2a,#0e1620)}}
     .st-key-configurator_starter [data-testid="stVerticalBlock"] {{gap:.4rem}}
@@ -1619,10 +1624,15 @@ with left:
         st.divider()
 
     if result and weight_lb is not None and pkg:
-        st.caption(
-            f"Estimated shipping · {int(ships_in_days)} calendar days · {weight_lb:.2f} lb · "
-            f"{pkg['length']} × {pkg['width']} × {pkg['height']} in."
-        )
+        with st.container(key="preview_fulfillment"):
+            st.metric("Estimated ship time", f"{int(ships_in_days)} calendar days")
+            st.markdown("**Shipping estimates**")
+            shipping_weight, shipping_package = st.columns([1, 1.4])
+            shipping_weight.metric("Estimated total weight", f"{weight_lb:.2f} lb")
+            shipping_package.metric(
+                "Estimated package",
+                f"{pkg['length']} × {pkg['width']} × {pkg['height']} in.",
+            )
 
 
 # -----------------------------

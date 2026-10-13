@@ -26,13 +26,17 @@
         label: metric.querySelector('[data-testid="stMetricLabel"]')?.textContent?.trim() || '',
         value: metric.querySelector('[data-testid="stMetricValue"]')?.textContent?.trim() || ''
       })).filter(metric => metric.label && metric.value).slice(0, 2);
+      const fulfillment = [...column.querySelectorAll('.st-key-preview_fulfillment [data-testid="stMetric"]')].map(metric => ({
+        label: metric.querySelector('[data-testid="stMetricLabel"]')?.textContent?.trim() || '',
+        value: metric.querySelector('[data-testid="stMetricValue"]')?.textContent?.trim() || ''
+      })).filter(metric => metric.label && metric.value);
       const captions = [...column.querySelectorAll('[data-testid="stCaptionContainer"]')].map(el => el.textContent.trim());
       const alerts = [...column.querySelectorAll('[data-testid="stAlert"]')].map(el => el.textContent.trim());
       feedback = {
         top: rect.top + (main?.scrollTop || 0), left: rect.left, width: rect.width,
         svg, prices, previewNotice: svg ? '' : (alerts[0] || 'Complete the required dimensions to update the plate preview.'),
         priceNotice: prices.length ? '' : (alerts.at(-1) || 'Complete the required fields to see a verified price.'),
-        shipping: captions.find(text => text.startsWith('Estimated shipping ·')) || ''
+        shipping: captions.find(text => text.startsWith('Estimated shipping ·')) || '', fulfillment
       };
     }
     const payload = { type: 'oplates:layout', height, feedback };

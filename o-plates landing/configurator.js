@@ -41,6 +41,8 @@ function renderFeedback(data) {
   if (!rail || !stage || !data || ![data.top, data.left, data.width].every(Number.isFinite) || data.top < 0 || data.top > 30000 || data.left < 0 || data.width < 100 || data.width > frame.clientWidth) return;
   if (!Array.isArray(data.prices) || data.prices.length > 2 || data.prices.some(item => !item || typeof item.label !== 'string' || typeof item.value !== 'string' || item.label.length > 100 || item.value.length > 100)) return;
   if (![data.previewNotice, data.priceNotice, data.shipping].every(value => typeof value === 'string' && value.length <= 2000)) return;
+  const fulfillment = data.fulfillment || [];
+  if (!Array.isArray(fulfillment) || fulfillment.length > 3 || fulfillment.some(item => !item || !['Estimated ship time', 'Estimated total weight', 'Estimated package'].includes(item.label) || typeof item.value !== 'string' || item.value.length > 100)) return;
   const svg = safeSvg(data.svg);
   if (data.svg && !svg) return;
   rail.replaceChildren(textElement('h3', 'Configuration Drawing'));
@@ -56,7 +58,17 @@ function renderFeedback(data) {
     }
   } else price.append(textElement('p', data.priceNotice, 'muted'));
   rail.append(price);
-  if (data.shipping) rail.append(textElement('p', data.shipping, 'sticky-feedback__shipping'));
+  if (fulfillment.length) {
+    const summary = document.createElement('div'); summary.className = 'sticky-feedback__fulfillment';
+    const shipping = document.createElement('div'); shipping.className = 'sticky-feedback__estimates';
+    for (const item of fulfillment) {
+      const metric = document.createElement('div');
+      metric.append(textElement('span', item.label), textElement('strong', item.value));
+      if (item.label === 'Estimated ship time') summary.append(metric);
+      else shipping.append(metric);
+    }
+    summary.append(textElement('h4', 'Shipping estimates'), shipping); rail.append(summary);
+  } else if (data.shipping) rail.append(textElement('p', data.shipping, 'sticky-feedback__shipping'));
   feedback = data;
   syncLayout();
 }
