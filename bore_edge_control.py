@@ -47,11 +47,18 @@ def bore_edge_choice(*, key):
       .st-key-bore_edge_choice [data-testid="stButtonGroup"] button:nth-of-type(2)::before {
         background-image:url(data:image/png;base64,""" + right_graphic + """);
       }
+      .st-key-bore_edge_choice [data-testid="stButtonGroup"] button {font-family:inherit}
+      .st-key-bore_edge_choice button [data-testid="stMarkdownContainer"] {width:100%;text-align:left}
       .st-key-bore_edge_choice [data-testid="stButtonGroup"] button p {
-        white-space:normal;font-size:1rem;line-height:1.4;margin:.5rem 0 0;color:#dbe1e7;
+        font-family:inherit!important;white-space:normal;font-size:.875rem!important;
+        font-weight:400!important;line-height:1.4!important;margin:0!important;color:#dbe1e7;
+      }
+      .st-key-bore_edge_choice [data-testid="stButtonGroup"] button p:has(strong) {
+        margin:.75rem 0 .35rem!important;
       }
       .st-key-bore_edge_choice [data-testid="stButtonGroup"] button strong {
-        font-size:1.15rem;color:#fff;
+        font-family:inherit!important;font-size:1rem!important;font-weight:600!important;
+        line-height:1.35!important;color:#fff;
       }
       .st-key-bore_edge_choice [data-testid="stButtonGroup"] button::after {
         content:"";position:absolute;top:3%;right:3.3%;width:6%;aspect-ratio:1;

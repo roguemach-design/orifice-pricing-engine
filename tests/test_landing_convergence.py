@@ -306,6 +306,11 @@ def test_material_cards_keep_required_unresolved_selection():
     app = AppTest.from_function(render).run()
     assert not app.exception
     assert app.button_group(key="material").value is None
+    assert app.button_group(key="material").options == [
+        "**304 SS**\n\nGeneral-purpose stainless.",
+        "**316 SS**\n\nAdded corrosion resistance.",
+        "**Carbon Steel**\n\nCost-effective steel.",
+    ]
     for value in ("304", "316", "Carbon Steel"):
         app.button_group(key="material").set_value(value).run()
         assert not app.exception
