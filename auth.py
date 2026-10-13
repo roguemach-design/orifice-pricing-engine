@@ -339,7 +339,9 @@ def render_auth_sidebar(*, show_debug: bool = False) -> None:
                 logout()
         return
 
-    account_container = st.expander("Account", expanded=False)
+    account_container = st.expander(
+        "Account", expanded=st.session_state.get("account_expand_requested", False)
+    )
     with account_container:
         if show_debug:
             _render_connection_debug()

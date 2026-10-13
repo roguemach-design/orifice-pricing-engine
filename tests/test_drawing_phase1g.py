@@ -774,14 +774,18 @@ def test_signed_out_user_sees_locked_drawing_section(monkeypatch, active_config)
         app = customer_page_test("pages/1_Quote.py", default_timeout=20
         ).run()
         assert not app.exception
-        assert any(item.value == "Upload a drawing" for item in app.subheader)
-        assert any("Sign in to upload and analyze" in item.value for item in app.info)
+        assert any("Upload a drawing" in item.value for item in app.markdown)
+        assert any(item.value == "Sign in to analyze a print" for item in app.caption)
+        assert not any("Sign in to upload" in item.value for item in app.info)
+        assert len([b for b in app.button if b.key == "drawing_sign_in_cta"]) == 1
         assert not app.get("file_uploader")
         assert not any(button.label == "Analyze drawing" for button in app.button)
         next(
-            button for button in app.button if button.label == "Sign in to upload"
+            button for button in app.button if button.key == "drawing_sign_in_cta"
         ).click().run()
-        assert any("Open Account" in item.value for item in app.info)
+        assert next(x for x in app.expander if x.label == "Account").proto.expanded
+        assert any(x.label == "Email" for x in app.text_input)
+        assert any(x.label == "Quantity" for x in app.number_input)
         inspect_upload.assert_not_called()
 
 
@@ -820,8 +824,8 @@ def test_internal_entry_point_requires_server_verified_access(
 
     assert not app.exception
     assert not app.get("file_uploader")
-    assert any(item.value == "Upload a drawing" for item in app.subheader)
-    assert any("approved test users only" in item.value for item in app.info)
+    assert any("Upload a drawing" in item.value for item in app.markdown)
+    assert any("approved test users only" in item.value for item in app.caption)
 
 
 def test_invalid_upload_preserves_existing_manual_configuration(

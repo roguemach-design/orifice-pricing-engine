@@ -121,6 +121,15 @@ st.markdown(
         gap: 0.45rem;
     }}
 
+    /* Compact secondary upload path and aligned configurator start. */
+    .st-key-drawing_upload [data-testid="stVerticalBlock"] {{gap:0.2rem}}
+    .st-key-drawing_upload p {{margin:0}}
+    .st-key-drawing_upload [data-testid="stButton"] button {{
+        height:auto;min-height:36px;padding:.35rem .75rem;font-size:.875rem;
+    }}
+    .st-key-configurator_start [data-testid="stVerticalBlock"] {{gap:.55rem}}
+    .st-key-configurator_start h3 {{margin-top:0;padding-top:0}}
+
     /* Make Streamlit buttons taller */
     div[data-testid="stButton"] > button {{
         height: {PAY_BUTTON_HEIGHT_PX}px;
@@ -688,19 +697,20 @@ owner_test_checkout_allowed = bool(
 
 if DRAWING_ASSISTED_ENABLED and not drawing_access_allowed:
     with st.container(border=False, key="drawing_upload"):
-        st.subheader("Upload a drawing")
-        st.write("Upload your print and we’ll identify what we can.")
-        st.caption("Supports PDF, PNG, and JPG. Files are processed locally for analysis and are not stored.")
+        upload_copy, upload_action = st.columns([4, 1], vertical_alignment="center", gap="small")
+        with upload_copy:
+            st.markdown("**Upload a drawing**")
+            st.caption(
+                "Sign in to analyze a print" if not is_logged_in()
+                else "Drawing uploads are currently available to approved test users only."
+            )
+            st.caption("PDF, PNG, JPG · Analyzed locally; drawings are not stored.")
         if not is_logged_in():
-            st.info("Sign in to upload and analyze your drawing.")
-            if st.button("Sign in to upload", key="drawing_sign_in_cta"):
-                st.info(
-                    "Open Account, enter your email, and select Send code. "
-                    "Then enter the email verification code and select Verify code."
-                )
-        else:
-            st.info(
-                "Drawing uploads are currently available to approved test users only."
+            def _open_upload_sign_in():
+                st.session_state["account_expand_requested"] = True
+
+            upload_action.button(
+                "Sign in", key="drawing_sign_in_cta", on_click=_open_upload_sign_in
             )
 
 if drawing_access_allowed:
@@ -962,15 +972,13 @@ if drawing_access_allowed:
 # -----------------------------
 # Two-column layout
 # -----------------------------
-left, right = st.columns([1.12, 1.38], gap="large")
+configurator_start = st.container(key="configurator_start")
+left, right = configurator_start.columns([1.12, 1.38], gap="medium")
 
 # -----------------------------
 # LEFT: image + summary (tight)
 # -----------------------------
 with left:
-    st.markdown(
-        f"<div style='height:{IMAGE_TOP_SPACER_PX}px'></div>", unsafe_allow_html=True
-    )
     st.subheader("Configuration Drawing")
     st.caption("Entered dimensions are reflected below. Drawing is not to scale (NTS).")
 
