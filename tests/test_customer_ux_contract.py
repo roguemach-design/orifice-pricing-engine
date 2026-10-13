@@ -81,10 +81,7 @@ def test_quote_keeps_engineering_workflow_and_prominent_summary():
 
     assert positions == sorted(positions)
     assert 'st.subheader("Configuration Drawing")' in quote_source
-    assert (
-        'with st.container(border=True):\n        st.subheader("Quote Summary")'
-        in quote_source
-    )
+    assert 'with st.container(border=True):' in quote_source
     assert 'c1.metric("Unit price"' in quote_source
     assert 'c2.metric("Total price"' in quote_source
     assert "calendar days" in quote_source
@@ -102,7 +99,7 @@ def test_quote_keeps_lean_owner_approved_controls():
     assert "value=None" in quote_source
     assert '"Lead time"' in quote_source
     assert 'format_func=lambda days: f"{days} calendar days"' in quote_source
-    assert quote_source.count("Estimated to ship within") == 1
+    assert quote_source.count("Estimated shipping ·") == 1
 
 
 def test_success_page_allows_guest_confirmation():

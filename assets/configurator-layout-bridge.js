@@ -32,7 +32,7 @@
         top: rect.top + (main?.scrollTop || 0), left: rect.left, width: rect.width,
         svg, prices, previewNotice: svg ? '' : (alerts[0] || 'Complete the required dimensions to update the plate preview.'),
         priceNotice: prices.length ? '' : (alerts.at(-1) || 'Complete the required fields to see a verified price.'),
-        shipping: captions.filter(text => text.startsWith('Estimated to ship within') || text.startsWith('Shipping estimate')).join(' · ')
+        shipping: captions.find(text => text.startsWith('Estimated shipping ·')) || ''
       };
     }
     const payload = { type: 'oplates:layout', height, feedback };

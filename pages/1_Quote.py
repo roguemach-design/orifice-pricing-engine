@@ -755,7 +755,7 @@ with st.container(key="configurator_starter", border=False):
             render_auth_sidebar(show_debug=False, placement="inline")
         else:
             st.caption("Save your quotes and orders")
-            if st.button("Sign in", key="starter_sign_in", type="tertiary"):
+            if st.button("Sign in", key="starter_sign_in", type="secondary"):
                 _starter_sign_in()
 
 starter_notice_shown = False
@@ -1586,20 +1586,10 @@ with left:
     else:
         st.info("Complete the required dimensions to update the plate preview.")
     with st.container(border=True):
-        st.subheader("Quote Summary")
         if result:
             c1, c2 = st.columns(2)
             c1.metric("Unit price", f"${result['unit_price']:,.2f}")
             c2.metric("Total price", f"${result['total_price']:,.2f}")
-            st.caption(
-                f"{material} · {float(thickness):.3f} in. thick · "
-                f"Ø {float(paddle_dia):.3f} OD / Ø {float(bore_dia):.3f} bore · "
-                f"Qty {int(quantity)}"
-            )
-            st.caption(f"Estimated to ship within {int(ships_in_days)} calendar days.")
-            st.caption(
-                f"Verified quote · Reference: {result.get('configuration_id', '')}"
-            )
         elif active_assisted_session is not None and pricing_error:
             st.warning(
                 "A verified price is not currently available. Your configuration is preserved."
@@ -1626,8 +1616,8 @@ with left:
 
     if result and weight_lb is not None and pkg:
         st.caption(
-            f"Shipping estimate · {weight_lb:.2f} lb · "
-            f"{pkg['length']} × {pkg['width']} × {pkg['height']} in. package"
+            f"Estimated shipping · {int(ships_in_days)} calendar days · {weight_lb:.2f} lb · "
+            f"{pkg['length']} × {pkg['width']} × {pkg['height']} in."
         )
 
 
