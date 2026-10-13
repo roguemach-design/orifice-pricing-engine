@@ -27,6 +27,7 @@ from drawing_intake.assisted_quote import (
     FieldAttentionKind,
     availability_from_active_config,
     confirm_configuration,
+    canonical_required_fields,
     reject_drawing_proposal,
     review_assisted_quote,
 )
@@ -146,6 +147,24 @@ st.markdown(
       }}
     }}
 
+    .st-key-configurator_starter {{border:1px solid #2b3c50;border-radius:16px;
+      padding:1.1rem 1.25rem;background:linear-gradient(115deg,#111d2a,#0e1620)}}
+    .st-key-configurator_starter [data-testid="stVerticalBlock"] {{gap:.4rem}}
+    .starter-upload-title {{display:flex;align-items:center;gap:.65rem;font-size:1rem}}
+    .starter-upload-title span {{font-size:1.6rem;color:#a7c5e8}}
+    .st-key-configurator_starter [data-testid="stButton"] button {{height:auto;min-height:38px;padding:.4rem .75rem;font-size:.875rem}}
+    .st-key-configurator_starter [data-testid="stAlert"] {{padding:.85rem;border-radius:10px}}
+    .st-key-starter_file_picker [data-testid="stFileUploaderDropzoneInstructions"] {{display:none}}
+    .st-key-starter_file_picker [data-testid="stFileUploaderDropzone"] {{padding:0;border:0;background:transparent}}
+    .st-key-starter_file_picker [data-testid="stFileUploaderDropzone"] button {{background:#1761b9;color:#fff;border:1px solid #4b99ef;min-height:42px}}
+    .st-key-starter_file_picker [data-testid="stFileUploaderDropzone"] button p {{font-size:0}}
+    .st-key-starter_file_picker [data-testid="stFileUploaderDropzone"] button p::after {{content:"Upload drawing";font-size:.875rem}}
+    .st-key-configurator_starter [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {{min-width:0}}
+    @media(max-width:900px) {{
+      .st-key-configurator_starter > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] {{flex-direction:column}}
+      .st-key-configurator_starter > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {{width:100%!important;flex:1 1 100%}}
+    }}
+
     /* Make Streamlit buttons taller */
     div[data-testid="stButton"] > button {{
         height: {PAY_BUTTON_HEIGHT_PX}px;
@@ -162,7 +181,7 @@ st.markdown(
 # -----------------------------
 # Shared auth sidebar (login persists across pages)
 # -----------------------------
-render_auth_sidebar(show_debug=False)
+render_auth_sidebar(show_debug=False, placement="deferred")
 
 # ✅ NEW: cart support (session state)
 import uuid
@@ -171,13 +190,15 @@ from datetime import datetime, timezone
 if "cart" not in st.session_state or not isinstance(st.session_state.cart, list):
     st.session_state.cart = []
 
-st.title("Configure your plate")
-st.markdown(
-    "<p style='margin-top:0;margin-bottom:0.5rem'>"
-    "Enter the part dimensions shown in the drawing. Your verified price updates automatically."
-    "</p>",
-    unsafe_allow_html=True,
-)
+if not st.session_state.get("integrated_landing"):
+    st.caption("BUILD FROM YOUR KNOWN DIMENSIONS")
+    st.title("Configure your plate")
+    st.markdown(
+        "<p style='margin-top:0;margin-bottom:0.5rem'>"
+        "Upload a drawing or enter dimensions below. Your verified price updates automatically."
+        "</p>",
+        unsafe_allow_html=True,
+    )
 
 
 # -----------------------------
@@ -711,46 +732,63 @@ owner_test_checkout_allowed = bool(
     OWNER_ACCEPTANCE_MODE and OWNER_TEST_CHECKOUT_ENABLED and drawing_access_allowed
 )
 
-if DRAWING_ASSISTED_ENABLED and not drawing_access_allowed:
-    with st.container(border=False, key="drawing_upload"):
-        upload_copy, upload_action = st.columns([4, 1], vertical_alignment="center", gap="small")
-        with upload_copy:
-            st.markdown("**Upload a drawing**")
-            st.caption(
-                "Sign in to analyze a print" if not is_logged_in()
-                else "Drawing uploads are currently available to approved test users only."
-            )
-            st.caption("PDF, PNG, JPG · Analyzed locally; drawings are not stored.")
-        if not is_logged_in():
-            def _open_upload_sign_in():
-                st.session_state["account_expand_requested"] = True
+@st.dialog("Sign in")
+def _starter_sign_in():
+    st.caption("Sign in to analyze a print or save your quotes and orders.")
+    render_auth_sidebar(show_debug=False, placement="inline")
 
-            upload_action.button(
-                "Sign in", key="drawing_sign_in_cta", on_click=_open_upload_sign_in
-            )
+
+with st.container(key="configurator_starter", border=False):
+    starter_upload, starter_analysis, starter_account = st.columns([4, 4, 2], gap="medium", vertical_alignment="center")
+    with starter_upload:
+        st.markdown(
+            '<div class="starter-upload-title"><span aria-hidden="true">↥</span>'
+            '<strong>Upload a drawing</strong></div>', unsafe_allow_html=True
+        )
+        st.caption("PDF, PNG, JPG · analyzed locally · not stored")
+    with starter_analysis:
+        starter_status = st.empty()
+    with starter_account:
+        if is_logged_in():
+            render_auth_sidebar(show_debug=False, placement="inline")
+        else:
+            st.caption("Save your quotes and orders")
+            if st.button("Sign in", key="starter_sign_in", type="tertiary"):
+                _starter_sign_in()
+
+starter_notice_shown = False
+
+
+def _starter_notice(kind, message):
+    global starter_notice_shown
+    starter_notice_shown = True
+    getattr(starter_status, kind)(message)
+
+
+if not drawing_access_allowed:
+    with starter_upload:
+        if st.button(
+            "Upload drawing", icon=":material/upload:", type="primary",
+            key="drawing_sign_in_cta", disabled=not DRAWING_ASSISTED_ENABLED or is_logged_in(),
+        ):
+            _starter_sign_in()
 
 if drawing_access_allowed:
-    with st.container(border=False, key="drawing_upload"):
-        st.subheader("Upload a drawing")
-        st.write("Upload your print and we’ll identify what we can.")
-        st.caption(
-            "Supports PDF, PNG, and JPG. Files are processed locally for analysis and are not stored."
-        )
+    with starter_upload:
         if st.session_state.pop(_DRAWING_RESET_UPLOAD_KEY, False):
             st.session_state.pop("phase1g_uploaded_drawing", None)
             st.session_state.pop("phase1g_candidate_label", None)
-        upload_column, analyze_column = st.columns([3, 1], vertical_alignment="bottom")
+        upload_column = st.container(key="starter_file_picker")
+        analyze_column = st.container()
         uploaded_drawing = upload_column.file_uploader(
-            "Drawing file",
+            "Upload drawing",
             type=["pdf", "png", "jpg", "jpeg"],
             key="phase1g_uploaded_drawing",
             label_visibility="collapsed",
         )
 
-        if analyze_column.button(
-            "Analyze drawing",
-            disabled=uploaded_drawing is None,
-            key="phase1g_analyze_drawing",
+        if uploaded_drawing is not None and analyze_column.button(
+            "Analyze drawing", key="phase1g_analyze_drawing",
         ):
             try:
                 limits = upload_limits_from_environment()
@@ -797,17 +835,17 @@ if drawing_access_allowed:
                         st.session_state[_DRAWING_PENDING_KEY] = recognized
                 st.rerun()
             except DrawingUploadValidationError as exc:
-                st.error(str(exc))
+                _starter_notice("error", str(exc))
             except DrawingProcessingBusyError:
-                st.error(
+                _starter_notice("error",
                     "Another drawing is processing. Try again when it finishes; your form is unchanged."
                 )
             except DrawingProcessingTimeoutError:
-                st.error(
+                _starter_notice("error",
                     "The drawing took too long to process. Your current configuration was preserved."
                 )
             except DrawingProcessingError:
-                st.error(
+                _starter_notice("error",
                     "We couldn't process that drawing safely. You can continue with manual entry."
                 )
 
@@ -826,17 +864,17 @@ if drawing_access_allowed:
             st.session_state.pop("phase1g_candidate_label", None)
             processed_upload = None
             if uploaded_sha256 is not None:
-                st.info(
+                _starter_notice("info",
                     "A different file is selected. Analyze it before applying values."
                 )
         if processed_upload is not None:
             candidate_options = processed_upload.review.candidates
             if not processed_upload.review.quote_specific or not candidate_options:
-                st.warning(
+                _starter_notice("warning",
                     "This file does not identify one quote-specific plate. Continue with the manual configuration below."
                 )
             elif len(candidate_options) > 1:
-                st.success(
+                _starter_notice("success",
                     f"Drawing processed. We found {len(candidate_options)} possible plates. Select the one you want to quote."
                 )
                 candidate_by_label = {
@@ -875,50 +913,34 @@ if drawing_access_allowed:
                         st.session_state[_DRAWING_PENDING_KEY] = pending
                         st.rerun()
                     except DrawingProcessingBusyError:
-                        st.error(
+                        _starter_notice("error",
                             "Another drawing is processing. Try again when it finishes; your form is unchanged."
                         )
                     except DrawingProcessingTimeoutError:
-                        st.error(
+                        _starter_notice("error",
                             "The selected plate took too long to process. Your current configuration was preserved."
                         )
                     except DrawingProcessingError:
-                        st.error(
+                        _starter_notice("error",
                             "We couldn't read the selected plate safely. Continue with manual entry."
                         )
-            else:
-                st.success(
-                    "Your drawing has been processed. Review the identified values before applying them."
-                )
 
         pending_session = st.session_state.get(_DRAWING_PENDING_KEY)
         if pending_session is not None:
-            proposed_count = len(pending_session.configuration)
-            st.info(
-                f"Ready to prefill {proposed_count} field{'s' if proposed_count != 1 else ''}. "
-                "Choose Apply identified values to put them in the form. "
-                "Your existing entries will be preserved if they conflict."
-            )
             if st.button("Apply identified values", key="phase1g_apply_values"):
                 _apply_assisted_session(pending_session)
                 st.rerun()
 
         active_assisted_session = st.session_state.get(_DRAWING_SESSION_KEY)
         if active_assisted_session is not None:
-            st.success(
-                "Drawing values are connected to this quote form. Review them and complete the items marked below."
-            )
-            conflicts = st.session_state.get(_DRAWING_CONFLICTS_KEY, [])
-            for conflict in conflicts:
-                label = FIELD_LABELS.get(
-                    conflict["canonical_field"], conflict["canonical_field"]
-                )
-                st.warning(
-                    f"{label}: kept your value {conflict['customer_value']}; "
-                    f"the drawing suggested {conflict['drawing_value']}."
-                )
-
-            with st.expander("Drawing details and source references"):
+            with st.popover("Drawing details and source references"):
+                conflicts = st.session_state.get(_DRAWING_CONFLICTS_KEY, [])
+                for conflict in conflicts:
+                    label = FIELD_LABELS.get(conflict["canonical_field"], conflict["canonical_field"])
+                    st.warning(
+                        f"{label}: kept your value {conflict['customer_value']}; "
+                        f"the drawing suggested {conflict['drawing_value']}."
+                    )
                 origins = st.session_state.get(_FORM_ORIGINS_KEY, {})
                 for proposal in active_assisted_session.proposals:
                     if not proposal.canonical_field or (
@@ -972,17 +994,17 @@ if drawing_access_allowed:
                             st.session_state[_DRAWING_CONFIRM_KEY] = False
                             st.rerun()
 
-            if st.button(
-                "Reset quote and return to manual entry",
-                key="phase1g_reset_to_manual",
-            ):
-                owner_run = st.session_state.get(_OWNER_ACCEPTANCE_RUN_KEY)
-                if isinstance(owner_run, OwnerAcceptanceRun):
-                    st.session_state[_OWNER_ACCEPTANCE_RUN_KEY] = record_event(
-                        owner_run, AcceptanceEventKind.RESET_TO_MANUAL
-                    )
-                _reset_to_manual_defaults()
-                st.rerun()
+                if st.button(
+                    "Reset quote and return to manual entry",
+                    key="phase1g_reset_to_manual",
+                ):
+                    owner_run = st.session_state.get(_OWNER_ACCEPTANCE_RUN_KEY)
+                    if isinstance(owner_run, OwnerAcceptanceRun):
+                        st.session_state[_OWNER_ACCEPTANCE_RUN_KEY] = record_event(
+                            owner_run, AcceptanceEventKind.RESET_TO_MANUAL
+                        )
+                    _reset_to_manual_defaults()
+                    st.rerun()
 
 
 # -----------------------------
@@ -1366,7 +1388,7 @@ if active_assisted_session is not None:
                 attention_prompt.empty()
 
             owner_run = st.session_state.get(_OWNER_ACCEPTANCE_RUN_KEY)
-            if isinstance(owner_run, OwnerAcceptanceRun):
+            if isinstance(owner_run, OwnerAcceptanceRun) and st.query_params.get("debug") == "1":
                 with st.expander("Internal test feedback"):
                     st.caption(
                         "This summary stays in this browser session unless you download it. "
@@ -1399,6 +1421,36 @@ if active_assisted_session is not None:
                         file_name=f"oplates-owner-feedback-{summary.run_id[:8]}.json",
                         mime="application/json",
                     )
+
+
+if not starter_notice_shown:
+    with starter_status.container():
+        if active_assisted_session is not None and assisted_review is not None:
+            required = canonical_required_fields(chamfer=current_form_values.get("chamfer"))
+            if current_form_values.get("handle_hole_enabled"):
+                required += ["handle_hole_diameter", "handle_hole_center_from_handle_end"]
+            missing = set(assisted_review.missing_required_fields)
+            populated = sum(field not in missing for field in required)
+            attention_count = len(missing | set(assisted_review.invalid_fields))
+            st.success(f"Drawing analysis complete — {populated} of {len(required)} fields populated.")
+            if attention_count:
+                st.caption(f"Complete or correct the {attention_count} highlighted fields below.")
+            else:
+                st.caption("All required fields are populated. Review them below before pricing.")
+            st.caption("Detected values can be reviewed and edited before pricing.")
+        elif st.session_state.get(_DRAWING_PENDING_KEY) is not None:
+            pending = st.session_state[_DRAWING_PENDING_KEY]
+            st.info(f"Drawing analysis complete — {len(pending.configuration)} fields identified.")
+            st.caption("Apply identified values to the fields below. Your existing entries are preserved.")
+        elif drawing_access_allowed and uploaded_drawing is not None:
+            st.markdown("**Your drawing is ready to analyze.**")
+            st.caption("Analyze it to populate the fields below.")
+        elif is_logged_in() and DRAWING_ASSISTED_ENABLED and not drawing_access_allowed:
+            st.markdown("**Drawing analysis is unavailable for this account.**")
+            st.caption("You can complete the configurator fields below.")
+        else:
+            st.markdown("**Ready to read your print.**")
+            st.caption("Detected values appear below and remain editable.")
 
 
 # -----------------------------

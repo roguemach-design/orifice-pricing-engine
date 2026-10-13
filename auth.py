@@ -323,13 +323,17 @@ def _render_connection_debug() -> None:
     st.code(SUPABASE_URL or "(missing)")
 
 
-def render_auth_sidebar(*, show_debug: bool = False) -> None:
+def render_auth_sidebar(*, show_debug: bool = False, placement: str = "default") -> None:
     from customer_navigation import render_customer_shell
-    render_customer_shell()
+    if placement in ("default", "deferred"):
+        render_customer_shell()
     # ✅ IMPORTANT: restore BEFORE widgets
     _ensure_auth_state()
     _restore_auth_from_cookie_if_needed()
     _refresh_session_if_needed()
+
+    if placement == "deferred":
+        return
 
     # Signed-in identity is a utility row on every customer page.
     if is_logged_in() and not show_debug:
@@ -339,8 +343,10 @@ def render_auth_sidebar(*, show_debug: bool = False) -> None:
                 logout()
         return
 
-    account_container = st.expander(
-        "Account", expanded=st.session_state.get("account_expand_requested", False)
+    account_container = (
+        st.container() if placement == "inline" else st.expander(
+            "Account", expanded=st.session_state.get("account_expand_requested", False)
+        )
     )
     with account_container:
         if show_debug:

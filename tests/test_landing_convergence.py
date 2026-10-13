@@ -262,7 +262,8 @@ def test_cold_direct_embedded_quote_initializes_customer_shell(monkeypatch):
     app.run()
     assert not app.exception
     assert app.session_state["integrated_landing"] is True
-    assert any(x.label == "Account" for x in app.expander)
+    assert not app.title  # The landing section already provides the one heading.
+    assert app.button(key="starter_sign_in").label == "Sign in"
     assert not app.sidebar.text_input
     page_links = app.get("page_link")
     assert [x.proto.label for x in page_links] == [
@@ -296,7 +297,7 @@ def test_signed_in_account_is_compact_and_logout_still_clears_session(monkeypatc
     app.button(key="account_log_out").click().run()
     assert not app.exception
     assert app.session_state["auth"]["access_token"] is None
-    assert any(x.label == "Account" for x in app.expander)
+    assert app.button(key="starter_sign_in").label == "Sign in"
 
 
 def test_material_cards_keep_required_unresolved_selection():

@@ -775,7 +775,7 @@ def test_signed_out_user_sees_locked_drawing_section(monkeypatch, active_config)
         ).run()
         assert not app.exception
         assert any("Upload a drawing" in item.value for item in app.markdown)
-        assert any(item.value == "Sign in to analyze a print" for item in app.caption)
+        assert any("analyzed locally" in item.value for item in app.caption)
         assert not any("Sign in to upload" in item.value for item in app.info)
         assert len([b for b in app.button if b.key == "drawing_sign_in_cta"]) == 1
         assert not app.get("file_uploader")
@@ -783,7 +783,7 @@ def test_signed_out_user_sees_locked_drawing_section(monkeypatch, active_config)
         next(
             button for button in app.button if button.key == "drawing_sign_in_cta"
         ).click().run()
-        assert next(x for x in app.expander if x.label == "Account").proto.expanded
+        assert not any(x.label == "Account" for x in app.expander)
         assert any(x.label == "Email" for x in app.text_input)
         assert any(x.label == "Quantity" for x in app.number_input)
         inspect_upload.assert_not_called()
@@ -825,7 +825,7 @@ def test_internal_entry_point_requires_server_verified_access(
     assert not app.exception
     assert not app.get("file_uploader")
     assert any("Upload a drawing" in item.value for item in app.markdown)
-    assert any("approved test users only" in item.value for item in app.caption)
+    assert any("Drawing analysis is unavailable for this account" in item.value for item in app.markdown)
 
 
 def test_invalid_upload_preserves_existing_manual_configuration(
@@ -1003,6 +1003,8 @@ def test_internal_real_form_upload_populate_complete_confirm_then_price(
             ).value
             == 2.0
         )
+        assert any("Drawing analysis complete — 6 of 10 fields populated." in item.value for item in app.success), [item.value for item in app.success]
+        assert any("4 highlighted fields below" in item.value for item in app.caption)
         assert any("Handle width" in item.value for item in app.info)
         assert (
             next(
@@ -1113,6 +1115,7 @@ def test_internal_real_form_upload_populate_complete_confirm_then_price(
             "fingerprint": final_session.confirmation_fingerprint,
             "review": final_review.model_dump(),
         }
+        assert any("Drawing analysis complete — 10 of 10 fields populated." in item.value for item in app.success)
         assert len(quote_calls) == price_calls_after_apply + 1
         assert quote_calls[-1]["paddle_dia"] == 8.0
         assert any(item.label == "Unit price" for item in app.metric)
