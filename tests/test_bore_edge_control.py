@@ -19,6 +19,8 @@ def test_bore_edge_selector_preserves_unresolved_and_boolean_state():
 
     app = AppTest.from_function(render).run()
     assert not app.exception
+    assert len(app.button_group) == 1
+    assert app.button_group[0].options == ["NO CHAMFER", "CHAMFERED BORE"]
     assert app.button_group(key="quote_field_chamfer").value is None
     assert not app.number_input
     app.button_group(key="quote_field_chamfer").set_value(True).run()
