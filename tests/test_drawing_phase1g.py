@@ -1102,7 +1102,7 @@ def test_internal_real_form_upload_populate_complete_confirm_then_price(
         assert not confirmation.disabled
         confirmation.set_value(True).run()
         assert not app.exception
-        success_messages = [item.value for item in app.success]
+        success_messages = [item.value for item in app.success] + [item.value for item in app.caption]
         final_session = app.session_state["phase1g_assisted_session"]
         final_review = review_assisted_quote(final_session, availability=availability)
         assert any("Estimated to ship" in item for item in success_messages), {

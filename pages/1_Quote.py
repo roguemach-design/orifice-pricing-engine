@@ -129,6 +129,23 @@ st.markdown(
     .st-key-configurator_start [data-testid="stVerticalBlock"] {{gap:.55rem}}
     .st-key-configurator_start h3 {{margin-top:0;padding-top:0}}
 
+    /* Bound the feedback column to this configurator's scrolling input row. */
+    @media (min-width: 901px) {{
+      .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] {{align-items:flex-start}}
+      .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {{
+        position:sticky;top:4rem;align-self:flex-start;min-width:0;
+        max-height:calc(100dvh - 5.5rem);overflow-y:auto;overflow-x:hidden;
+        overscroll-behavior:contain;padding-right:.25rem;
+      }}
+    }}
+    @media (max-width: 900px) {{
+      .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] {{flex-direction:column}}
+      .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {{
+        position:static;top:auto;width:100%!important;flex:1 1 100%;min-width:0;
+        max-height:none;overflow:visible;padding-right:0;
+      }}
+    }}
+
     /* Make Streamlit buttons taller */
     div[data-testid="stButton"] > button {{
         height: {PAY_BUTTON_HEIGHT_PX}px;
@@ -1490,7 +1507,9 @@ with left:
     preview_ready = payload_inputs is not None and not errors
     if preview_ready:
         components.html(
-            render_plate_svg(
+            "<style>html,body{margin:0;height:100%}"
+            "svg{width:100%!important;height:100%!important}</style>"
+            + render_plate_svg(
                 handle_hole_enabled=handle_hole_enabled,
                 handle_hole_diameter=handle_hole_diameter,
                 handle_hole_center_from_handle_end=handle_hole_center_from_handle_end,
@@ -1507,7 +1526,7 @@ with left:
                     float(chamfer_width) if chamfer_width is not None else None
                 ),
             ),
-            height=430,
+            height=300,
             scrolling=False,
         )
     else:
@@ -1523,10 +1542,9 @@ with left:
                 f"Ø {float(paddle_dia):.3f} OD / Ø {float(bore_dia):.3f} bore · "
                 f"Qty {int(quantity)}"
             )
-            st.success(f"Estimated to ship within {int(ships_in_days)} calendar days.")
+            st.caption(f"Estimated to ship within {int(ships_in_days)} calendar days.")
             st.caption(
-                f"Quote reference: {result.get('configuration_id', '')} · "
-                "Verified using the active pricing and availability configuration."
+                f"Verified quote · Reference: {result.get('configuration_id', '')}"
             )
         elif active_assisted_session is not None and pricing_error:
             st.warning(
@@ -1553,12 +1571,9 @@ with left:
         st.divider()
 
     if result and weight_lb is not None and pkg:
-        st.caption("Shipping estimates")
-        s1, s2 = st.columns(2)
-        s1.metric("Estimated total weight", f"{weight_lb:.2f} lb")
-        s2.metric(
-            "Estimated package",
-            f"{pkg['length']} × {pkg['width']} × {pkg['height']} in.",
+        st.caption(
+            f"Shipping estimate · {weight_lb:.2f} lb · "
+            f"{pkg['length']} × {pkg['width']} × {pkg['height']} in. package"
         )
 
 
