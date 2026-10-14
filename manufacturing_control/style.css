@@ -61,3 +61,5 @@
 .stApp .st-key-mc_card_unlock {max-width:560px;margin:40px auto;padding:28px;}
 .stApp .st-key-mc_card_unlock [data-testid="stForm"] {border:0;padding:0;}
 .stApp [data-baseweb="popover"] li,.stApp [role="listbox"] {background:#fff;color:#1c1d1f;}
+.stApp [data-testid="stCaptionContainer"] p {color:#5c5f62!important;}
+.stApp [data-testid="stAlert"] p {color:#1c1d1f!important;}
