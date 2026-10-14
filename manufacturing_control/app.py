@@ -170,7 +170,7 @@ def overview(snapshot):
         + "</div>"
     )
     left, right = st.columns([1, 1.4], gap="medium")
-    with left, st.container(border=True):
+    with left, st.container(border=True, key="mc_card_attention"):
         st.subheader("Needs attention")
         attention = [
             o
@@ -195,7 +195,7 @@ def overview(snapshot):
                 args=(order["id"],),
                 width="stretch",
             )
-    with right, st.container(border=True):
+    with right, st.container(border=True, key="mc_card_recent"):
         st.subheader("Recent completed orders")
         for order in snapshot["orders"][:5]:
             html(mode_chip(order.get("payment_mode")) + chip(row_approval(order)))
@@ -306,7 +306,7 @@ def orders_workspace(snapshot, *, sourcing=False):
     if not rows:
         st.info("No records match these filters within the loaded snapshot.")
     for order in rows[(page - 1) * 10 : page * 10]:
-        with st.container(border=True):
+        with st.container(border=True, key=f"mc_card_order_{order['id']}"):
             html(
                 mode_chip(order.get("payment_mode"))
                 + chip(
@@ -392,7 +392,7 @@ def inventory_workspace(client):
             ).casefold()
         ):
             continue
-        with st.container(border=True):
+        with st.container(border=True, key=f"mc_card_plate_{plate['id']}"):
             st.subheader(plate["line_id"])
             st.caption("Plate " + plate["id"])
             st.caption("Order " + plate["order_id"])
@@ -438,7 +438,7 @@ def files(client, rev, plate, order, is_current, is_approved):
         ),
     ]:
         artifact = rev.get("artifacts", {}).get(kind)
-        with st.container(border=True):
+        with st.container(border=True, key=f"mc_card_file_{rev['id']}_{kind}"):
             st.markdown("**" + title + "**")
             st.caption(desc)
             if not artifact:
@@ -503,7 +503,7 @@ def files(client, rev, plate, order, is_current, is_approved):
 
 def history(client, detail):
     rev = detail["revision"]
-    with st.container(border=True):
+    with st.container(border=True, key=f"mc_card_history_{rev['id']}"):
         st.subheader(f"Revision history · R{rev['number']}")
         events = [(rev.get("created_at"), "Revision created", rev.get("reason"))]
         for a in detail.get("approvals", []):
@@ -588,7 +588,7 @@ def line_detail(client, plate, order):
     current = rid == detail["plate"]["current_revision"]
     is_approved = approved(rev, detail.get("approvals", []))
     spec = frozen_spec(rev)
-    with st.container(border=True):
+    with st.container(border=True, key=f"mc_card_line_{rev['id']}"):
         html(
             f'<div class="mc-row"><h3>{text(plate["line_id"].replace("line-","Line "))}</h3>'
             + chip(
@@ -656,7 +656,7 @@ def line_detail(client, plate, order):
             )
         files(client, rev, plate, order, current, is_approved)
     history(client, detail)
-    with st.container(border=True):
+    with st.container(border=True, key=f"mc_card_source_{rev['id']}"):
         st.subheader(f"Sourcing · R{rev['number']}")
         html(chip("Not released"))
         sources = sorted(
@@ -744,7 +744,7 @@ def order_detail(client, order_id, snapshot):
             except PortalError as error:
                 show_error(error)
     with aside:
-        with st.container(border=True):
+        with st.container(border=True, key="mc_card_order_record"):
             st.subheader("Order record")
             pairs(
                 [
@@ -755,11 +755,11 @@ def order_detail(client, order_id, snapshot):
                     ("Paid", stamp(order.get("paid_at"))),
                 ]
             )
-        with st.container(border=True):
+        with st.container(border=True, key="mc_card_customer"):
             st.subheader("Customer")
             st.caption("Customer contact from the order record")
             st.write(order.get("customer_email") or "Email not provided")
-        with st.container(border=True):
+        with st.container(border=True, key="mc_card_shipping"):
             st.subheader("Shipping")
             address = order.get("shipping_address")
             if isinstance(address, dict) and address:
@@ -780,7 +780,7 @@ def order_detail(client, order_id, snapshot):
                 "Service: " + str(order.get("shipping_service") or "Not provided")
             )
             st.caption("Tracking, labels and fulfillment are not part of this portal.")
-        with st.container(border=True):
+        with st.container(border=True, key="mc_card_totals"):
             st.subheader("Order totals")
 
             def money(k):
@@ -815,7 +815,7 @@ def run():
         st.error("Owner portal environment binding is unavailable.")
         return
     if not st.session_state.get("mc_key"):
-        with st.container(border=True):
+        with st.container(border=True, key="mc_card_unlock"):
             st.title("Manufacturing Control")
             st.write(
                 "Internal review portal. Enter the owner credential to load orders."
