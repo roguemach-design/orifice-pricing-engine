@@ -131,7 +131,7 @@ def test_snapshot_scope_no_artifact_reads_or_mutation(tmp_path, monkeypatch):
     )
     assert (
         summary["partial"] is True
-        and summary["scope"] == SCOPE
+        and summary["scope"] == SCOPE + " · Active"
         and summary["snapshot_at"]
     )
     assert summary["counts"]["approved"] == 1

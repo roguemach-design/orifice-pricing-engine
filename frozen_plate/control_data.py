@@ -19,7 +19,7 @@ def approved(revision, approvals):
     )
 
 
-def bounded_summary(orders, repo):
+def bounded_summary(orders, repo, *, archive_view="Active", search=None):
     orders = [dict(o) for o in orders[:200] if o["status"] == "completed"]
     ids = [o["id"] for o in orders]
     lines = []
@@ -76,7 +76,11 @@ def bounded_summary(orders, repo):
         order["lines"] = [line for line in lines if line["order_id"] == order["id"]]
     return {
         "orders": orders,
-        "scope": SCOPE,
+        "scope": SCOPE
+        + " · "
+        + archive_view
+        + (" · matching search" if search else ""),
+        "archive_view": archive_view,
         "partial": True,
         "snapshot_at": datetime.now(timezone.utc).isoformat(),
         "counts": {

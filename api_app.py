@@ -17,7 +17,7 @@ from typing import Optional, List, Dict, Any, Literal
 import stripe
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import model_validator, BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import StrictBool, model_validator, BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from pricing_engine import QuoteInputs, calculate_quote
 
@@ -166,6 +166,7 @@ class Order(Base):
     stripe_payment_intent = Column(String, nullable=True)
     status = Column(String, default="pending", nullable=False, index=True)
     paid_at = Column(DateTime, nullable=True)
+    owner_archived_at = Column(DateTime, nullable=True)
     last_stripe_event_id = Column(String, nullable=True, unique=True)
 
     customer_email = Column(String, nullable=True)
@@ -208,6 +209,7 @@ def init_db() -> None:
         conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS status VARCHAR NOT NULL DEFAULT 'pending'"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(status)"))
         conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP WITH TIME ZONE"))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS owner_archived_at TIMESTAMP WITH TIME ZONE"))
         conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS last_stripe_event_id VARCHAR"))
         conn.execute(
             text(
@@ -1536,20 +1538,20 @@ def _admin_payment_mode(order):
 
 
 @app.get("/admin/manufacturing-summary", dependencies=[Depends(_rate_limit_admin)])
-def admin_manufacturing_summary():
+def admin_manufacturing_summary(archive_view: Literal["Active", "Archived", "All"] = "Active", q: Optional[str] = None):
     if not frozen_plate_enabled(app_env=APP_ENV):
         raise HTTPException(503, "Manufacturing records unavailable")
     from frozen_plate.api import repository
     from frozen_plate.control_data import bounded_summary
     from frozen_plate.repository import WorkflowError
     try:
-        return bounded_summary(admin_list_orders(limit=200), repository())
+        return bounded_summary(admin_list_orders(q=q, limit=200, archive_view=archive_view), repository(), archive_view=archive_view, search=q)
     except (WorkflowError, ValueError, KeyError):
         raise HTTPException(503, "Manufacturing records unavailable") from None
 
 
 @app.get("/admin/orders", dependencies=[Depends(_rate_limit_admin)])
-def admin_list_orders(q: Optional[str] = None, limit: int = 50):
+def admin_list_orders(q: Optional[str] = None, limit: int = 50, archive_view: Literal["Active", "Archived", "All"] = "Active", offset: int = 0):
     _db_required()
     limit = max(1, min(int(limit), 200))
 
@@ -1557,21 +1559,15 @@ def admin_list_orders(q: Optional[str] = None, limit: int = 50):
     try:
         query = db.query(Order).order_by(Order.created_at.desc())
 
-        if q and q.strip():
-            qq = q.strip()
-            query = query.filter(
-                or_(
-                    Order.id.ilike(f"%{qq}%"),
-                    Order.customer_email.ilike(f"%{qq}%"),
-                    Order.stripe_session_id.ilike(f"%{qq}%"),
-                )
-            )
+        from owner_order_archive import filter_orders
+        query = filter_orders(query, Order, archive_view=archive_view, search=q)
 
-        orders = query.limit(limit).all()
+        orders = query.offset(max(0, int(offset))).limit(limit).all()
         return [
             {
                 "id": o.id,
                 "status": o.status,
+                "owner_archived_at": o.owner_archived_at.isoformat() if o.owner_archived_at else None,
                 "payment_mode": _admin_payment_mode(o),
                 "order_number_display": _format_order_number(o.order_number),
                 "created_at": o.created_at.isoformat() if o.created_at else None,
@@ -1605,6 +1601,22 @@ def debug_whoami(
     }
 
 
+class OrderArchiveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    archived: StrictBool
+
+
+@app.put("/admin/orders/{order_id}/archive", dependencies=[Depends(_rate_limit_admin)])
+def admin_archive_order(order_id: str, body: OrderArchiveRequest):
+    _db_required()
+    from owner_order_archive import set_archived
+    db = SessionLocal()
+    try:
+        return set_archived(db, Order, order_id, body.archived)
+    finally:
+        db.close()
+
+
 @app.get("/admin/orders/{order_id}", dependencies=[Depends(_rate_limit_admin)])
 def admin_get_order(order_id: str):
     _db_required()
@@ -1617,6 +1629,7 @@ def admin_get_order(order_id: str):
         return {
             "id": o.id,
             "status": o.status,
+            "owner_archived_at": o.owner_archived_at.isoformat() if o.owner_archived_at else None,
             "payment_mode": _admin_payment_mode(o),
             "order_number_display": _format_order_number(o.order_number),
             "created_at": o.created_at.isoformat() if o.created_at else None,

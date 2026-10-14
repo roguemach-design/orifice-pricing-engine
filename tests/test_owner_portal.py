@@ -164,9 +164,7 @@ def test_authorized_owner_page_shows_exact_downloads_without_writes(monkeypatch)
     assert not app.exception
     next(b for b in app.button if b.label == 'OP-0014').click().run()
     assert not app.exception
-    assert not app.get('download_button')
-    assert not any('/artifact/' in c or c.endswith('/dxf') for c in calls)
-    next(b for b in app.button if b.label == 'Prepare PDF').click().run()
     assert len(app.get('download_button')) == 1
-    assert any('Bytes verified' in e.value for e in app.success)
+    assert not any('/artifact/' in c or c.endswith('/dxf') for c in calls)
+    assert not any('Prepare' in b.label for b in app.button)
     assert not any('Record sourcing' in b.label or 'revised' in b.label for b in app.button)

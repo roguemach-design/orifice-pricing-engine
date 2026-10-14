@@ -12,7 +12,14 @@ import streamlit as st
 from frozen_plate.control_data import approved
 from frozen_plate.download_names import dxf_delivery_name
 from frozen_plate.runtime import ui_enabled
-from .client import OwnerClient, PortalError, ERRORS, clear_owner_session
+from .client import (
+    OwnerClient,
+    PortalError,
+    ERRORS,
+    clear_owner_session,
+    DownloadAccess,
+    download_callable,
+)
 
 
 def html(value):
@@ -216,7 +223,9 @@ def overview(snapshot):
 def orders_workspace(snapshot, *, sourcing=False):
     st.title("Sourcing records" if sourcing else "Orders")
     scope(snapshot)
-    search = st.text_input("Search by order number or customer email", key="mc_search")
+    search = st.text_input(
+        "Search by order number, customer or identifiers", key="mc_search"
+    )
     f1, f2, f3, f4 = st.columns(4)
     with f1:
         status = st.selectbox(
@@ -260,15 +269,6 @@ def orders_workspace(snapshot, *, sourcing=False):
 
     def matches(order):
         lines = order["lines"]
-        if (
-            search.strip().casefold()
-            not in (
-                (order.get("order_number_display") or "")
-                + " "
-                + (order.get("customer_email") or "")
-            ).casefold()
-        ):
-            return False
         if mode != "All" and mode != order.get("payment_mode", "UNKNOWN"):
             return False
         if material != "All" and not any(l["material"] == material for l in lines):
@@ -417,7 +417,7 @@ def frozen_spec(rev):
 def files(client, rev, plate, order, is_current, is_approved):
     st.subheader(f"Manufacturing files · R{rev['number']}")
     st.caption(
-        "File bytes load only on request. Prepare a file, then save the verified download."
+        "Downloads verify exact stored bytes against Frozen Plate SHA-256 and byte length before delivery."
     )
     spec = frozen_spec(rev)
     for kind, title, desc in [
@@ -468,34 +468,24 @@ def files(client, rev, plate, order, is_current, is_approved):
                     )
                     continue
                 st.caption("Saves as " + filename)
-            if st.button(
-                "Prepare " + kind.upper(),
-                key=f"mc_prepare_{rev['id']}_{kind}",
+            if "mc_download_access" not in st.session_state:
+                st.session_state["mc_download_access"] = DownloadAccess(client)
+            st.download_button(
+                "Download " + kind.upper(),
+                data=download_callable(
+                    st.session_state["mc_download_access"], rev, kind, filename
+                ),
+                file_name=filename,
+                mime={
+                    "pdf": "application/pdf",
+                    "dxf": "application/dxf",
+                    "json": "application/json",
+                }[kind],
+                key=f"mc_save_{rev['id']}_{kind}",
                 type="primary" if kind == "dxf" else "secondary",
+                on_click="ignore",
                 width="stretch",
-            ):
-                try:
-                    with st.spinner("Retrieving and checking exact bytes…"):
-                        content = client.artifact(rev, kind, filename)
-                    st.success(
-                        "Bytes verified · SHA-256 and byte length match · "
-                        + datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
-                    )
-                    st.download_button(
-                        "Download " + kind.upper(),
-                        content,
-                        file_name=filename,
-                        mime={
-                            "pdf": "application/pdf",
-                            "dxf": "application/dxf",
-                            "json": "application/json",
-                        }[kind],
-                        key=f"mc_save_{rev['id']}_{kind}",
-                        on_click="ignore",
-                        width="stretch",
-                    )
-                except PortalError as error:
-                    show_error(error)
+            )
     st.caption(
         "Approval and metadata alone do not verify file bytes. Downloads do not release manufacturing."
     )
@@ -726,6 +716,24 @@ def order_detail(client, order_id, snapshot):
             + text(mode)
             + " order.</strong> Not a LIVE charge. Approved means the customer approved the drawing — not charged LIVE, shipped or released to manufacturing.</div>"
         )
+    archived = bool(order.get("owner_archived_at"))
+    if archived:
+        html(chip("Archived"))
+        st.caption(
+            "Archived "
+            + stamp(order["owner_archived_at"])
+            + " · organizational only; manufacturing history retained"
+        )
+    if order.get("status") == "completed" or mode in ("TEST", "OWNER TEST"):
+        if st.button(
+            "Unarchive order" if archived else "Archive order", key="mc_archive_action"
+        ):
+            try:
+                client.archive(order_id, not archived)
+                refresh()
+                st.rerun()
+            except PortalError as error:
+                show_error(error)
     st.caption(
         "Created "
         + stamp(order.get("created_at"))
@@ -842,23 +850,40 @@ def run():
             key="mc_nav",
             label_visibility="collapsed",
         )
+        st.radio(
+            "Orders visibility", ["Active", "Archived", "All"], key="mc_archive_view"
+        )
         st.button("Lock", on_click=lock, width="stretch")
         st.caption("Owner session · shared key")
         st.divider()
-        st.markdown("**Review-only portal**")
+        st.markdown("**Manufacturing review only**")
         st.caption(
             "Viewing never approves, regenerates, emails, records sourcing, submits to a vendor or releases manufacturing."
         )
-        st.caption("Pricing settings remain in the separate legacy admin.")
+        st.caption(
+            "Order archive is organizational only. Pricing settings remain in the separate legacy admin."
+        )
     st.button("Refresh", on_click=refresh)
     client = OwnerClient(os.environ.get("API_BASE", ""), st.session_state["mc_key"])
     try:
+        archive_view = st.session_state.get("mc_archive_view", "Active")
+        nav = st.session_state.get("mc_nav", "Overview")
+        search = (
+            st.session_state.get("mc_search", "")
+            if nav in ("Orders", "Sourcing records")
+            else ""
+        )
+        signature = (archive_view, search)
+        if st.session_state.get("mc_snapshot_signature") != signature:
+            st.session_state.pop("mc_snapshot", None)
+            st.session_state["mc_snapshot_signature"] = signature
         if "mc_snapshot" not in st.session_state:
             with st.spinner(
                 "Loading order metadata… Files are not fetched until requested."
             ):
                 st.session_state["mc_snapshot"] = client.json(
-                    "/admin/manufacturing-summary"
+                    "/admin/manufacturing-summary",
+                    params={"archive_view": archive_view, "q": search},
                 )
         snapshot = st.session_state["mc_snapshot"]
         selected = st.session_state.get("mc_order")
