@@ -1,9 +1,30 @@
 """Customer routes; internal tools retain their own authorization and URLs."""
 
 from pathlib import Path
+import json
+from urllib.parse import urlsplit
 
 import streamlit as st
 import streamlit.components.v1 as components
+
+
+def render_integrated_checkout(checkout_url: str) -> bool:
+    """Let the trusted landing host open the existing sandbox session outside the iframe."""
+    if not st.session_state.get("integrated_landing"):
+        return False
+    target = urlsplit(checkout_url)
+    if (target.scheme != "https" or target.netloc != "checkout.stripe.com"
+            or not target.path.startswith("/c/pay/cs_test_")):
+        st.error("The embedded validation checkout requires a Stripe TEST session.")
+        return True
+    payload = json.dumps({"type": "oplates:checkout", "url": checkout_url}).replace("<", "\\u003c")
+    components.html(
+        "<script>for (const origin of ['https://o-plates.com', 'https://www.o-plates.com']) "
+        f"window.parent.parent.postMessage({payload}, origin);</script>",
+        height=0,
+    )
+    st.link_button("Continue to Stripe Checkout", checkout_url)
+    return True
 
 
 def _legacy_root():

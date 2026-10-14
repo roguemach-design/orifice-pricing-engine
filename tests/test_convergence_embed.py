@@ -96,3 +96,54 @@ def test_feedback_projection_is_trusted_display_only_and_falls_back_on_narrow_sc
       assert.equal(rail.hidden,true);assert.equal(messages.at(-1).data.enabled,false);
     """], cwd=ROOT, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_checkout_navigation_requires_trusted_frame_and_test_stripe_url():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("Node is unavailable for the embed message test")
+    result = subprocess.run([node, "-e", r"""
+      const fs=require('fs'),vm=require('vm'),assert=require('assert');
+      const listeners={},navigations=[],child={},frame={contentWindow:{0:child,length:1},style:{}};
+      const context={URL,document:{documentElement:{classList:{contains:()=>false}},
+        getElementById:id=>id==='y'?{}:(id==='plate-configurator'?frame:null),querySelectorAll:()=>[]},
+        window:{location:{assign:url=>navigations.push(url)},addEventListener:(name,fn)=>listeners[name]=fn}};
+      vm.runInNewContext(fs.readFileSync('o-plates landing/configurator.js','utf8'),context);
+      const url='https://checkout.stripe.com/c/pay/cs_test_existing#existing-fragment';
+      const event={origin:'https://quote.o-plates.com',source:child,data:{type:'oplates:checkout',url}};
+      listeners.message({...event,origin:'https://untrusted.example'});
+      listeners.message({...event,source:{}});
+      for(const url of ['https://checkout.stripe.com/c/pay/cs_live_no',
+          'https://checkout.stripe.com.evil.test/c/pay/cs_test_no',
+          'http://checkout.stripe.com/c/pay/cs_test_no',
+          'https://user@checkout.stripe.com/c/pay/cs_test_no','javascript:alert(1)','/c/pay/cs_test_no']) {
+        listeners.message({...event,data:{type:'oplates:checkout',url}});
+      }
+      assert.deepEqual(navigations,[]);
+      listeners.message(event);assert.deepEqual(navigations,[url]);
+      assert.strictEqual(frame.style.height,undefined);
+    """], cwd=ROOT, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+
+
+def test_embedded_checkout_uses_existing_url_without_changing_direct_navigation(monkeypatch):
+    from types import SimpleNamespace
+    import customer_navigation
+
+    scripts, links, errors = [], [], []
+    state = {}
+    monkeypatch.setattr(customer_navigation, "st", SimpleNamespace(
+        session_state=state, error=errors.append,
+        link_button=lambda label, url: links.append(url)))
+    monkeypatch.setattr(customer_navigation.components, "html", lambda html, **kwargs: scripts.append(html))
+    url = "https://checkout.stripe.com/c/pay/cs_test_existing#existing-fragment"
+    assert customer_navigation.render_integrated_checkout(url) is False
+    assert not scripts and not links and not errors
+    state["integrated_landing"] = True
+    assert customer_navigation.render_integrated_checkout(url) is True
+    assert links == [url]
+    assert 'window.parent.parent.postMessage' in scripts[0]
+    assert url in scripts[0]
+    assert "refresh" not in scripts[0]
+    assert customer_navigation.render_integrated_checkout(url.replace("cs_test_", "cs_live_")) is True
+    assert len(scripts) == 1 and len(errors) == 1
