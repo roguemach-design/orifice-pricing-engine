@@ -64,7 +64,7 @@ orders = call("/admin/orders", params={"limit": 200}).json()
 completed = [o for o in orders if o["status"] == "completed"]
 inventory = call("/admin/frozen-plates").json()
 labels = {
-    o["id"]: f"{o['order_number_display'] or o['id']} · {o['created_at']}"
+    o["id"]: f"{o['order_number_display'] or o['id']} · {o.get('payment_mode', 'UNKNOWN')} · {o['created_at']}"
     for o in completed
 }
 for plate in inventory:
@@ -77,6 +77,8 @@ order_id = st.selectbox(
 )
 if order_id in {o["id"] for o in completed}:
     order = call(f"/admin/orders/{order_id}").json()
+    if order.get("payment_mode") == "OWNER TEST":
+        st.info("TEST ORDER — sandbox payment. Review only; no manufacturing release or vendor submission.")
     with st.expander("Order and line-item record"):
         st.json(order)
 else:

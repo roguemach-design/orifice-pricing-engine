@@ -11,12 +11,13 @@ def verified_owner_access(
     enabled: bool,
     user_id_hint: str | None,
     headers: Mapping[str, str],
+    access_path: str = "/internal/drawing-intake/access",
 ) -> bool:
     if not enabled or not user_id_hint:
         return False
     try:
         response = requests.get(
-            f"{api_base}/internal/drawing-intake/access",
+            f"{api_base}{access_path}",
             headers=dict(headers),
             timeout=5,
         )

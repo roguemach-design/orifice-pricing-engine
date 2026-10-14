@@ -50,11 +50,13 @@ if not API_BASE:
     st.error("The O-Plates pricing service is not configured.")
     st.stop()
 
-owner_checkout_allowed = not OWNER_ACCEPTANCE_MODE or verified_owner_access(
+owner_checkout_allowed = not (OWNER_ACCEPTANCE_MODE or os.environ.get("APP_ENV") == "production") or verified_owner_access(
     API_BASE,
     enabled=OWNER_TEST_CHECKOUT_ENABLED and is_logged_in(),
     user_id_hint=current_user_id_hint() if is_logged_in() else None,
     headers=auth_headers() if is_logged_in() else {},
+    access_path=("/internal/owner-test/access" if os.environ.get("APP_ENV") == "production"
+                 else "/internal/drawing-intake/access"),
 )
 
 checkout_return = st.query_params.get("checkout")
@@ -605,7 +607,8 @@ with c2:
                     "pricing_config_version": cart_pricing_config_version,
                     "idempotency_key": checkout_attempt["idempotency_key"],
                 },
-                headers=auth_headers(),
+                headers={**auth_headers(), **({"x-oplates-checkout-mode": "owner_test"}
+                         if os.environ.get("APP_ENV") == "production" and owner_checkout_allowed else {})},
                 timeout=30,
             )
         except requests.RequestException:

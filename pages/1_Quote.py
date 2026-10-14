@@ -409,6 +409,8 @@ def start_checkout(payload_inputs: dict, priced_configuration: dict) -> None:
     # Logged-in customers: use Bearer token so API saves customer_id on the order
     if is_logged_in():
         headers.update(auth_headers())
+        if owner_test_checkout_allowed and os.environ.get("APP_ENV") == "production":
+            headers["x-oplates-checkout-mode"] = "owner_test"
     else:
         # Guest flow (existing behavior)
         if API_KEY:
@@ -747,7 +749,14 @@ if (
             st.error(str(exc))
 drawing_access_allowed = _internal_drawing_access_allowed()
 owner_test_checkout_allowed = bool(
-    OWNER_ACCEPTANCE_MODE and OWNER_TEST_CHECKOUT_ENABLED and drawing_access_allowed
+    OWNER_TEST_CHECKOUT_ENABLED and verified_owner_access(
+        API_BASE,
+        enabled=is_logged_in(),
+        user_id_hint=current_user_id_hint() if is_logged_in() else None,
+        headers=auth_headers() if is_logged_in() else {},
+        access_path=("/internal/owner-test/access" if os.environ.get("APP_ENV") == "production"
+                     else "/internal/drawing-intake/access"),
+    )
 )
 
 @st.dialog("Sign in")
@@ -1683,9 +1692,10 @@ with right:
                 "Checkout as guest — open Account to save orders to your account."
             )
 
-        if OWNER_ACCEPTANCE_MODE and not owner_test_checkout_allowed:
+        if (OWNER_ACCEPTANCE_MODE or os.environ.get("APP_ENV") == "production") and not owner_test_checkout_allowed:
             st.caption(
-                "Checkout is disabled in this controlled owner-acceptance environment."
+                "Checkout is currently closed." if os.environ.get("APP_ENV") == "production"
+                else "Checkout is disabled in this controlled owner-acceptance environment."
             )
         elif active_assisted_session is not None and not owner_test_checkout_allowed:
             st.caption("Checkout remains disabled for drawing-assisted configurations.")
@@ -1700,7 +1710,7 @@ with right:
         with btn_cols[1]:
             checkout_disabled = (
                 result is None
-                or (OWNER_ACCEPTANCE_MODE and not owner_test_checkout_allowed)
+                or ((OWNER_ACCEPTANCE_MODE or os.environ.get("APP_ENV") == "production") and not owner_test_checkout_allowed)
                 or (
                     active_assisted_session is not None
                     and not owner_test_checkout_allowed
@@ -1729,7 +1739,7 @@ with right:
             add_disabled = (
                 not is_logged_in()
                 or result is None
-                or (OWNER_ACCEPTANCE_MODE and not owner_test_checkout_allowed)
+                or ((OWNER_ACCEPTANCE_MODE or os.environ.get("APP_ENV") == "production") and not owner_test_checkout_allowed)
                 or (
                     active_assisted_session is not None
                     and not owner_test_checkout_allowed

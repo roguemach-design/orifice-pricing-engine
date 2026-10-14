@@ -74,6 +74,8 @@ _jwk_client: Optional[PyJWKClient] = PyJWKClient(SUPABASE_JWKS_URL) if SUPABASE_
 # Stripe config
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_TEST_SECRET_KEY = os.environ.get("STRIPE_TEST_SECRET_KEY", "")
+STRIPE_TEST_WEBHOOK_SECRET = os.environ.get("STRIPE_TEST_WEBHOOK_SECRET", "")
 APP_BASE_URL = (os.environ.get("APP_BASE_URL") or "").strip().rstrip("/")
 APP_ENV = (os.environ.get("APP_ENV") or "unset").strip().lower()
 
@@ -244,7 +246,41 @@ def _db_required() -> None:
         raise HTTPException(status_code=500, detail="DB not configured (missing DATABASE_URL).")
 
 
-def _stripe_checkout_required() -> None:
+def _owner_test_authorized(customer_id) -> bool:
+    return bool(
+        os.environ.get("OPLATES_OWNER_TEST_CHECKOUT_ENABLED") == "true"
+        and _drawing_assisted_feature_enabled()
+        and customer_id
+        and customer_id in _drawing_assisted_allowed_user_ids()
+    )
+
+
+def _owner_test_configuration_required() -> None:
+    if not STRIPE_TEST_SECRET_KEY.startswith(("sk_test_", "rk_test_")):
+        raise HTTPException(503, "Owner sandbox Stripe credentials unavailable.")
+    if not STRIPE_TEST_WEBHOOK_SECRET or STRIPE_TEST_WEBHOOK_SECRET == WEBHOOK_SECRET:
+        raise HTTPException(503, "Independent sandbox webhook configuration required.")
+    if APP_ENV != "production" or not APP_BASE_URL.startswith("https://"):
+        raise HTTPException(503, "Production owner sandbox binding unavailable.")
+    if (not frozen_plate_enabled(app_env=APP_ENV)
+        or os.environ.get("FROZEN_PLATE_EMAIL_MODE") != "send"
+        or not SENDGRID_API_KEY or not ADMIN_API_KEY):
+        raise HTTPException(503, "Production confirmation configuration unavailable.")
+    try:
+        from frozen_plate.api import repository as frozen_repository
+        frozen_repository()
+    except Exception:
+        raise HTTPException(503, "Production confirmation configuration unavailable.") from None
+
+
+def _stripe_checkout_required(customer_id=None, checkout_mode=None) -> bool:
+    if checkout_mode == "owner_test":
+        if not _owner_test_authorized(customer_id):
+            raise HTTPException(403, "Owner sandbox checkout unavailable.")
+        _owner_test_configuration_required()
+        return True
+    if checkout_mode is not None:
+        raise HTTPException(400, "Unsupported checkout mode.")
     secret_key = str(stripe.api_key or "")
     if APP_ENV not in {"production", "staging", "preview", "test"}:
         raise HTTPException(
@@ -282,6 +318,29 @@ def _stripe_checkout_required() -> None:
             frozen_repository()
         except Exception:
             raise HTTPException(503, "Production confirmation configuration unavailable.") from None
+    return False
+
+
+def _is_owner_test_order(order) -> bool:
+    marker = (order.quote_payload or {}).get("_payment") or {}
+    return bool(
+        marker.get("mode") == "owner_test"
+        and marker.get("owner_id") == order.customer_id
+        and order.customer_id
+        and (order.stripe_session_id or "").startswith("cs_test_")
+    )
+
+
+def _create_checkout_session(checkout_args, owner_test, customer_id):
+    if owner_test:
+        checkout_args["api_key"] = STRIPE_TEST_SECRET_KEY
+        checkout_args["metadata"]["oplates_payment_mode"] = "owner_test"
+        if "idempotency_key" in checkout_args:
+            checkout_args["idempotency_key"] = "owner-test:" + customer_id + ":" + checkout_args["idempotency_key"]
+    session = stripe.checkout.Session.create(**checkout_args)
+    if owner_test and (session.livemode is not False or not session.id.startswith("cs_test_")):
+        raise HTTPException(502, "Sandbox Checkout session verification failed.")
+    return session
 
 
 def _require_api_key(x_api_key: Optional[str] = Header(default=None, alias="x-api-key")) -> None:
@@ -985,10 +1044,10 @@ def admin_reset_config():
         db.close()
 
 
-def _checkout_recovery_reference(customer_id, idempotency_key, kind):
+def _checkout_recovery_reference(customer_id, idempotency_key, kind, *, owner_test=False):
     # Enabled only for the existing authenticated, allowlisted owner-test path.
     if (
-        APP_ENV not in {"preview", "staging"}
+        (APP_ENV not in {"preview", "staging"} and not (owner_test and _owner_test_authorized(customer_id)))
         or not _drawing_assisted_feature_enabled()
         or customer_id not in _drawing_assisted_allowed_user_ids()
         or not idempotency_key
@@ -1005,7 +1064,7 @@ def checkout_recovery(
     customer_id: str = Depends(_require_internal_drawing_user_id),
 ):
     """Read an owner's pending snapshot; never mark paid or restore an old price."""
-    if APP_ENV not in {"preview", "staging"} or not re.fullmatch(r"[0-9a-f]{64}", reference):
+    if (APP_ENV not in {"preview", "staging"} and not _owner_test_authorized(customer_id)) or not re.fullmatch(r"[0-9a-f]{64}", reference):
         raise HTTPException(status_code=404, detail="Recovery unavailable")
     _db_required()
     cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
@@ -1048,6 +1107,7 @@ def checkout_recovery(
 def checkout_create(
     req: CheckoutCreateRequest,
     customer_user_id: Optional[str] = Depends(_api_key_or_customer_user_id),
+    checkout_mode: Optional[str] = Header(default=None, alias="x-oplates-checkout-mode"),
 ):
     principal = f"customer:{customer_user_id}" if customer_user_id else "verified-ui-key"
     _RATE_LIMITER.check(
@@ -1055,7 +1115,7 @@ def checkout_create(
         CHECKOUT_RATE_LIMIT_REQUESTS,
         RATE_LIMIT_WINDOW_SECONDS,
     )
-    _stripe_checkout_required()
+    owner_test = _stripe_checkout_required(customer_user_id, checkout_mode)
     _db_required()
 
     inputs = QuoteInputs(**req.inputs.model_dump())
@@ -1079,7 +1139,7 @@ def checkout_create(
         raise HTTPException(status_code=500, detail=f"Missing shipping fields from pricing engine: {', '.join(missing)}")
 
     recovery_reference = _checkout_recovery_reference(
-        customer_user_id, req.idempotency_key, "direct"
+        customer_user_id, req.idempotency_key, "direct", owner_test=owner_test
     )
     recovery_contexts = [None]
     if req.recovery_context is not None:
@@ -1159,12 +1219,13 @@ def checkout_create(
     )
     if req.idempotency_key:
         checkout_args["idempotency_key"] = req.idempotency_key
-    session = stripe.checkout.Session.create(**checkout_args)
+    session = _create_checkout_session(checkout_args, owner_test, customer_user_id)
 
     _persist_pending_order(
         stripe_session_id=session.id,
         quote_payload={
             **req.inputs.model_dump(),
+            **({"_payment": {"mode": "owner_test", "owner_id": customer_user_id}} if owner_test else {}),
             **(
                 {
                     "_checkout_recovery": {
@@ -1187,8 +1248,9 @@ def checkout_create(
 def checkout_cart_create(
     req: CartCheckoutCreateRequest,
     customer_user_id: str = Depends(_require_customer_user_id),
+    checkout_mode: Optional[str] = Header(default=None, alias="x-oplates-checkout-mode"),
 ):
-    _stripe_checkout_required()
+    owner_test = _stripe_checkout_required(customer_user_id, checkout_mode)
     _db_required()
 
     if not req.items:
@@ -1231,7 +1293,7 @@ def checkout_cart_create(
         normalized_items.append(it.model_dump())
 
     recovery_reference = _checkout_recovery_reference(
-        customer_user_id, req.idempotency_key, "cart"
+        customer_user_id, req.idempotency_key, "cart", owner_test=owner_test
     )
     recovery_contexts = [None] * len(req.items)
     if req.recovery_contexts is not None:
@@ -1313,12 +1375,13 @@ def checkout_cart_create(
     )
     if req.idempotency_key:
         checkout_args["idempotency_key"] = req.idempotency_key
-    session = stripe.checkout.Session.create(**checkout_args)
+    session = _create_checkout_session(checkout_args, owner_test, customer_user_id)
 
     _persist_pending_order(
         stripe_session_id=session.id,
         quote_payload={
             "cart_items": normalized_items,
+            **({"_payment": {"mode": "owner_test", "owner_id": customer_user_id}} if owner_test else {}),
             **(
                 {
                     "_checkout_recovery": {
@@ -1402,6 +1465,7 @@ def me_orders(customer_user_id: str = Depends(_require_customer_user_id), limit:
             {
                 "id": o.id,
                 "status": o.status,
+                "payment_mode": "OWNER TEST" if _is_owner_test_order(o) else ("TEST" if (o.stripe_session_id or "").startswith("cs_test_") else "LIVE"),
                 "order_number_display": _format_order_number(o.order_number),
                 "created_at": o.created_at.isoformat() if o.created_at else None,
                 "customer_email": o.customer_email,
@@ -1435,6 +1499,7 @@ def me_order_detail(order_id: str, customer_user_id: str = Depends(_require_cust
         return {
             "id": o.id,
             "status": o.status,
+            "payment_mode": "OWNER TEST" if _is_owner_test_order(o) else ("TEST" if (o.stripe_session_id or "").startswith("cs_test_") else "LIVE"),
             "order_number_display": _format_order_number(o.order_number),
             "created_at": o.created_at.isoformat() if o.created_at else None,
             "stripe_session_id": o.stripe_session_id,
@@ -1476,6 +1541,7 @@ def admin_list_orders(q: Optional[str] = None, limit: int = 50):
             {
                 "id": o.id,
                 "status": o.status,
+                "payment_mode": "OWNER TEST" if _is_owner_test_order(o) else ("TEST" if (o.stripe_session_id or "").startswith("cs_test_") else "LIVE"),
                 "order_number_display": _format_order_number(o.order_number),
                 "created_at": o.created_at.isoformat() if o.created_at else None,
                 "customer_email": o.customer_email,
@@ -1519,6 +1585,7 @@ def admin_get_order(order_id: str):
         return {
             "id": o.id,
             "status": o.status,
+            "payment_mode": "OWNER TEST" if _is_owner_test_order(o) else ("TEST" if (o.stripe_session_id or "").startswith("cs_test_") else "LIVE"),
             "order_number_display": _format_order_number(o.order_number),
             "created_at": o.created_at.isoformat() if o.created_at else None,
             "stripe_session_id": o.stripe_session_id,
@@ -1537,16 +1604,38 @@ def admin_get_order(order_id: str):
         db.close()
 
 
+@app.get("/internal/owner-test/access")
+def owner_test_access(customer_id: str = Depends(_require_customer_user_id)):
+    if not _owner_test_authorized(customer_id):
+        raise HTTPException(403, "Owner sandbox checkout unavailable.")
+    _owner_test_configuration_required()
+    return {"enabled": True, "authorized": True, "user_id": customer_id}
+
+
 @app.post("/stripe/webhook")
 async def stripe_webhook(request: Request):
-    if not WEBHOOK_SECRET:
+    return await _complete_stripe_webhook(request, owner_test=False)
+
+
+@app.post("/stripe/test/webhook")
+async def stripe_test_webhook(request: Request):
+    return await _complete_stripe_webhook(request, owner_test=True)
+
+
+async def _complete_stripe_webhook(request: Request, *, owner_test):
+    webhook_secret = STRIPE_TEST_WEBHOOK_SECRET if owner_test else WEBHOOK_SECRET
+    if owner_test and (APP_ENV != "production" or not webhook_secret
+                       or webhook_secret == WEBHOOK_SECRET
+                       or not STRIPE_TEST_SECRET_KEY.startswith(("sk_test_", "rk_test_"))):
+        raise HTTPException(503, "Sandbox webhook unavailable.")
+    if not webhook_secret:
         raise HTTPException(status_code=500, detail="Stripe webhook not configured (missing STRIPE_WEBHOOK_SECRET).")
 
     payload = await request.body()
     sig = request.headers.get("stripe-signature")
 
     try:
-        event = stripe.Webhook.construct_event(payload, sig, WEBHOOK_SECRET)
+        event = stripe.Webhook.construct_event(payload, sig, webhook_secret)
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid Stripe signature")
 
@@ -1557,13 +1646,16 @@ async def stripe_webhook(request: Request):
         if callable(to_dict):
             event = to_dict()
 
+    if owner_test and event.get("livemode") is not False:
+        raise HTTPException(400, "Sandbox webhook requires a test event.")
+
     if event["type"] not in {
         "checkout.session.completed",
         "checkout.session.async_payment_succeeded",
     }:
         return {"ok": True, "status": "ignored"}
 
-    if APP_ENV == "production" and event.get("livemode") is not True:
+    if APP_ENV == "production" and not owner_test and event.get("livemode") is not True:
         raise HTTPException(400, "Production webhook requires a live event.")
 
     session = event["data"]["object"] or {}
@@ -1580,6 +1672,7 @@ async def stripe_webhook(request: Request):
         session = stripe.checkout.Session.retrieve(
             session.get("id"),
             expand=["shipping_cost.shipping_rate"],
+            **({"api_key": STRIPE_TEST_SECRET_KEY} if owner_test else {}),
         )
         if not isinstance(session, dict):
             to_dict = getattr(session, "to_dict_recursive", None) or getattr(
@@ -1588,7 +1681,8 @@ async def stripe_webhook(request: Request):
             if callable(to_dict):
                 session = to_dict()
     except Exception:
-        pass
+        if owner_test:
+            raise HTTPException(503, "Sandbox session verification unavailable; retry webhook.") from None
 
     if session.get("payment_status") not in {"paid", "no_payment_required"}:
         return {"ok": True, "status": "pending_payment"}
@@ -1596,7 +1690,12 @@ async def stripe_webhook(request: Request):
     stripe_session_id = session.get("id")
     if not stripe_session_id:
         raise HTTPException(status_code=400, detail="Stripe session is missing an ID")
-    if APP_ENV == "production" and (
+    if owner_test and (
+        session.get("livemode") is not False or not stripe_session_id.startswith("cs_test_")
+        or (session.get("metadata") or {}).get("oplates_payment_mode") != "owner_test"
+    ):
+        raise HTTPException(400, "Sandbox webhook requires an owner-test Checkout session.")
+    if APP_ENV == "production" and not owner_test and (
         session.get("livemode") is not True or not stripe_session_id.startswith("cs_live_")
     ):
         raise HTTPException(400, "Production webhook requires a live Checkout session.")
@@ -1617,7 +1716,9 @@ async def stripe_webhook(request: Request):
                 "service"
             ) or shipping_rate.get("display_name")
         elif shipping_rate:
-            retrieved_rate = stripe.ShippingRate.retrieve(shipping_rate)
+            retrieved_rate = stripe.ShippingRate.retrieve(
+                shipping_rate, **({"api_key": STRIPE_TEST_SECRET_KEY} if owner_test else {})
+            )
             shipping_service = (retrieved_rate.get("metadata") or {}).get(
                 "service"
             ) or retrieved_rate.get("display_name")
@@ -1645,6 +1746,11 @@ async def stripe_webhook(request: Request):
                 status_code=503,
                 detail="Pending order is not available yet; retry this webhook.",
             )
+
+        if owner_test and (not _is_owner_test_order(order) or order.customer_id != customer_id):
+            raise HTTPException(400, "Sandbox payment does not match the server-owned order.")
+        if not owner_test and _is_owner_test_order(order):
+            raise HTTPException(400, "Live payment cannot complete a sandbox order.")
 
         if order.status == "completed":
             # A signed replay may repair shipping metadata omitted by an
@@ -1733,7 +1839,9 @@ def _frozen_plate_order_snapshot(order_id):
         order = db.query(Order).filter(Order.id == order_id, Order.status == "completed").first()
         if not order or not order.customer_id:
             raise HTTPException(404, "Completed customer order not found")
-        if APP_ENV == "production" and not (order.stripe_session_id or "").startswith("cs_live_"):
+        if APP_ENV == "production" and not (
+            (order.stripe_session_id or "").startswith("cs_live_") or _is_owner_test_order(order)
+        ):
             raise HTTPException(404, "Completed live customer order not found")
         return {"id": order.id, "customer_id": order.customer_id,
                 "customer_email": order.customer_email,
