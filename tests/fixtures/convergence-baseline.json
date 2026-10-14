@@ -1,0 +1,168 @@
+{
+  "source_sha": "a97a664686ca91d8edaa42f223542ac284b78c34",
+  "cases": [
+    {
+      "payload": {
+        "quantity": 1,
+        "material": "304",
+        "thickness": 0.125,
+        "handle_width": 2.0,
+        "handle_length_from_bore": 10.5,
+        "paddle_dia": 5.0,
+        "bore_dia": 1.548,
+        "bore_tolerance": 0.005,
+        "chamfer": false,
+        "chamfer_width": null,
+        "handle_label": "No label",
+        "ships_in_days": 21
+      },
+      "price": {
+        "area_sq_in": 65.0,
+        "linear_inches": 30.85,
+        "material_cost": 8.46,
+        "laser_cost": 25.48,
+        "machine_bore_cost": 52.08,
+        "chamfer_bore_cost": 0,
+        "load_cost": 15.0,
+        "inspection_cost": 15.0,
+        "subtotal_pre_multiplier": 116.02,
+        "lead_time_multiplier": 1.0,
+        "unit_price_pre_qty_discount": 116.02,
+        "qty_discount_multiplier": 1.0,
+        "unit_price": 116.02,
+        "quantity": 1,
+        "total_price": 116.02,
+        "estimated_unit_weight_lb": 2.35,
+        "estimated_total_weight_lb": 2.35,
+        "estimated_package_in": {
+          "length": 17.0,
+          "width": 9.0,
+          "height": 1.0
+        },
+        "shipping": {
+          "ups_ground_cents": 1485,
+          "ups_2day_cents": 2747,
+          "ups_nextday_cents": 4232
+        },
+        "handle_label": "No label",
+        "chamfer_width": null
+      },
+      "spec_sha256": "b765a8f1c567965a44a3cfcf8c5de3e1bc4d0793fde6e8caf0af8f3d405efb01",
+      "pdf_sha256": "1e8f478844d301b82b62f2cc9b24319e7a9482e9b8b0b9a401f78848be8ca10f",
+      "dxf_sha256": "704abfa62d0bef0b3ac91d97a58bc0dfa7f093418d87f12ae3763d12118ecfb8",
+      "svg_sha256": "ef3845ffd4f2d0bd353dc4a3c96c4ab6e984d7533f536836bb65482e690f1910"
+    },
+    {
+      "payload": {
+        "quantity": 1,
+        "material": "316",
+        "thickness": 0.25,
+        "handle_width": 2.0,
+        "handle_length_from_bore": 10.5,
+        "paddle_dia": 5.0,
+        "bore_dia": 1.548,
+        "bore_tolerance": 0.002,
+        "chamfer": false,
+        "chamfer_width": null,
+        "handle_label": "No label",
+        "ships_in_days": 14,
+        "handle_hole_enabled": true,
+        "handle_hole_diameter": 0.375,
+        "handle_hole_center_from_handle_end": 0.75
+      },
+      "price": {
+        "area_sq_in": 65.0,
+        "linear_inches": 30.85,
+        "material_cost": 24.46,
+        "laser_cost": 25.48,
+        "machine_bore_cost": 52.08,
+        "chamfer_bore_cost": 0,
+        "load_cost": 15.0,
+        "inspection_cost": 30.0,
+        "subtotal_pre_multiplier": 147.02,
+        "lead_time_multiplier": 1.6,
+        "unit_price_pre_qty_discount": 235.23,
+        "qty_discount_multiplier": 1.0,
+        "unit_price": 235.23,
+        "quantity": 1,
+        "total_price": 235.23,
+        "estimated_unit_weight_lb": 4.7,
+        "estimated_total_weight_lb": 4.7,
+        "estimated_package_in": {
+          "length": 17.0,
+          "width": 9.0,
+          "height": 1.0
+        },
+        "shipping": {
+          "ups_ground_cents": 1675,
+          "ups_2day_cents": 3099,
+          "ups_nextday_cents": 4774
+        },
+        "handle_label": "No label",
+        "chamfer_width": null
+      },
+      "spec_sha256": "ea1308292f7aecdddde5e02428dccfae0d31859c9731fb7c2e08ee87fdfdc849",
+      "pdf_sha256": "3d5e221bfadc74d46edf842fc36a05dc94759cc222898be209d4fc86c791e4f2",
+      "dxf_sha256": "3c2789abdd7145c93b840bc3f1c70825f9f2ce0d05e81c7caf718f1612879705",
+      "svg_sha256": "3661c96a8918f174de4bfe16ed9a296e3b490dd72307322766274e0ef3093d87"
+    },
+    {
+      "payload": {
+        "quantity": 1,
+        "material": "Carbon Steel",
+        "thickness": 0.375,
+        "handle_width": 2.0,
+        "handle_length_from_bore": 10.5,
+        "paddle_dia": 5.0,
+        "bore_dia": 1.548,
+        "bore_tolerance": 0.001,
+        "chamfer": true,
+        "chamfer_width": 0.02,
+        "handle_label": "No label",
+        "ships_in_days": 21,
+        "chamfer_angle_degrees": 45.0,
+        "chamfer_side": "downstream",
+        "flow_orientation": "left-to-right",
+        "chamfer_width_definition": "radial-angle-from-face",
+        "handle_hole_enabled": true,
+        "handle_hole_diameter": 0.375,
+        "handle_hole_center_from_handle_end": 0.75
+      },
+      "price": {
+        "area_sq_in": 65.0,
+        "linear_inches": 30.85,
+        "material_cost": 7.19,
+        "laser_cost": 25.48,
+        "machine_bore_cost": 52.08,
+        "chamfer_bore_cost": 52.08,
+        "load_cost": 15.0,
+        "inspection_cost": 45.0,
+        "subtotal_pre_multiplier": 196.83,
+        "lead_time_multiplier": 1.0,
+        "unit_price_pre_qty_discount": 196.83,
+        "qty_discount_multiplier": 1.0,
+        "unit_price": 196.83,
+        "quantity": 1,
+        "total_price": 196.83,
+        "estimated_unit_weight_lb": 6.9,
+        "estimated_total_weight_lb": 6.9,
+        "estimated_package_in": {
+          "length": 17.0,
+          "width": 9.0,
+          "height": 1.0
+        },
+        "shipping": {
+          "ups_ground_cents": 1865,
+          "ups_2day_cents": 3450,
+          "ups_nextday_cents": 5315
+        },
+        "handle_label": "No label",
+        "chamfer_width": 0.02
+      },
+      "spec_sha256": "7a9a730e418607fe144d93fa79afc3c9fd0b7ee9bf3fa9a9a2b21151882ee440",
+      "pdf_sha256": "c1b53d76ef2b716b15e49b37bdaa90e6f232bee5d34b365dd20ff5eba3d8295e",
+      "dxf_sha256": "3c2789abdd7145c93b840bc3f1c70825f9f2ce0d05e81c7caf718f1612879705",
+      "svg_sha256": "cb975640395ada977f80441e0d2f7b8b1a62978ff5f8ce1f690c97a20a8aa610"
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+from ui_harness import customer_page_test
 import base64
 import io
 import json
@@ -650,8 +651,7 @@ def test_real_page_keeps_manual_pricing_and_existing_svg_when_feature_disabled(
         )
 
     with patch("requests.get", fake_get), patch("requests.post", fake_post):
-        app = AppTest.from_file(
-            str(ROOT / "pages" / "1_Quote.py"), default_timeout=20
+        app = customer_page_test("pages/1_Quote.py", default_timeout=20
         ).run()
 
     assert not app.exception
@@ -690,10 +690,10 @@ def test_manual_chamfer_waits_for_width_before_requesting_price(
         )
 
     with patch("requests.get", fake_get), patch("requests.post", fake_post):
-        app = AppTest.from_file(str(ROOT / "pages" / "1_Quote.py"), default_timeout=20)
+        app = customer_page_test("pages/1_Quote.py", default_timeout=20)
         app.run()
         initial_count = len(quote_calls)
-        next(field for field in app.checkbox if field.label == "Chamfer").set_value(
+        next(field for field in app.button_group if field.label == "Chamfer").set_value(
             True
         ).run()
         assert not app.exception
@@ -719,7 +719,7 @@ def test_manual_chamfer_waits_for_width_before_requesting_price(
         assert quote_calls[-1]["chamfer_width"] == 0.0625
 
 
-def test_staging_manual_chamfer_requires_explicit_geometry(monkeypatch, active_config):
+def test_staging_manual_chamfer_size_needs_no_hidden_geometry_fields(monkeypatch, active_config):
     from streamlit.testing.v1 import AppTest
 
     monkeypatch.setenv("API_BASE", "http://test")
@@ -733,16 +733,19 @@ def test_staging_manual_chamfer_requires_explicit_geometry(monkeypatch, active_c
         return _Response({"unit_price": 100.0, "total_price": 100.0, "configuration_id": "test"})
 
     with patch("requests.get", lambda *a, **k: _Response(active_config)), patch("requests.post", quote):
-        app = AppTest.from_file(str(ROOT / "pages" / "1_Quote.py"), default_timeout=20).run()
-        next(f for f in app.checkbox if f.label == "Chamfer").set_value(True).run()
-        assert app.number_input(key="staging_chamfer_angle").value is None
-        assert app.selectbox(key="staging_chamfer_side").value is None
+        app = customer_page_test("pages/1_Quote.py", default_timeout=20).run()
+        next(f for f in app.button_group if f.label == "Chamfer").set_value(True).run()
+        assert not any(f.key == "staging_chamfer_angle" for f in app.number_input)
+        assert not any(f.key.startswith("staging_chamfer_") for f in app.button_group)
         next(f for f in app.number_input if f.label == "Chamfer Width (in.)").set_value(0.02).run()
-        assert any("Drawing HOLD" in w.value for w in app.warning)
-        app.number_input(key="staging_chamfer_angle").set_value(45)
-        app.selectbox(key="staging_chamfer_side").set_value("downstream")
-        app.selectbox(key="staging_chamfer_flow").set_value("left-to-right")
-        app.selectbox(key="staging_chamfer_definition").set_value("radial-angle-from-face")
+        assert not app.exception
+        assert not any("Drawing HOLD" in w.value for w in app.warning)
+        assert not any(key.startswith("chamfer_") and key != "chamfer_width"
+                       for key in calls[-1])
+        app.session_state["staging_chamfer_angle"] = 45
+        app.session_state["staging_chamfer_side"] = "downstream"
+        app.session_state["staging_chamfer_flow"] = "left-to-right"
+        app.session_state["staging_chamfer_definition"] = "radial-angle-from-face"
         app.run()
         assert not app.exception
         assert not any("Drawing HOLD" in w.value for w in app.warning)
@@ -750,7 +753,7 @@ def test_staging_manual_chamfer_requires_explicit_geometry(monkeypatch, active_c
         assert calls[-1]["chamfer_side"] == "downstream"
         assert calls[-1]["flow_orientation"] == "left-to-right"
         assert calls[-1]["chamfer_width_definition"] == "radial-angle-from-face"
-        next(f for f in app.checkbox if f.label == "Chamfer").set_value(False).run()
+        next(f for f in app.button_group if f.label == "Chamfer").set_value(False).run()
         assert "chamfer_angle_degrees" not in calls[-1]
 
 
@@ -768,18 +771,21 @@ def test_signed_out_user_sees_locked_drawing_section(monkeypatch, active_config)
     ), patch(
         "drawing_intake.configurator_integration.inspect_validated_upload"
     ) as inspect_upload:
-        app = AppTest.from_file(
-            str(ROOT / "pages" / "1_Quote.py"), default_timeout=20
+        app = customer_page_test("pages/1_Quote.py", default_timeout=20
         ).run()
         assert not app.exception
-        assert any(item.label == "Upload a Drawing" for item in app.expander)
-        assert any("Sign in to upload and analyze" in item.value for item in app.info)
+        assert any("Upload a drawing" in item.value for item in app.markdown)
+        assert any("analyzed locally" in item.value for item in app.caption)
+        assert not any("Sign in to upload" in item.value for item in app.info)
+        assert len([b for b in app.button if b.key == "drawing_sign_in_cta"]) == 1
         assert not app.get("file_uploader")
         assert not any(button.label == "Analyze drawing" for button in app.button)
         next(
-            button for button in app.button if button.label == "Sign in to upload"
+            button for button in app.button if button.key == "drawing_sign_in_cta"
         ).click().run()
-        assert any("Account sidebar" in item.value for item in app.info)
+        assert not any(x.label == "Account" for x in app.expander)
+        assert any(x.label == "Email" for x in app.text_input)
+        assert any(x.label == "Quantity" for x in app.number_input)
         inspect_upload.assert_not_called()
 
 
@@ -807,7 +813,7 @@ def test_internal_entry_point_requires_server_verified_access(
             }
         ),
     ):
-        app = AppTest.from_file(str(ROOT / "pages" / "1_Quote.py"), default_timeout=20)
+        app = customer_page_test("pages/1_Quote.py", default_timeout=20)
         app.session_state["auth"] = {
             "access_token": _jwt("ordinary-user"),
             "refresh_token": None,
@@ -818,8 +824,8 @@ def test_internal_entry_point_requires_server_verified_access(
 
     assert not app.exception
     assert not app.get("file_uploader")
-    assert any(item.label == "Upload a Drawing" for item in app.expander)
-    assert any("approved test users only" in item.value for item in app.info)
+    assert any("Upload a drawing" in item.value for item in app.markdown)
+    assert any("Drawing analysis is unavailable for this account" in item.value for item in app.markdown)
 
 
 def test_invalid_upload_preserves_existing_manual_configuration(
@@ -854,7 +860,7 @@ def test_invalid_upload_preserves_existing_manual_configuration(
         )
 
     with patch("requests.get", fake_get), patch("requests.post", fake_post):
-        app = AppTest.from_file(str(ROOT / "pages" / "1_Quote.py"), default_timeout=20)
+        app = customer_page_test("pages/1_Quote.py", default_timeout=20)
         app.session_state["auth"] = {
             "access_token": _jwt("internal-user"),
             "refresh_token": None,
@@ -961,7 +967,7 @@ def test_internal_real_form_upload_populate_complete_confirm_then_price(
             return_value=recognized,
         ),
     ):
-        app = AppTest.from_file(str(ROOT / "pages" / "1_Quote.py"), default_timeout=30)
+        app = customer_page_test("pages/1_Quote.py", default_timeout=30)
         app.session_state["auth"] = {
             "access_token": _jwt("internal-user"),
             "refresh_token": None,
@@ -997,6 +1003,8 @@ def test_internal_real_form_upload_populate_complete_confirm_then_price(
             ).value
             == 2.0
         )
+        assert any("Drawing analysis complete — 6 of 10 fields populated." in item.value for item in app.success), [item.value for item in app.success]
+        assert any("4 highlighted fields below" in item.value for item in app.caption)
         assert any("Handle width" in item.value for item in app.info)
         assert (
             next(
@@ -1007,7 +1015,7 @@ def test_internal_real_form_upload_populate_complete_confirm_then_price(
             is None
         )
         assert (
-            next(field for field in app.selectbox if field.label == "Lead time").value
+            next(field for field in app.button_group if field.label == "Lead time").value
             is None
         )
         assert app.session_state["quote_field_handle_width"] is None
@@ -1025,14 +1033,14 @@ def test_internal_real_form_upload_populate_complete_confirm_then_price(
         assert ".st-key-quote_field_paddle_dia" not in highlight
         assert ".st-key-quote_field_handle_label" not in highlight
 
-        next(field for field in app.selectbox if field.label == "Chamfer").set_value(
+        next(field for field in app.button_group if field.label == "Chamfer").set_value(
             True
         ).run()
         assert not app.exception
         assert any(
             ".st-key-quote_field_chamfer_width" in item.value for item in app.markdown
         )
-        next(field for field in app.selectbox if field.label == "Chamfer").set_value(
+        next(field for field in app.button_group if field.label == "Chamfer").set_value(
             False
         ).run()
         assert not app.exception
@@ -1066,7 +1074,7 @@ def test_internal_real_form_upload_populate_complete_confirm_then_price(
             for field in app.number_input
             if field.label == "Handle Length (From Bore Center) (in.)"
         ).set_value(9.0)
-        next(field for field in app.selectbox if field.label == "Lead time").set_value(
+        next(field for field in app.button_group if field.label == "Lead time").set_value(
             14
         )
         app.run()
@@ -1096,10 +1104,10 @@ def test_internal_real_form_upload_populate_complete_confirm_then_price(
         assert not confirmation.disabled
         confirmation.set_value(True).run()
         assert not app.exception
-        success_messages = [item.value for item in app.success]
+        success_messages = [item.value for item in app.success] + [item.value for item in app.caption]
         final_session = app.session_state["phase1g_assisted_session"]
         final_review = review_assisted_quote(final_session, availability=availability)
-        assert any("Estimated to ship" in item for item in success_messages), {
+        assert any(metric.label == "Estimated ship time" and "calendar days" in metric.value for metric in app.metric), {
             "messages": success_messages,
             "confirmation_widget": app.session_state.get(
                 "phase1g_customer_confirmation"
@@ -1107,6 +1115,7 @@ def test_internal_real_form_upload_populate_complete_confirm_then_price(
             "fingerprint": final_session.confirmation_fingerprint,
             "review": final_review.model_dump(),
         }
+        assert any("Drawing analysis complete — 10 of 10 fields populated." in item.value for item in app.success)
         assert len(quote_calls) == price_calls_after_apply + 1
         assert quote_calls[-1]["paddle_dia"] == 8.0
         assert any(item.label == "Unit price" for item in app.metric)
@@ -1230,7 +1239,10 @@ def test_source_contract_has_no_upload_api_or_drawing_pricing_path():
     assert "confirmed_drawing_quote_inputs" in quote_source
     assert "drawing" not in pricing_source.lower()
     assert 'st.subheader("Configuration Drawing")' in quote_source
-    assert 'st.checkbox("Chamfer", value=False)' in quote_source
+    assert 'bore_edge_choice(key=_FORM_KEYS["chamfer"])' in quote_source
+    assert '"Chamfer", [False, True]' in " ".join(
+        (ROOT / "bore_edge_control.py").read_text().split()
+    )
 
 
 def test_candidate_metadata_remains_explicit_and_source_scoped(active_config):

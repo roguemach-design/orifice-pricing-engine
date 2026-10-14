@@ -382,12 +382,12 @@ def test_assisted_confirmation_invalidated_and_missing_fields_hold():
     assert handoff.quote_request["handle_hole_diameter"] == 0.375
 
 
-def test_configurator_checkbox_missing_input_fractions_and_off(monkeypatch):
+def test_configurator_buttons_missing_input_fractions_and_off(monkeypatch):
     from test_drawing_phase1k import _quote_app
 
     for app, _, calls in _quote_app(monkeypatch, checkout_enabled=True):
-        toggle = next(c for c in app.checkbox if c.label == "Handle Hole")
-        toggle.check().run()
+        toggle = next(c for c in app.button_group if c.label == "Handle Hole")
+        toggle.set_value(True).run()
         assert not app.exception
         assert any("Drawing HOLD" in e.value for e in app.error)
         assert not app.session_state["phase1g_customer_confirmation"]
@@ -406,7 +406,7 @@ def test_configurator_checkbox_missing_input_fractions_and_off(monkeypatch):
             app.session_state["quote_field_handle_hole_center_from_handle_end"] == 0.75
         )
         assert not any("Drawing HOLD" in e.value for e in app.error)
-        next(c for c in app.checkbox if c.label == "Handle Hole").uncheck().run()
+        next(c for c in app.button_group if c.label == "Handle Hole").set_value(False).run()
         assert not app.exception
         snapshot = app.session_state["phase1g_form_snapshot"]
         assert snapshot["handle_hole_enabled"] is False

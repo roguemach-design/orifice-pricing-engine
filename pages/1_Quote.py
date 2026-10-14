@@ -27,6 +27,7 @@ from drawing_intake.assisted_quote import (
     FieldAttentionKind,
     availability_from_active_config,
     confirm_configuration,
+    canonical_required_fields,
     reject_drawing_proposal,
     review_assisted_quote,
 )
@@ -58,6 +59,8 @@ from drawing_intake.owner_acceptance import (
     update_run,
 )
 from plate_preview import render_plate_svg
+from customer_controls import choice_buttons, material_cards
+from bore_edge_control import bore_edge_choice
 
 # -----------------------------
 # Page setup (MUST be first Streamlit call)
@@ -94,8 +97,7 @@ st.markdown(
 )
 
 # ---- EASY TUNING KNOBS ----
-RIGHT_FORM_WIDTH = 0.72  # 0.55 - 0.85 (smaller = narrower input column)
-IMAGE_TOP_SPACER_PX = 10  # move image down more/less
+IMAGE_TOP_SPACER_PX = 0  # move image down more/less
 LEFT_TIGHTEN = True  # tighter left column spacing
 PAY_BUTTON_HEIGHT_PX = 56  # taller button
 PAY_BUTTON_FONT_PX = 18
@@ -105,18 +107,80 @@ PAY_BUTTON_WIDTH_RATIO = 0.56  # how wide button is (0.40-0.80) of the input col
 st.markdown(
     f"""
     <style>
-    /* Centered H1 */
+    /* Dominant configurator heading */
     h1 {{
       font-family: Arial, sans-serif;
       font-weight: 800;
       letter-spacing: 0.2px;
       margin-bottom: 0.25rem;
-      text-align: center;
+      text-align: left;
+      font-size: 2rem;
     }}
 
     /* tighten vertical spacing between widgets */
     div[data-testid="stVerticalBlock"] > div {{
         gap: 0.45rem;
+    }}
+
+    /* Compact secondary upload path and aligned configurator start. */
+    .st-key-drawing_upload [data-testid="stVerticalBlock"] {{gap:0.2rem}}
+    .st-key-drawing_upload [data-testid="stButton"] button {{
+        height:auto;min-height:36px;padding:.35rem .75rem;font-size:.875rem;
+    }}
+    .st-key-configurator_start [data-testid="stVerticalBlock"] {{gap:.55rem}}
+    .st-key-configurator_start h3 {{margin-top:0;padding-top:0}}
+
+    /* Bound the feedback column to this configurator's scrolling input row. */
+    @media (min-width: 901px) {{
+      .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] {{align-items:flex-start}}
+      .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {{
+        position:sticky;top:4rem;align-self:flex-start;min-width:0;
+        overflow:visible;padding-right:.25rem;
+      }}
+    }}
+    @media (max-width: 900px) {{
+      .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] {{flex-direction:column}}
+      .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {{
+        position:static;top:auto;width:100%!important;flex:1 1 100%;min-width:0;
+        max-height:none;overflow:visible;padding-right:0;
+      }}
+    }}
+
+    /* Hide the source feedback only after the trusted landing host enables its sticky copy. */
+    html.oplates-parent-preview .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {{visibility:hidden;pointer-events:none}}
+
+    /* Streamlit captions explicitly set visibility; suppress the source copy only on the landing host. */
+    html.oplates-parent-preview .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stCaptionContainer"],
+    html.oplates-parent-preview .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stCaptionContainer"] * {{visibility:hidden!important}}
+
+    .st-key-preview_fulfillment [data-testid="stMetricValue"] {{font-size:1.5rem;line-height:1.25}}
+    .st-key-preview_fulfillment [data-testid="stMetricValue"] > div {{white-space:normal;overflow-wrap:anywhere}}
+    html.oplates-parent-preview .st-key-preview_fulfillment,
+    html.oplates-parent-preview .st-key-preview_fulfillment * {{visibility:hidden!important}}
+
+    /* The native dialog is portaled to body, above the app root. */
+    html.oplates-viewport-modal body,
+    html.oplates-viewport-modal #root {{background:transparent!important}}
+    html.oplates-viewport-modal #root,
+    html.oplates-viewport-modal #root * {{visibility:hidden!important}}
+    html.oplates-viewport-modal [data-testid="stDialog"] {{inset:0;z-index:1000061;max-height:100dvh;overflow:auto}}
+
+    .st-key-configurator_starter {{border:1px solid #2b3c50;border-radius:16px;
+      padding:1.1rem 1.25rem;background:linear-gradient(115deg,#111d2a,#0e1620)}}
+    .st-key-configurator_starter [data-testid="stVerticalBlock"] {{gap:.4rem}}
+    .starter-upload-title {{display:flex;align-items:center;gap:.65rem;font-size:1rem}}
+    .starter-upload-title span {{font-size:1.6rem;color:#a7c5e8}}
+    .st-key-configurator_starter [data-testid="stButton"] button {{height:auto;min-height:38px;padding:.4rem .75rem;font-size:.875rem}}
+    .st-key-configurator_starter [data-testid="stAlert"] {{padding:.85rem;border-radius:10px}}
+    .st-key-starter_file_picker [data-testid="stFileUploaderDropzoneInstructions"] {{display:none}}
+    .st-key-starter_file_picker [data-testid="stFileUploaderDropzone"] {{padding:0;border:0;background:transparent}}
+    .st-key-starter_file_picker [data-testid="stFileUploaderDropzone"] button {{background:#1761b9;color:#fff;border:1px solid #4b99ef;min-height:42px}}
+    .st-key-starter_file_picker [data-testid="stFileUploaderDropzone"] button p {{font-size:0}}
+    .st-key-starter_file_picker [data-testid="stFileUploaderDropzone"] button p::after {{content:"Upload drawing";font-size:.875rem}}
+    .st-key-configurator_starter [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {{min-width:0}}
+    @media(max-width:900px) {{
+      .st-key-configurator_starter > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] {{flex-direction:column}}
+      .st-key-configurator_starter > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {{width:100%!important;flex:1 1 100%}}
     }}
 
     /* Make Streamlit buttons taller */
@@ -135,7 +199,7 @@ st.markdown(
 # -----------------------------
 # Shared auth sidebar (login persists across pages)
 # -----------------------------
-render_auth_sidebar(show_debug=False)
+render_auth_sidebar(show_debug=False, placement="deferred")
 
 # ✅ NEW: cart support (session state)
 import uuid
@@ -144,13 +208,15 @@ from datetime import datetime, timezone
 if "cart" not in st.session_state or not isinstance(st.session_state.cart, list):
     st.session_state.cart = []
 
-st.markdown("<h1>Orifice Plate Instant Quote</h1>", unsafe_allow_html=True)
-st.markdown(
-    "<p style='text-align:center;color:#526174;margin-top:-0.25rem'>"
-    "Enter the part dimensions shown in the drawing. Your verified price updates automatically."
-    "</p>",
-    unsafe_allow_html=True,
-)
+if not st.session_state.get("integrated_landing"):
+    st.caption("BUILD FROM YOUR KNOWN DIMENSIONS")
+    st.title("Configure your plate")
+    st.markdown(
+        "<p style='margin-top:0;margin-bottom:0.5rem'>"
+        "Upload a drawing or enter dimensions below. Your verified price updates automatically."
+        "</p>",
+        unsafe_allow_html=True,
+    )
 
 
 # -----------------------------
@@ -343,6 +409,8 @@ def start_checkout(payload_inputs: dict, priced_configuration: dict) -> None:
     # Logged-in customers: use Bearer token so API saves customer_id on the order
     if is_logged_in():
         headers.update(auth_headers())
+        if owner_test_checkout_allowed and os.environ.get("APP_ENV") == "production":
+            headers["x-oplates-checkout-mode"] = "owner_test"
     else:
         # Guest flow (existing behavior)
         if API_KEY:
@@ -377,6 +445,10 @@ def start_checkout(payload_inputs: dict, priced_configuration: dict) -> None:
         st.error("Checkout API did not return checkout_url.")
         st.json(resp)
         st.stop()
+
+    from customer_navigation import render_integrated_checkout
+    if render_integrated_checkout(checkout_url):
+        return
 
     st.markdown(
         f"<meta http-equiv='refresh' content='0; url={checkout_url}'>",
@@ -681,46 +753,73 @@ if (
             st.error(str(exc))
 drawing_access_allowed = _internal_drawing_access_allowed()
 owner_test_checkout_allowed = bool(
-    OWNER_ACCEPTANCE_MODE and OWNER_TEST_CHECKOUT_ENABLED and drawing_access_allowed
+    OWNER_TEST_CHECKOUT_ENABLED and verified_owner_access(
+        API_BASE,
+        enabled=is_logged_in(),
+        user_id_hint=current_user_id_hint() if is_logged_in() else None,
+        headers=auth_headers() if is_logged_in() else {},
+        access_path=("/internal/owner-test/access" if os.environ.get("APP_ENV") == "production"
+                     else "/internal/drawing-intake/access"),
+    )
 )
 
-if DRAWING_ASSISTED_ENABLED and not drawing_access_allowed:
-    with st.expander("Upload a Drawing", expanded=True):
-        st.write("Upload your print and we'll fill in the details we can identify.")
-        if not is_logged_in():
-            st.info("Sign in to upload and analyze your drawing.")
-            if st.button("Sign in to upload", key="drawing_sign_in_cta"):
-                st.info(
-                    "Open the Account sidebar, enter your email, and select Send code. "
-                    "Then enter the email verification code and select Verify code."
-                )
+@st.dialog("Sign in")
+def _starter_sign_in():
+    st.caption("Sign in to analyze a print or save your quotes and orders.")
+    render_auth_sidebar(show_debug=False, placement="inline")
+
+
+with st.container(key="configurator_starter", border=False):
+    starter_upload, starter_analysis, starter_account = st.columns([4, 4, 2], gap="medium", vertical_alignment="center")
+    with starter_upload:
+        st.markdown(
+            '<div class="starter-upload-title"><span aria-hidden="true">↥</span>'
+            '<strong>Upload a drawing</strong></div>', unsafe_allow_html=True
+        )
+        st.caption("PDF, PNG, JPG · analyzed locally · not stored")
+    with starter_analysis:
+        starter_status = st.empty()
+    with starter_account:
+        if is_logged_in():
+            render_auth_sidebar(show_debug=False, placement="inline")
         else:
-            st.info(
-                "Drawing uploads are currently available to approved test users only."
-            )
+            st.caption("Save your quotes and orders")
+            if st.button("Sign in", key="starter_sign_in", type="secondary"):
+                _starter_sign_in()
+
+starter_notice_shown = False
+
+
+def _starter_notice(kind, message):
+    global starter_notice_shown
+    starter_notice_shown = True
+    getattr(starter_status, kind)(message)
+
+
+if not drawing_access_allowed:
+    with starter_upload:
+        if st.button(
+            "Upload drawing", icon=":material/upload:", type="primary",
+            key="drawing_sign_in_cta", disabled=not DRAWING_ASSISTED_ENABLED or is_logged_in(),
+        ):
+            _starter_sign_in()
 
 if drawing_access_allowed:
-    with st.expander(
-        "Upload a Drawing",
-        expanded=_DRAWING_SESSION_KEY not in st.session_state,
-    ):
-        st.write("Upload your print and we'll fill in the details we can identify.")
-        st.caption(
-            "Internal acceptance only · PDF, PNG, or JPEG · local processing · no drawing storage"
-        )
+    with starter_upload:
         if st.session_state.pop(_DRAWING_RESET_UPLOAD_KEY, False):
             st.session_state.pop("phase1g_uploaded_drawing", None)
             st.session_state.pop("phase1g_candidate_label", None)
-        uploaded_drawing = st.file_uploader(
-            "Drawing file",
+        upload_column = st.container(key="starter_file_picker")
+        analyze_column = st.container()
+        uploaded_drawing = upload_column.file_uploader(
+            "Upload drawing",
             type=["pdf", "png", "jpg", "jpeg"],
             key="phase1g_uploaded_drawing",
+            label_visibility="collapsed",
         )
 
-        if st.button(
-            "Analyze drawing",
-            disabled=uploaded_drawing is None,
-            key="phase1g_analyze_drawing",
+        if uploaded_drawing is not None and analyze_column.button(
+            "Analyze drawing", key="phase1g_analyze_drawing",
         ):
             try:
                 limits = upload_limits_from_environment()
@@ -767,17 +866,17 @@ if drawing_access_allowed:
                         st.session_state[_DRAWING_PENDING_KEY] = recognized
                 st.rerun()
             except DrawingUploadValidationError as exc:
-                st.error(str(exc))
+                _starter_notice("error", str(exc))
             except DrawingProcessingBusyError:
-                st.error(
-                    "Another internal drawing test is processing. Try again when it finishes; your form is unchanged."
+                _starter_notice("error",
+                    "Another drawing is processing. Try again when it finishes; your form is unchanged."
                 )
             except DrawingProcessingTimeoutError:
-                st.error(
+                _starter_notice("error",
                     "The drawing took too long to process. Your current configuration was preserved."
                 )
             except DrawingProcessingError:
-                st.error(
+                _starter_notice("error",
                     "We couldn't process that drawing safely. You can continue with manual entry."
                 )
 
@@ -796,17 +895,17 @@ if drawing_access_allowed:
             st.session_state.pop("phase1g_candidate_label", None)
             processed_upload = None
             if uploaded_sha256 is not None:
-                st.info(
+                _starter_notice("info",
                     "A different file is selected. Analyze it before applying values."
                 )
         if processed_upload is not None:
             candidate_options = processed_upload.review.candidates
             if not processed_upload.review.quote_specific or not candidate_options:
-                st.warning(
+                _starter_notice("warning",
                     "This file does not identify one quote-specific plate. Continue with the manual configuration below."
                 )
             elif len(candidate_options) > 1:
-                st.success(
+                _starter_notice("success",
                     f"Drawing processed. We found {len(candidate_options)} possible plates. Select the one you want to quote."
                 )
                 candidate_by_label = {
@@ -845,50 +944,34 @@ if drawing_access_allowed:
                         st.session_state[_DRAWING_PENDING_KEY] = pending
                         st.rerun()
                     except DrawingProcessingBusyError:
-                        st.error(
-                            "Another internal drawing test is processing. Try again when it finishes; your form is unchanged."
+                        _starter_notice("error",
+                            "Another drawing is processing. Try again when it finishes; your form is unchanged."
                         )
                     except DrawingProcessingTimeoutError:
-                        st.error(
+                        _starter_notice("error",
                             "The selected plate took too long to process. Your current configuration was preserved."
                         )
                     except DrawingProcessingError:
-                        st.error(
+                        _starter_notice("error",
                             "We couldn't read the selected plate safely. Continue with manual entry."
                         )
-            else:
-                st.success(
-                    "Your drawing has been processed. Review the identified values before applying them."
-                )
 
         pending_session = st.session_state.get(_DRAWING_PENDING_KEY)
         if pending_session is not None:
-            proposed_count = len(pending_session.configuration)
-            st.info(
-                f"Ready to prefill {proposed_count} field{'s' if proposed_count != 1 else ''}. "
-                "Choose Apply identified values to put them in the form. "
-                "Your existing entries will be preserved if they conflict."
-            )
             if st.button("Apply identified values", key="phase1g_apply_values"):
                 _apply_assisted_session(pending_session)
                 st.rerun()
 
         active_assisted_session = st.session_state.get(_DRAWING_SESSION_KEY)
         if active_assisted_session is not None:
-            st.success(
-                "Drawing values are connected to this quote form. Review them and complete the items marked below."
-            )
-            conflicts = st.session_state.get(_DRAWING_CONFLICTS_KEY, [])
-            for conflict in conflicts:
-                label = FIELD_LABELS.get(
-                    conflict["canonical_field"], conflict["canonical_field"]
-                )
-                st.warning(
-                    f"{label}: kept your value {conflict['customer_value']}; "
-                    f"the drawing suggested {conflict['drawing_value']}."
-                )
-
-            with st.expander("Drawing details and source references"):
+            with st.popover("Drawing details and source references"):
+                conflicts = st.session_state.get(_DRAWING_CONFLICTS_KEY, [])
+                for conflict in conflicts:
+                    label = FIELD_LABELS.get(conflict["canonical_field"], conflict["canonical_field"])
+                    st.warning(
+                        f"{label}: kept your value {conflict['customer_value']}; "
+                        f"the drawing suggested {conflict['drawing_value']}."
+                    )
                 origins = st.session_state.get(_FORM_ORIGINS_KEY, {})
                 for proposal in active_assisted_session.proposals:
                     if not proposal.canonical_field or (
@@ -942,31 +1025,29 @@ if drawing_access_allowed:
                             st.session_state[_DRAWING_CONFIRM_KEY] = False
                             st.rerun()
 
-            if st.button(
-                "Reset quote and return to manual entry",
-                key="phase1g_reset_to_manual",
-            ):
-                owner_run = st.session_state.get(_OWNER_ACCEPTANCE_RUN_KEY)
-                if isinstance(owner_run, OwnerAcceptanceRun):
-                    st.session_state[_OWNER_ACCEPTANCE_RUN_KEY] = record_event(
-                        owner_run, AcceptanceEventKind.RESET_TO_MANUAL
-                    )
-                _reset_to_manual_defaults()
-                st.rerun()
+                if st.button(
+                    "Reset quote and return to manual entry",
+                    key="phase1g_reset_to_manual",
+                ):
+                    owner_run = st.session_state.get(_OWNER_ACCEPTANCE_RUN_KEY)
+                    if isinstance(owner_run, OwnerAcceptanceRun):
+                        st.session_state[_OWNER_ACCEPTANCE_RUN_KEY] = record_event(
+                            owner_run, AcceptanceEventKind.RESET_TO_MANUAL
+                        )
+                    _reset_to_manual_defaults()
+                    st.rerun()
 
 
 # -----------------------------
 # Two-column layout
 # -----------------------------
-left, right = st.columns([1.12, 1.38], gap="large")
+configurator_start = st.container(key="configurator_start")
+left, right = configurator_start.columns([1.12, 1.38], gap="medium")
 
 # -----------------------------
 # LEFT: image + summary (tight)
 # -----------------------------
 with left:
-    st.markdown(
-        f"<div style='height:{IMAGE_TOP_SPACER_PX}px'></div>", unsafe_allow_html=True
-    )
     st.subheader("Configuration Drawing")
     st.caption("Entered dimensions are reflected below. Drawing is not to scale (NTS).")
 
@@ -984,27 +1065,19 @@ def _number_field(label: str, field: str, **kwargs):
 
 
 def _select_field(label: str, field: str, options, **kwargs):
-    key = _FORM_KEYS[field]
-    if key in st.session_state and st.session_state.get(key) in options:
-        return st.selectbox(label, options=options, key=key, **kwargs)
-    st.session_state[key] = None
-    return st.selectbox(label, options=options, index=None, key=key, **kwargs)
+    # Keep canonical values and unresolved analyzer fields; only selection UX changes.
+    return choice_buttons(label, options, key=_FORM_KEYS[field], **kwargs)
 
 
 with right:
     attention_style = st.empty() if drawing_mode else None
-    _spacer, form_col = st.columns(
-        [1 - RIGHT_FORM_WIDTH, RIGHT_FORM_WIDTH], gap="medium"
-    )
+    form_col = st.container()
 
     with form_col:
         attention_prompt = st.empty() if drawing_mode else None
         st.caption("PRODUCT")
-        r1c1, r1c2 = st.columns([1, 2])
-        with r1c1:
-            quantity = _number_field("Quantity", "quantity", min_value=1, step=1)
-        with r1c2:
-            material = _select_field("Material", "material", material_options)
+        quantity = _number_field("Quantity", "quantity", min_value=1, step=1)
+        material = material_cards(material_options, key=_FORM_KEYS["material"])
 
         thickness_options = _thickness_options(material)
         existing_thickness = st.session_state.get(_FORM_KEYS["thickness"])
@@ -1019,6 +1092,7 @@ with right:
             thickness_options,
             placeholder="Select plate thickness",
             help="Finished nominal plate thickness.",
+            format_func=lambda value: f'{value:g}"',
         )
 
         st.caption("DIMENSIONS")
@@ -1064,7 +1138,10 @@ with right:
 
         if st.session_state.get(_FORM_KEYS["handle_hole_enabled"]) is None:
             st.session_state[_FORM_KEYS["handle_hole_enabled"]] = False
-        handle_hole_enabled = st.checkbox("Handle Hole", key=_FORM_KEYS["handle_hole_enabled"])
+        handle_hole_enabled = _select_field(
+            "Handle Hole", "handle_hole_enabled", [False, True],
+            format_func=lambda value: "HANDLE HOLE" if value else "NO HANDLE HOLE",
+        )
         handle_hole_diameter = None
         handle_hole_center_from_handle_end = None
         if handle_hole_enabled:
@@ -1090,6 +1167,7 @@ with right:
             tol_options,
             placeholder="Select bore tolerance",
             help="Permitted variation from the specified finished bore diameter.",
+            format_func=lambda value: f"±{value:g} in.",
         )
 
         handle_label = st.text_input(
@@ -1100,17 +1178,7 @@ with right:
             help=f"Maximum {max_handle_label_chars} characters. Letters, numbers, spaces, and standard shop-marking punctuation only.",
         )
 
-        if drawing_mode:
-            chamfer = _select_field(
-                "Chamfer",
-                "chamfer",
-                [False, True],
-                placeholder="Select yes or no",
-                format_func=lambda value: "Yes" if value else "No",
-            )
-        else:
-            chamfer = st.checkbox("Chamfer", value=False)
-            st.session_state[_FORM_KEYS["chamfer"]] = chamfer
+        chamfer = bore_edge_choice(key=_FORM_KEYS["chamfer"])
         chamfer_width = None
         chamfer_details = {}
         if chamfer is True:
@@ -1128,35 +1196,20 @@ with right:
                     "Enter a chamfer width and press Enter or click outside the field to apply it."
                 )
             if OWNER_ACCEPTANCE_MODE and not drawing_mode:
+                # Optional explicit geometry remains supported, but the public
+                # YES/NO + size contract never requires hidden legacy fields.
                 chamfer_details = {
-                    "chamfer_angle_degrees": st.number_input(
-                        "Chamfer angle from face (degrees)", min_value=0.1,
-                        max_value=89.9, value=None, step=0.1,
-                        key="staging_chamfer_angle", placeholder="Enter angle",
-                    ),
-                    "chamfer_side": st.selectbox(
-                        "Chamfer side", ["upstream", "downstream"], index=None,
-                        key="staging_chamfer_side", placeholder="Select side",
-                    ),
-                    "flow_orientation": st.selectbox(
-                        "Flow orientation in section", ["left-to-right", "right-to-left"],
-                        index=None, key="staging_chamfer_flow", placeholder="Select flow",
-                    ),
-                    "chamfer_width_definition": st.selectbox(
-                        "Chamfer width definition",
-                        ["radial-angle-from-face", "axial-depth-angle-from-face"],
-                        index=None, key="staging_chamfer_definition",
-                        placeholder="Select width definition",
-                        format_func=lambda v: {
-                            "radial-angle-from-face": "Radial width; angle measured from face",
-                            "axial-depth-angle-from-face": "Axial depth; angle measured from face",
-                        }[v],
-                    ),
+                    "chamfer_angle_degrees": st.session_state.get("staging_chamfer_angle"),
+                    "chamfer_side": st.session_state.get("staging_chamfer_side"),
+                    "flow_orientation": st.session_state.get("staging_chamfer_flow"),
+                    "chamfer_width_definition": st.session_state.get("staging_chamfer_definition"),
                 }
-                if any(v is None for v in chamfer_details.values()):
-                    st.warning("Drawing HOLD: complete the explicit chamfer configuration before drawing approval.")
+                chamfer_details = {
+                    key: value for key, value in chamfer_details.items() if value is not None
+                }
 
         st.caption("DELIVERY")
+        st.caption("Lead-time selection updates the verified quote total below.")
         ships_in_days = _select_field(
             "Lead time",
             "ships_in_days",
@@ -1366,7 +1419,7 @@ if active_assisted_session is not None:
                 attention_prompt.empty()
 
             owner_run = st.session_state.get(_OWNER_ACCEPTANCE_RUN_KEY)
-            if isinstance(owner_run, OwnerAcceptanceRun):
+            if isinstance(owner_run, OwnerAcceptanceRun) and st.query_params.get("debug") == "1":
                 with st.expander("Internal test feedback"):
                     st.caption(
                         "This summary stays in this browser session unless you download it. "
@@ -1399,6 +1452,36 @@ if active_assisted_session is not None:
                         file_name=f"oplates-owner-feedback-{summary.run_id[:8]}.json",
                         mime="application/json",
                     )
+
+
+if not starter_notice_shown:
+    with starter_status.container():
+        if active_assisted_session is not None and assisted_review is not None:
+            required = canonical_required_fields(chamfer=current_form_values.get("chamfer"))
+            if current_form_values.get("handle_hole_enabled"):
+                required += ["handle_hole_diameter", "handle_hole_center_from_handle_end"]
+            missing = set(assisted_review.missing_required_fields)
+            populated = sum(field not in missing for field in required)
+            attention_count = len(missing | set(assisted_review.invalid_fields))
+            st.success(f"Drawing analysis complete — {populated} of {len(required)} fields populated.")
+            if attention_count:
+                st.caption(f"Complete or correct the {attention_count} highlighted fields below.")
+            else:
+                st.caption("All required fields are populated. Review them below before pricing.")
+            st.caption("Detected values can be reviewed and edited before pricing.")
+        elif st.session_state.get(_DRAWING_PENDING_KEY) is not None:
+            pending = st.session_state[_DRAWING_PENDING_KEY]
+            st.info(f"Drawing analysis complete — {len(pending.configuration)} fields identified.")
+            st.caption("Apply identified values to the fields below. Your existing entries are preserved.")
+        elif drawing_access_allowed and uploaded_drawing is not None:
+            st.markdown("**Your drawing is ready to analyze.**")
+            st.caption("Analyze it to populate the fields below.")
+        elif is_logged_in() and DRAWING_ASSISTED_ENABLED and not drawing_access_allowed:
+            st.markdown("**Drawing analysis is unavailable for this account.**")
+            st.caption("You can complete the configurator fields below.")
+        else:
+            st.markdown("**Ready to read your print.**")
+            st.caption("Detected values appear below and remain editable.")
 
 
 # -----------------------------
@@ -1507,7 +1590,9 @@ with left:
     preview_ready = payload_inputs is not None and not errors
     if preview_ready:
         components.html(
-            render_plate_svg(
+            "<style>html,body{margin:0;height:100%}"
+            "svg{width:100%!important;height:100%!important}</style>"
+            + render_plate_svg(
                 handle_hole_enabled=handle_hole_enabled,
                 handle_hole_diameter=handle_hole_diameter,
                 handle_hole_center_from_handle_end=handle_hole_center_from_handle_end,
@@ -1524,27 +1609,16 @@ with left:
                     float(chamfer_width) if chamfer_width is not None else None
                 ),
             ),
-            height=430,
+            height=300,
             scrolling=False,
         )
     else:
         st.info("Complete the required dimensions to update the plate preview.")
     with st.container(border=True):
-        st.subheader("Quote Summary")
         if result:
             c1, c2 = st.columns(2)
             c1.metric("Unit price", f"${result['unit_price']:,.2f}")
             c2.metric("Total price", f"${result['total_price']:,.2f}")
-            st.caption(
-                f"{material} · {float(thickness):.3f} in. thick · "
-                f"Ø {float(paddle_dia):.3f} OD / Ø {float(bore_dia):.3f} bore · "
-                f"Qty {int(quantity)}"
-            )
-            st.success(f"Estimated to ship within {int(ships_in_days)} calendar days.")
-            st.caption(
-                f"Quote reference: {result.get('configuration_id', '')} · "
-                "Verified using the active pricing and availability configuration."
-            )
         elif active_assisted_session is not None and pricing_error:
             st.warning(
                 "A verified price is not currently available. Your configuration is preserved."
@@ -1570,13 +1644,15 @@ with left:
         st.divider()
 
     if result and weight_lb is not None and pkg:
-        st.caption("Shipping estimates")
-        s1, s2 = st.columns(2)
-        s1.metric("Estimated total weight", f"{weight_lb:.2f} lb")
-        s2.metric(
-            "Estimated package",
-            f"{pkg['length']} × {pkg['width']} × {pkg['height']} in.",
-        )
+        with st.container(key="preview_fulfillment"):
+            st.metric("Estimated ship time", f"{int(ships_in_days)} calendar days")
+            st.markdown("**Shipping estimates**")
+            shipping_weight, shipping_package = st.columns([1, 1.4])
+            shipping_weight.metric("Estimated total weight", f"{weight_lb:.2f} lb")
+            shipping_package.metric(
+                "Estimated package",
+                f"{pkg['length']} × {pkg['width']} × {pkg['height']} in.",
+            )
 
 
 # -----------------------------
@@ -1610,21 +1686,20 @@ def _add_to_cart(payload_inputs: dict, result: dict, *, assisted: bool = False) 
 with right:
     st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
 
-    _spacer, form_col = st.columns(
-        [1 - RIGHT_FORM_WIDTH, RIGHT_FORM_WIDTH], gap="large"
-    )
+    form_col = st.container()
     with form_col:
         # Logged-in indicator (ties the order to account)
         if is_logged_in():
             st.success("You’re logged in — this order will be saved to your account.")
         else:
             st.info(
-                "Checkout as guest — log in from the sidebar to save orders to your account."
+                "Checkout as guest — open Account to save orders to your account."
             )
 
-        if OWNER_ACCEPTANCE_MODE and not owner_test_checkout_allowed:
+        if (OWNER_ACCEPTANCE_MODE or os.environ.get("APP_ENV") == "production") and not owner_test_checkout_allowed:
             st.caption(
-                "Checkout is disabled in this controlled owner-acceptance environment."
+                "Checkout is currently closed." if os.environ.get("APP_ENV") == "production"
+                else "Checkout is disabled in this controlled owner-acceptance environment."
             )
         elif active_assisted_session is not None and not owner_test_checkout_allowed:
             st.caption("Checkout remains disabled for drawing-assisted configurations.")
@@ -1639,7 +1714,7 @@ with right:
         with btn_cols[1]:
             checkout_disabled = (
                 result is None
-                or (OWNER_ACCEPTANCE_MODE and not owner_test_checkout_allowed)
+                or ((OWNER_ACCEPTANCE_MODE or os.environ.get("APP_ENV") == "production") and not owner_test_checkout_allowed)
                 or (
                     active_assisted_session is not None
                     and not owner_test_checkout_allowed
@@ -1668,7 +1743,7 @@ with right:
             add_disabled = (
                 not is_logged_in()
                 or result is None
-                or (OWNER_ACCEPTANCE_MODE and not owner_test_checkout_allowed)
+                or ((OWNER_ACCEPTANCE_MODE or os.environ.get("APP_ENV") == "production") and not owner_test_checkout_allowed)
                 or (
                     active_assisted_session is not None
                     and not owner_test_checkout_allowed

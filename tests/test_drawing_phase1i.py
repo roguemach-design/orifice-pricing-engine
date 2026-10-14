@@ -1,3 +1,4 @@
+from ui_harness import customer_page_test
 """Owner-test pricing convergence without another pricing implementation."""
 
 import base64
@@ -364,8 +365,8 @@ def test_pricing_api_failure_preserves_confirmed_form_and_hides_price(
         )
 
     with patch("requests.get", fake_get), patch("requests.post", fake_post):
-        app = AppTest.from_file(
-            str(Path(__file__).resolve().parents[1] / "pages" / "1_Quote.py"),
+        app = customer_page_test(
+            "pages/1_Quote.py",
             default_timeout=20,
         )
         app.session_state["auth"] = {
@@ -426,8 +427,8 @@ def test_owner_scope_blocks_stale_assisted_session_pricing(
             else {"enabled": True, "authorized": authorized, "user_id": "internal-user"}
         ),
     ), patch("requests.post") as post:
-        app = AppTest.from_file(
-            str(Path(__file__).resolve().parents[1] / "pages" / "1_Quote.py"),
+        app = customer_page_test(
+            "pages/1_Quote.py",
             default_timeout=20,
         )
         app.session_state["auth"] = {

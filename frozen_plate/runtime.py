@@ -5,6 +5,7 @@ import os
 STAGING_API = "https://oplates-pricing-api-staging.onrender.com"
 STAGING_UI = "https://oplates-customer-ui-staging.onrender.com"
 PRODUCTION_API = "https://orifice-pricing-api.onrender.com"
+PRODUCTION_PRIVATE_API = "http://orifice-pricing-api:10000"
 PRODUCTION_UI = "https://quote.o-plates.com"
 PRODUCTION_PROJECT = "kboaovlhilonlymcuqcr"
 
@@ -30,7 +31,13 @@ def ui_enabled(environ=None):
     base = env.get("API_BASE", "").rstrip("/")
     return (base == STAGING_API and env.get("APP_ENV") != "production") or (
         env.get("APP_ENV") == "production"
-        and base == PRODUCTION_API
+        and (
+            base == PRODUCTION_API
+            or (
+                base == PRODUCTION_PRIVATE_API
+                and env.get("RENDER_SERVICE_ID") == "srv-d530k8re5dus73ahqr0g"
+            )
+        )
         and env.get("FROZEN_PLATE_ENABLED") == "true"
     )
 
