@@ -250,3 +250,24 @@ def test_production_owner_cancel_recovery_is_private_and_reprices(sandbox, datab
     assert response.json()["requires_confirmation"] is True
     assert "_payment" not in response.json()["items"][0]
     assert sandbox.client.get("/checkout/recovery/" + reference, headers=headers("customer")).status_code == 403
+
+
+@pytest.mark.parametrize("cart", [False, True])
+def test_validation_window_blocks_live_even_if_live_readiness_is_enabled(sandbox, monkeypatch, cart):
+    monkeypatch.setenv("OPLATES_STRIPE_TEST_VALIDATION_WINDOW", "true")
+    monkeypatch.setenv("FROZEN_PLATE_LIVE_CHECKOUT_READY", "true")
+    body = {"items": [checkout_body()["inputs"]]} if cart else checkout_body()
+    result = sandbox.client.post("/checkout/cart/create" if cart else "/checkout/create", json=body, headers=headers(mode=False))
+    assert result.status_code == 503
+    assert not sandbox.calls
+    result = sandbox.client.post("/checkout/cart/create" if cart else "/checkout/create", json=body, headers=headers())
+    assert result.status_code == 200, result.text
+    assert sandbox.calls[0]["api_key"] == "rk_test_separate"
+
+
+def test_validation_window_blocks_live_session_factory(sandbox, monkeypatch):
+    monkeypatch.setenv("OPLATES_STRIPE_TEST_VALIDATION_WINDOW", "true")
+    with pytest.raises(api_app.HTTPException) as exc:
+        api_app._create_checkout_session({"metadata": {}}, False, "owner")
+    assert exc.value.status_code == 503
+    assert not sandbox.calls

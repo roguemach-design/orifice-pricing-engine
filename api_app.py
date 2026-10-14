@@ -281,6 +281,8 @@ def _stripe_checkout_required(customer_id=None, checkout_mode=None) -> bool:
         return True
     if checkout_mode is not None:
         raise HTTPException(400, "Unsupported checkout mode.")
+    if APP_ENV == "production" and os.environ.get("OPLATES_STRIPE_TEST_VALIDATION_WINDOW") == "true":
+        raise HTTPException(503, "Only authorized sandbox checkout is available during validation.")
     secret_key = str(stripe.api_key or "")
     if APP_ENV not in {"production", "staging", "preview", "test"}:
         raise HTTPException(
@@ -332,6 +334,8 @@ def _is_owner_test_order(order) -> bool:
 
 
 def _create_checkout_session(checkout_args, owner_test, customer_id):
+    if APP_ENV == "production" and os.environ.get("OPLATES_STRIPE_TEST_VALIDATION_WINDOW") == "true" and not owner_test:
+        raise HTTPException(503, "Live Checkout is disabled during validation.")
     if owner_test:
         checkout_args["api_key"] = STRIPE_TEST_SECRET_KEY
         checkout_args["metadata"]["oplates_payment_mode"] = "owner_test"

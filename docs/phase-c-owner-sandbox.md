@@ -65,6 +65,12 @@ only. No vendor or manufacturing integration is invoked.
 
 ## Activation and first owner buy
 
+During the temporary live-site validation window, set
+`OPLATES_STRIPE_TEST_VALIDATION_WINDOW=true` on the production API. This explicitly
+blocks the normal production checkout path and session factory even if
+`FROZEN_PLATE_LIVE_CHECKOUT_READY` is accidentally enabled. The existing verified
+owner checkout uses the separate TEST credentials and retains its authorization.
+
 1. Deploy the accepted Phase C commit to the existing production API and UI.
    Keep the owner gate off until checks pass; use the exact commit rather than
    each service's older configured source branch.
