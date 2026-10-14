@@ -84,7 +84,15 @@ window.addEventListener("message", (event) => {
   if (event.origin !== "https://quote.o-plates.com" || !frame.contentWindow) return;
   let trusted = event.source === frame.contentWindow;
   for (let i = 0; !trusted && i < frame.contentWindow.length; i++) trusted = event.source === frame.contentWindow[i];
-  if (!trusted || !['oplates:height', 'oplates:layout'].includes(event.data?.type)) return;
+  if (!trusted) return;
+  if (event.data?.type === 'oplates:checkout') {
+    try {
+      const target = new URL(event.data.url);
+      if (target.origin === 'https://checkout.stripe.com' && !target.username && !target.password && target.pathname.startsWith('/c/pay/cs_test_')) window.location.assign(target.href);
+    } catch (_) { /* Ignore malformed navigation from the embedded frame. */ }
+    return;
+  }
+  if (!['oplates:height', 'oplates:layout'].includes(event.data?.type)) return;
   syncModal(event.data.modalOpen);
   const height = event.data.height;
   if (!document.documentElement.classList.contains('oplates-modal-open') && typeof height === "number" && Number.isFinite(height) && height >= 400 && height <= 30000) frame.style.height = `${Math.ceil(height)}px`;
@@ -92,6 +100,13 @@ window.addEventListener("message", (event) => {
     if (event.data.feedback === null) { feedback = null; rail?.replaceChildren(); syncLayout(); }
     else renderFeedback(event.data.feedback);
   }
+});
+// A new iframe document must supply fresh feedback; never retain the previous route's drawing.
+frame.addEventListener?.('load', () => {
+  feedback = null;
+  rail?.replaceChildren();
+  syncModal(false);
+  syncLayout();
 });
 window.addEventListener('resize', syncLayout);
 if (typeof ResizeObserver !== 'undefined' && stage) new ResizeObserver(syncLayout).observe(stage);
