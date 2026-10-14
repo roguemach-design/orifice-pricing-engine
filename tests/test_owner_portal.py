@@ -35,7 +35,7 @@ def test_owner_exact_history_authorization_and_approval_gates(tmp_path, monkeypa
             raise HTTPException(401)
 
     app = FastAPI()
-    app.include_router(api.router(lambda: "customer", admin, lambda _: None))
+    app.include_router(api.router(lambda: "customer", admin, lambda _: {"order_number_display":"OP-0014"}))
     client = TestClient(app)
     headers = {"x-api-key": "owner-test-credential"}
     root = "/admin/frozen-plates/"
@@ -153,40 +153,20 @@ def test_owner_page_is_hidden_and_anonymous_has_no_data_requests(monkeypatch):
 
 
 def test_authorized_owner_page_shows_exact_downloads_without_writes(monkeypatch):
-    from types import SimpleNamespace
-    import requests
-    monkeypatch.setenv('APP_ENV','production')
-    monkeypatch.setenv('API_BASE','http://orifice-pricing-api:10000')
-    monkeypatch.setenv('RENDER_SERVICE_ID','srv-d530k8re5dus73ahqr0g')
-    monkeypatch.setenv('FROZEN_PLATE_ENABLED','true')
-    contents = {'pdf':b'%PDF-exact-fixture','json':b'{"spec":"fixture"}'}
-    artifacts = {k:dict(filename='R1.'+k,size=len(v),sha256=sha256(v).hexdigest()) for k,v in contents.items()}
-    artifacts['dxf'] = dict(filename='R1.dxf',size=10,sha256='d'*64)
-    rev = dict(id='r1',number=1,plate_id='p1',spec_sha256='a'*64,artifacts=artifacts)
-    plate = dict(id='p1',order_id='o1',line_id='line-1',lifecycle='READY_FOR_CUSTOMER_CONFIRMATION',current_revision='r1')
-    def get(url,headers,**kwargs):
-        if headers['x-api-key'] != 'fixture-owner':
-            return SimpleNamespace(status_code=401)
-        path=url.split(':10000')[-1]
-        data={
-            '/admin/orders':[dict(id='o1',status='completed',order_number_display='OP-TEST',created_at='fixture')],
-            '/admin/orders/o1':dict(id='o1',quote_payload={'lines':[{'configuration_id':'cfg'}]}),
-            '/admin/frozen-plates':[plate],
-            '/admin/frozen-plates/p1/revisions':[rev],
-            '/admin/frozen-plates/p1':dict(plate=plate,revision=rev,approvals=[],deliveries=[],sourcing=[]),
-            '/admin/frozen-plates/revisions/r1/email-status':dict(state='NOT_ATTEMPTED')}
-        if '/artifact/' in path:
-            return SimpleNamespace(status_code=200,content=contents[path.rsplit('/',1)[1]])
-        assert path in data, path
-        return SimpleNamespace(status_code=200,json=lambda:data[path])
-    monkeypatch.setattr(requests,'get',get)
-    monkeypatch.setattr(requests,'post',lambda *a,**kw: (_ for _ in ()).throw(AssertionError('owner page write')))
-    app=customer_page_test('pages/6_Internal_Sourcing.py').run()
-    app.text_input[0].set_value('customer-key').run()
-    assert not app.selectbox and app.error
-    app.text_input[0].set_value('fixture-owner').run()
+    from test_manufacturing_control import configure_ui
+    app, calls, rev = configure_ui(monkeypatch)
+    app.text_input[0].set_value('customer-key')
+    next(b for b in app.button if b.label == 'Unlock').click().run()
+    assert app.error and not app.get('download_button')
+    next(b for b in app.button if b.label == 'Lock').click().run()
+    app.text_input[0].set_value('fixture-owner')
+    next(b for b in app.button if b.label == 'Unlock').click().run()
     assert not app.exception
-    assert len(app.selectbox)==2
-    assert len(app.get('download_button'))==2
-    assert any('not approved' in i.value for i in app.info)
+    next(b for b in app.button if b.label == 'OP-0014').click().run()
+    assert not app.exception
+    assert not app.get('download_button')
+    assert not any('/artifact/' in c or c.endswith('/dxf') for c in calls)
+    next(b for b in app.button if b.label == 'Prepare PDF').click().run()
+    assert len(app.get('download_button')) == 1
+    assert any('Bytes verified' in e.value for e in app.success)
     assert not any('Record sourcing' in b.label or 'revised' in b.label for b in app.button)

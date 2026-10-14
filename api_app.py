@@ -1521,6 +1521,33 @@ def me_order_detail(order_id: str, customer_user_id: str = Depends(_require_cust
         db.close()
 
 
+def _admin_payment_mode(order):
+    session = order.stripe_session_id or ""
+    if not isinstance(session, str):
+        return "UNKNOWN"
+    if re.fullmatch(r"cs_test_[A-Za-z0-9_]+", session):
+        try:
+            return "OWNER TEST" if _is_owner_test_order(order) else "TEST"
+        except (AttributeError, TypeError):
+            return "TEST"
+    if re.fullmatch(r"cs_live_[A-Za-z0-9_]+", session):
+        return "LIVE"
+    return "UNKNOWN"
+
+
+@app.get("/admin/manufacturing-summary", dependencies=[Depends(_rate_limit_admin)])
+def admin_manufacturing_summary():
+    if not frozen_plate_enabled(app_env=APP_ENV):
+        raise HTTPException(503, "Manufacturing records unavailable")
+    from frozen_plate.api import repository
+    from frozen_plate.control_data import bounded_summary
+    from frozen_plate.repository import WorkflowError
+    try:
+        return bounded_summary(admin_list_orders(limit=200), repository())
+    except (WorkflowError, ValueError, KeyError):
+        raise HTTPException(503, "Manufacturing records unavailable") from None
+
+
 @app.get("/admin/orders", dependencies=[Depends(_rate_limit_admin)])
 def admin_list_orders(q: Optional[str] = None, limit: int = 50):
     _db_required()
@@ -1545,9 +1572,10 @@ def admin_list_orders(q: Optional[str] = None, limit: int = 50):
             {
                 "id": o.id,
                 "status": o.status,
-                "payment_mode": "OWNER TEST" if _is_owner_test_order(o) else ("TEST" if (o.stripe_session_id or "").startswith("cs_test_") else "LIVE"),
+                "payment_mode": _admin_payment_mode(o),
                 "order_number_display": _format_order_number(o.order_number),
                 "created_at": o.created_at.isoformat() if o.created_at else None,
+                "paid_at": o.paid_at.isoformat() if o.paid_at else None,
                 "customer_email": o.customer_email,
                 "amount_total_usd": (o.amount_total_cents or 0) / 100.0,
                 "amount_shipping_usd": (o.amount_shipping_cents or 0) / 100.0,
@@ -1589,9 +1617,10 @@ def admin_get_order(order_id: str):
         return {
             "id": o.id,
             "status": o.status,
-            "payment_mode": "OWNER TEST" if _is_owner_test_order(o) else ("TEST" if (o.stripe_session_id or "").startswith("cs_test_") else "LIVE"),
+            "payment_mode": _admin_payment_mode(o),
             "order_number_display": _format_order_number(o.order_number),
             "created_at": o.created_at.isoformat() if o.created_at else None,
+            "paid_at": o.paid_at.isoformat() if o.paid_at else None,
             "stripe_session_id": o.stripe_session_id,
             "stripe_payment_intent": o.stripe_payment_intent,
             "customer_email": o.customer_email,
@@ -1849,6 +1878,7 @@ def _frozen_plate_order_snapshot(order_id):
             raise HTTPException(404, "Completed live customer order not found")
         return {"id": order.id, "customer_id": order.customer_id,
                 "customer_email": order.customer_email,
+                "order_number_display": _format_order_number(order.order_number),
                 "quote_payload": copy.deepcopy(order.quote_payload)}
     finally:
         db.close()
