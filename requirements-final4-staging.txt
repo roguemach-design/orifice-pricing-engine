@@ -1,4 +1,5 @@
 # Isolated harness only; deliberately excludes payment/email/customer UI dependencies.
+-c requirements.txt
 -r requirements-manufacturing.txt
 fastapi==0.141.1
 uvicorn==0.53.0
