@@ -635,5 +635,8 @@ with c2:
             st.stop()
 
         # redirect
+        from customer_navigation import render_integrated_checkout
+        if render_integrated_checkout(url):
+            st.stop()
         st.markdown(f"<meta http-equiv='refresh' content='0; url={url}'>", unsafe_allow_html=True)
         st.link_button("Continue to Stripe Checkout", url, use_container_width=True)

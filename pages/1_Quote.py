@@ -446,6 +446,10 @@ def start_checkout(payload_inputs: dict, priced_configuration: dict) -> None:
         st.json(resp)
         st.stop()
 
+    from customer_navigation import render_integrated_checkout
+    if render_integrated_checkout(checkout_url):
+        return
+
     st.markdown(
         f"<meta http-equiv='refresh' content='0; url={checkout_url}'>",
         unsafe_allow_html=True,

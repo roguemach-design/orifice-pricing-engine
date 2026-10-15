@@ -1,0 +1,119 @@
+{
+  "checks": {
+    "HAAS_all_files_verified": true,
+    "HAAS_generation": true,
+    "PACKAGING_all_files_verified": true,
+    "PACKAGING_generation": true,
+    "anonymous_blocked": true,
+    "health": true,
+    "no_release_route": true,
+    "profile_override_rejected": true,
+    "query": true,
+    "request_bound": true,
+    "wrong_key_blocked": true,
+    "wrong_parent_rejected": true
+  },
+  "deploy_sha": "114707970d5c0a2105a24973944924f1d23155d8",
+  "files": [
+    {
+      "family": "HAAS",
+      "name": "inputs.json",
+      "sha256": "047a95655830fb05f5a90900816593f4c0e0c075e4bdd24139f59b28d6f4ae38",
+      "size": 2618
+    },
+    {
+      "family": "HAAS",
+      "name": "inspection.md",
+      "sha256": "32304125c7c40078efc673ec73f2213db1c7325975069db8138395bd11d40f48",
+      "size": 760
+    },
+    {
+      "family": "HAAS",
+      "name": "manifest.json",
+      "sha256": "8d97ebd85c216f73a6988aebd5b6193dd00f16a354f1d8ce11dd6bd914df0cf5",
+      "size": 1689
+    },
+    {
+      "family": "HAAS",
+      "name": "paths.svg",
+      "sha256": "fe26371ffca01cf0a9d4c32a908b6b3e2ae88e2fe1e00f6fa67d92da9580eea7",
+      "size": 13955
+    },
+    {
+      "family": "HAAS",
+      "name": "program.NC",
+      "sha256": "60d2a1525c5aa49a7a924ce8c1cef605cce6f4cc3b310c51e142d425ec3f2a14",
+      "size": 19046
+    },
+    {
+      "family": "HAAS",
+      "name": "readiness.json",
+      "sha256": "6a0ccdad627b37bf1ab2cbd48c9b38503abc0d7754ccbcc3a45e3a2633908964",
+      "size": 846
+    },
+    {
+      "family": "HAAS",
+      "name": "setup.md",
+      "sha256": "b1e8ee0d8ff6dc62ebd50e842ee0fc6332c740de587fdb3f34314c52a3331aa8",
+      "size": 2947
+    },
+    {
+      "family": "HAAS",
+      "name": "simulation.json",
+      "sha256": "c854236b60c93a3ff46f6ad82c142119ef7e20ab2a3f8b613a1db5c0290612f3",
+      "size": 64619
+    },
+    {
+      "family": "HAAS",
+      "name": "verification.json",
+      "sha256": "5e65179db4874dc1d27cd47e825cd8499d3d77364f15e74a8c3e1a4edd962725",
+      "size": 293
+    },
+    {
+      "family": "PACKAGING",
+      "name": "assembly.md",
+      "sha256": "54e279ef62af0a2ca422126a65fc304b99552bb4bfefe75d5e11e4656d34baa1",
+      "size": 2941
+    },
+    {
+      "family": "PACKAGING",
+      "name": "fixture-reference.svg",
+      "sha256": "4e5b410af1c5a3bb4d2db265f7723d82b2a1f561c3e316040bb81c8c81e9986c",
+      "size": 404
+    },
+    {
+      "family": "PACKAGING",
+      "name": "inputs.json",
+      "sha256": "d71ea1e12230b8f199c4f3807aed9aa62bbea53e50bb004b7d1e2f3353a2431a",
+      "size": 1445
+    },
+    {
+      "family": "PACKAGING",
+      "name": "layout.svg",
+      "sha256": "52205b5341a8203e21b4531a13dbe55e9bd863c3f3cba7a507d71208c6b9b468",
+      "size": 30582
+    },
+    {
+      "family": "PACKAGING",
+      "name": "manifest.json",
+      "sha256": "850e2872f4d3a459b3ef2767bb4ee7c0f1236ec8dff70d394e7898a08040c37d",
+      "size": 1289
+    },
+    {
+      "family": "PACKAGING",
+      "name": "packaging.dxf",
+      "sha256": "1362f0157aa0055d1b50a1329afc41ed5dc013e4e9de754aafddd51e96f444e7",
+      "size": 87430
+    },
+    {
+      "family": "PACKAGING",
+      "name": "schedule.json",
+      "sha256": "2c33a840de34490c6197e61ebdecac0fd876e099fabc648fb959692de24b88c9",
+      "size": 1965
+    }
+  ],
+  "manufacturing_release_approved": false,
+  "physical_validation_completed": false,
+  "scope": "isolated-synthetic-staging",
+  "verified_file_count": 16
+}
