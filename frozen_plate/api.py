@@ -41,7 +41,7 @@ def repository():
     return configured_repository()
 
 
-def router(customer_auth, admin_auth, load_order):
+def router(customer_auth, admin_auth, load_order, *, approval_committed=None):
     routes = APIRouter()
 
     def _records(repo, table, revision_id):
@@ -204,6 +204,14 @@ def router(customer_auth, admin_auth, load_order):
     @routes.post("/me/frozen-plates/approve")
     def approve(body: TokenRequest, customer_id=Depends(customer_auth)):
         result = run(lambda: repository().approve(body.token, customer_id))
+        # Approval is already committed. Staging is internal, independent and
+        # never changes the customer approval response/wording or its success.
+        if approval_committed is not None:
+            try:
+                approval_committed()
+            except Exception:
+                import logging
+                logging.getLogger(__name__).warning("Internal staging notification unavailable; background recovery remains scheduled")
         return {
             "state": result["state"],
             "context": result["context"],

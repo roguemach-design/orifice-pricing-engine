@@ -1900,8 +1900,15 @@ def _frozen_plate_order_snapshot(order_id):
 # Explicit production opt-in; production and staging retain separate bindings.
 if frozen_plate_enabled(app_env=APP_ENV):
     from frozen_plate.api import router as frozen_plate_router
+    def notify_manufacturing_approval():
+        from final4.runtime import enabled
+        if enabled():
+            from final4.worker import request_scan
+            request_scan()
+
     app.include_router(frozen_plate_router(_require_customer_user_id, _rate_limit_admin,
-                                          _frozen_plate_order_snapshot))
+                                          _frozen_plate_order_snapshot,
+                                          approval_committed=notify_manufacturing_approval))
 
 # Additive owner-only tooling. Existing customer/checkout routes remain untouched.
 if frozen_plate_enabled(app_env=APP_ENV):
@@ -1917,5 +1924,13 @@ if frozen_plate_enabled(app_env=APP_ENV):
             from frozen_plate.repository import WorkflowError
             try:
                 return derived_configuration()
-            except (WorkflowError, ValueError, OSError):
+            except (WorkflowError, ValueError, TypeError, OSError):
                 raise HTTPException(503, "Manufacturing PostgreSQL configuration unavailable") from None
+
+        from final4.runtime import worker as staging_worker
+        app.add_event_handler("startup", staging_worker().start)
+        app.add_event_handler("shutdown", staging_worker().stop)
+
+        @app.get("/admin/manufacturing/staging/{revision_id}", dependencies=[Depends(_rate_limit_admin)])
+        def manufacturing_staging_status(revision_id: str):
+            return staging_worker().status(revision_id)

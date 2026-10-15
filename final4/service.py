@@ -187,59 +187,75 @@ class DerivedService:
                     "spec": canonical_specification(spec),
                     "configuration": asdict(self.packaging_config),
                 }
-            manifest = json.loads(files["manifest.json"])
-            bundle_id = str(uuid4())
-            # Unique private object namespace; stored once and never regenerated on download.
-            destination = repo.objects / "derived" / bundle_id
-            destination.mkdir(parents=True, mode=0o700)
-            for name, data in files.items():
-                if not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", name):
-                    raise WorkflowError("unsafe artifact name")
-                with (destination / name).open("xb") as f:
-                    f.write(data)
-                    f.flush()
-                    os.fsync(f.fileno())
-                (destination / name).chmod(0o400)
-            for directory in (destination, destination.parent, repo.objects):
-                fd = os.open(directory, os.O_RDONLY)
-                try:
-                    os.fsync(fd)
-                finally:
-                    os.close(fd)
-            repo._publish_objects(destination)
-            # Fail closed if persisted bytes differ, including remote storage.
-            file_rows = []
-            slug = "HAAS-REVIEW" if family == "HAAS" else "PACKAGING-PROTOTYPE"
-            stem = f"OP-{slug}-{identifier(association['order_id'])}-{identifier(association['line_id'])}-R{r['number']}-{bundle_id[:8]}"
-            for name, data in files.items():
-                key = str((destination / name).relative_to(repo.objects))
-                if repo._read_object(key) != data:
-                    raise WorkflowError("derived storage verification failure")
-                filename = f"{stem}-{name}"
-                file_rows.append(
-                    (bundle_id, name, filename, key, len(data), digest(data))
-                )
-            db.execute(
-                "INSERT INTO manufacturing_bundles VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                (
-                    bundle_id,
-                    r["id"],
-                    family,
-                    canonical(parent),
-                    canonical(inputs),
-                    digest(canonical(inputs)),
-                    manifest["generator_version"],
-                    repo.now(),
-                    actor,
-                    canonical(manifest),
-                    digest(canonical(manifest)),
-                ),
-            )
-            for row in file_rows:
-                db.execute(
-                    "INSERT INTO manufacturing_bundle_files VALUES (?,?,?,?,?,?)", row
-                )
+            bundle_id = self._store(db, family, association, r, files, inputs, actor)
         return self.metadata(bundle_id)
+
+    def _store(self, db, family, association, r, files, inputs, actor, *, staging=None):
+        manifest = json.loads(files["manifest.json"])
+        repo = self.repo
+        parent = {**association, "revision": f"R{r['number']}"}
+        if staging:
+            manifest.update(staging)
+            files = {
+                **files,
+                "manifest.json": (
+                    json.dumps(manifest, sort_keys=True, indent=2) + "\n"
+                ).encode("ascii"),
+            }
+        bundle_id = str(uuid4())
+        # Unique private object namespace; stored once and never regenerated on download.
+        destination = repo.objects / "derived" / bundle_id
+        destination.mkdir(parents=True, mode=0o700)
+        for name, data in files.items():
+            if not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", name):
+                raise WorkflowError("unsafe artifact name")
+            with (destination / name).open("xb") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+            (destination / name).chmod(0o400)
+        for directory in (destination, destination.parent, repo.objects):
+            fd = os.open(directory, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        repo._publish_objects(destination)
+        # Fail closed if persisted bytes differ, including remote storage.
+        file_rows = []
+        slug = (
+            ("HAAS-STAGED" if staging else "HAAS-REVIEW")
+            if family == "HAAS"
+            else "PACKAGING-PROTOTYPE"
+        )
+        stem = f"OP-{slug}-{identifier(association['order_id'])}-{identifier(association['line_id'])}-R{r['number']}-{bundle_id[:8]}"
+        for name, data in files.items():
+            key = str((destination / name).relative_to(repo.objects))
+            if repo._read_object(key) != data:
+                raise WorkflowError("derived storage verification failure")
+            filename = f"{stem}-{name}"
+            file_rows.append((bundle_id, name, filename, key, len(data), digest(data)))
+        db.execute(
+            "INSERT INTO manufacturing_bundles VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                bundle_id,
+                r["id"],
+                family,
+                canonical(parent),
+                canonical(inputs),
+                digest(canonical(inputs)),
+                manifest["generator_version"],
+                repo.now(),
+                actor,
+                canonical(manifest),
+                digest(canonical(manifest)),
+            ),
+        )
+        for row in file_rows:
+            db.execute(
+                "INSERT INTO manufacturing_bundle_files VALUES (?,?,?,?,?,?)", row
+            )
+        return bundle_id
 
     def _bundle(self, db, bundle_id):
         b = self.repo._one(
@@ -310,6 +326,17 @@ class DerivedService:
                     )
                 ),
                 evidence=events,
+                staging={
+                    k: json.loads(b["manifest_json"]).get(k)
+                    for k in (
+                        "mode",
+                        "profile_sha256",
+                        "staging_key",
+                        "machine_profile",
+                        "fixture_profile",
+                        "input_source",
+                    )
+                },
             )
 
     def _stored_readiness(self, db, b):
@@ -336,7 +363,7 @@ class DerivedService:
             ]
         return [self.metadata(i) for i in ids]
 
-    def download(self, bundle_id, name):
+    def download(self, bundle_id, name, *, historical=False):
         with self.repo.connect() as db:
             db.execute("BEGIN")
             self._bundle(
@@ -347,7 +374,16 @@ class DerivedService:
                 "SELECT * FROM manufacturing_bundle_files WHERE bundle_id=? AND name=?",
                 (bundle_id, name),
             )
-            b, _, _ = self._bundle(db, bundle_id)
+            b, current, approved = self._bundle(db, bundle_id)
+            manifest = json.loads(b["manifest_json"])
+            if (
+                manifest.get("mode") == "AUTOMATIC"
+                and name in ("program.NC", "packaging.dxf")
+                and (not approved or (not current and not historical))
+            ):
+                raise WorkflowError(
+                    "current approved derivative required; historical audit must be explicit"
+                )
             raw = self.repo._read_object(a["object_key"])
             manifest = json.loads(b["manifest_json"])
             if name != "manifest.json" and manifest["files"].get(name) != {

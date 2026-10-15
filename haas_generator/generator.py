@@ -330,7 +330,11 @@ def generate(record, profile, parameters=None):
         f"Job: {record.job_id}; part: {record.part_id}; drawing: {record.drawing_revision}",
         f"Record SHA256: {record_hash}",
         f"Profile SHA256: {profile_hash}",
-        f"Reviewed by: {record.reviewed_by}; reference: {record.review_reference}",
+        (
+            f"Reviewed by: {record.reviewed_by}; reference: {record.review_reference}"
+            if record.source_kind != "approved-frozen-plate"
+            else "Automatically staged from approved Frozen Plate; no programmer review or measurement is asserted."
+        ),
         f"Source: {record.source_kind}; SHA256: {record.source_sha256}",
         f"Machine: {profile.machine_id}; control: {profile.control_version}",
         f"Profile verifier: {profile.verified_by or 'UNVERIFIED'}",

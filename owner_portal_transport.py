@@ -141,14 +141,15 @@ class OwnerClient:
         except ValueError:
             raise PortalError("service") from None
 
-    def derived_artifact(self, bundle_id, artifact):
+    def derived_artifact(self, bundle_id, artifact, *, historical=False):
         from urllib.parse import quote
 
         response = self.get(
             "/admin/manufacturing/bundles/"
             + quote(bundle_id, safe="")
             + "/files/"
-            + quote(artifact["name"], safe="")
+            + quote(artifact["name"], safe=""),
+            params={"historical": "true"} if historical else None,
         )
         if (
             len(response.content) != artifact["size"]
@@ -200,13 +201,17 @@ class DownloadAccess:
                 raise RuntimeError("Download blocked: owner session is locked.")
         return content
 
-    def load_derived(self, bundle_id, artifact):
+    def load_derived(self, bundle_id, artifact, *, historical=False):
         with self._lock:
             client = self._client if self._active else None
         if client is None:
             raise RuntimeError("Download blocked: owner session is locked.")
         try:
-            content = client.derived_artifact(bundle_id, artifact)
+            content = (
+                client.derived_artifact(bundle_id, artifact, historical=True)
+                if historical
+                else client.derived_artifact(bundle_id, artifact)
+            )
         except PortalError as error:
             raise RuntimeError("Download blocked: " + ERRORS[error.category]) from None
         with self._lock:

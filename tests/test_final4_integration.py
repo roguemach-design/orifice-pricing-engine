@@ -60,7 +60,7 @@ def test_generation_post_is_explicit_scoped_no_redirect(monkeypatch):
     assert request.call_args.kwargs["allow_redirects"] is False
 
 
-def test_generation_form_no_mutation_on_view_or_without_ack(monkeypatch):
+def test_download_only_view_has_no_generation_inputs_or_mutations(monkeypatch):
     from streamlit.testing.v1 import AppTest
 
     source = """
@@ -80,11 +80,6 @@ show(Client(),rev,plate,True,True)
     at = AppTest.from_string(source).run()
     assert not at.exception
     assert "generated" not in at.session_state
-    at.button[1].click().run()
-    assert not at.exception
-    assert "generated" not in at.session_state
-    at.checkbox[1].check()
-    at.button[1].click().run()
-    assert not at.exception
-    assert at.session_state["generated"]["family"] == "PACKAGING"
-    assert at.session_state["generated"]["parent"]["revision_id"] == "r"
+    assert not at.button and not at.checkbox
+    assert not at.number_input and not at.text_input and not at.selectbox
+    assert any(e.label == "Engineering details / audit files" for e in at.expander)

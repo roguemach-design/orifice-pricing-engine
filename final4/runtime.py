@@ -61,6 +61,31 @@ def configuration():
         packaging_configuration=asdict(s.packaging_config),
         machining_parameters=asdict(s.parameters),
         manufacturing_release_enabled=False,
-        haas_status="REVIEW ONLY",
+        haas_status="SETUP VERIFICATION REQUIRED",
+        automatic_staging=True,
+        staging_profiles=automatic().profiles(),
+        fixture_profile=asdict(automatic().fixture),
         packaging_status="PROTOTYPE",
     )
+
+
+@lru_cache(maxsize=1)
+def automatic():
+    from .automatic import AutomaticStager
+    from haas_generator.staging import FixtureProfile
+
+    return AutomaticStager(
+        service(),
+        FixtureProfile(
+            **read_config(
+                "FINAL4_FIXTURE_PROFILE_PATH", "examples/final4/fixture-profile.json"
+            )
+        ),
+    )
+
+
+@lru_cache(maxsize=1)
+def worker():
+    from .worker import StagingWorker
+
+    return StagingWorker(automatic)

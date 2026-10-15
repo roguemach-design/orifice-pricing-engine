@@ -77,8 +77,10 @@ def router(admin_auth, get_service, *, server_actor):
         return run(lambda: get_service().metadata(bundle_id))
 
     @r.get("/bundles/{bundle_id}/files/{name}")
-    def download(bundle_id: str, name: str):
-        filename, hash_, data = run(lambda: get_service().download(bundle_id, name))
+    def download(bundle_id: str, name: str, historical: bool = False):
+        filename, hash_, data = run(
+            lambda: get_service().download(bundle_id, name, historical=historical)
+        )
         media = (
             "application/dxf" if name.endswith(".dxf") else "application/octet-stream"
         )

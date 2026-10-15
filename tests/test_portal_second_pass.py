@@ -128,13 +128,13 @@ import streamlit as st
 from manufacturing_control.derived import show
 class Client:
  def json(self,path):
-  return dict(packaging_configuration={'version':'profile-test'},machine_profile={},machining_parameters={})
+  return dict(packaging_configuration={'version':'profile-test'},machine_profile={},machining_parameters={},staging_profiles={'HAAS':'h','PACKAGING':'p'})
  def manufacturing_post(self,path,body):
   if path.endswith('/query'):
    result=[]
    for n in range(3):
     for family,name in [('HAAS','program.NC'),('PACKAGING','packaging.dxf')]:
-     result.append(dict(id=family+str(n),family=family,created_at=str(n),generator_version='corrugated-trifold-2',state='ENGINEERING REVIEW',files=[dict(name=name,filename=family+str(n)+'-R1-'+name,size=1,sha256='f'*64),dict(name='inputs.json',filename='audit.json',size=1,sha256='a'*64)]))
+     result.append(dict(staging={'mode':'AUTOMATIC','profile_sha256':'h' if family=='HAAS' else 'p','machine_profile':{'revision':'M1'}},id=family+str(n),family=family,created_at=str(n),generator_version='corrugated-trifold-2',state='ENGINEERING REVIEW',files=[dict(name=name,filename=family+str(n)+'-R1-'+name,size=1,sha256='f'*64),dict(name='inputs.json',filename='audit.json',size=1,sha256='a'*64)]))
    return result
   st.session_state['generated']=body
   return {'id':'bundle'}
@@ -171,8 +171,9 @@ def test_primary_only_latest_nc_and_packaging_audit_collapsed_no_generation_on_v
         )
         == 12
     )
-    assert any(e.label == "Regenerate NC" for e in at.expander)
-    assert any(e.label == "Regenerate Packaging DXF" for e in at.expander)
+    assert (
+        not at.button and not at.checkbox and not at.number_input and not at.text_input
+    )
 
 
 @pytest.mark.parametrize("current,approved", [(False, True), (True, False)])
@@ -187,35 +188,17 @@ def test_historical_or_unapproved_selection_cannot_generate(current, approved):
         )
 
 
-def test_haas_regeneration_can_reload_verified_inputs_without_inventing_measurements():
-    source = portal_source().replace(
-        " def manufacturing_post(self,path,body):",
-        """ def derived_artifact(self,bundle_id,artifact):
-  st.session_state['previous_read']=(bundle_id,artifact['name'])
-  return b'{"record":{"actual_blank_bore":1.423,"blank_radial_uncertainty":0.005,"reviewed_by":"Fixture Reviewer","review_reference":"Measured fixture"},"setup_context":{"top_face_side":"upstream","fixture_orientation_reference":"Fixture A"}}'
- def manufacturing_post(self,path,body):""",
+def test_normal_screen_has_no_review_or_generation_fields():
+    at = AppTest.from_string(portal_source()).run()
+    assert not at.exception
+    assert (
+        not at.text_input
+        and not at.number_input
+        and not at.selectbox
+        and not at.checkbox
     )
-    at = AppTest.from_string(source).run()
-    assert not at.exception and "previous_read" not in at.session_state
-    assert at.number_input[0].value is None and at.number_input[1].value is None
-    next(
-        b for b in at.button if b.label == "Load previous reviewed inputs"
-    ).click().run()
-    assert not at.exception
-    assert at.session_state["previous_read"] == ("HAAS2", "inputs.json")
-    assert at.number_input[0].value == 1.423
-    assert at.number_input[1].value == 0.005
-    assert at.selectbox[0].value == "upstream"
-    at.checkbox[0].check()
-    next(b for b in at.button if b.label == "Regenerate NC").click().run()
-    assert not at.exception
-    generated = at.session_state["generated"]
-    assert generated["family"] == "HAAS"
-    assert generated["parent"]["revision_id"] == "r"
-    record = generated["reviewed_record"]
-    assert record["actual_blank_bore"] == 1.423
-    assert record["source_sha256"] == "a" * 64
-    assert record["setup_context"]["fixture_orientation_reference"] == "Fixture A"
+    assert not at.button
+    assert "generated" not in at.session_state
 
 
 def test_failed_bundle_query_blocks_generation_and_preserves_audit():
