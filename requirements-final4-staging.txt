@@ -1,0 +1,8 @@
+# Isolated harness only; deliberately excludes payment/email/customer UI dependencies.
+-r requirements-manufacturing.txt
+fastapi==0.141.1
+uvicorn==0.53.0
+reportlab==5.0.1
+itsdangerous==2.2.0
+pypdf==6.10.0
+shapely==2.1.2
