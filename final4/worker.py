@@ -95,3 +95,18 @@ class StagingWorker:
         wake_event.set()
         if self.thread:
             self.thread.join(timeout=2)
+
+
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def lifespan(app):
+    runner = getattr(app.state, "manufacturing_stager", None)
+    if runner is not None:
+        runner.start()
+    try:
+        yield
+    finally:
+        if runner is not None:
+            runner.stop()

@@ -34,6 +34,23 @@ def label(name, value):
         raise ValueError(f"{name}: 1-100 safe ASCII characters required")
 
 
+def material_code(value):
+    """Accepted material labels; original record/profile strings stay immutable."""
+    return {
+        "304": "304",
+        "304 ss": "304",
+        "304 stainless": "304",
+        "304 stainless steel": "304",
+        "316": "316",
+        "316 ss": "316",
+        "316 stainless": "316",
+        "316 stainless steel": "316",
+        "cs": "CS",
+        "carbon": "CS",
+        "carbon steel": "CS",
+    }.get(value.casefold() if isinstance(value, str) else "")
+
+
 def construct(cls, data):
     if not isinstance(data, dict):
         raise ValueError(f"{cls.__name__}: object required")

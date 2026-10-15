@@ -369,3 +369,45 @@ def test_metadata_views_and_downloads_do_not_append_bundles(system, monkeypatch)
         svc.list(a)
     with svc.repo.connect() as db:
         assert "\n".join(db.iterdump()) == before
+
+
+def test_fastapi_lifespan_starts_and_stops_the_real_stager(system):
+    from threading import Event
+    from final4.worker import lifespan
+
+    svc, a, _, _ = system
+    runner = StagingWorker(lambda: stager(svc), interval=600)
+    done = Event()
+    sweep = runner.sweep
+
+    def observed():
+        result = sweep()
+        done.set()
+        return result
+
+    runner.sweep = observed
+    app = FastAPI(lifespan=lifespan)
+    app.state.manufacturing_stager = runner
+    with TestClient(app):
+        assert done.wait(timeout=5)
+        assert runner.status(a["revision_id"])["HAAS"]["state"] == "STAGED"
+        assert runner.thread.is_alive()
+    assert not runner.thread.is_alive()
+
+
+@pytest.mark.parametrize("material", ["304", "304 SS", "304 Stainless Steel"])
+def test_canonical_material_aliases_preserve_exact_frozen_value(system, material):
+    svc, a, _, s = system
+    r = svc.repo.create_revision(
+        a["plate_id"],
+        replace(s, material=material),
+        expected_current=a["revision_id"],
+        reason="material label",
+        actor="fixture",
+        source_snapshot={},
+    )
+    svc.repo.approve(svc.repo.create_delivery(r["id"])["token"], "synthetic-customer")
+    bid = stager(svc).ensure("HAAS", parent_for(svc, a, r))
+    inputs = json.loads(svc.download(bid, "inputs.json")[2])
+    assert inputs["record"]["material"] == material
+    assert inputs["profile"]["approved_material"] == svc.profile.approved_material

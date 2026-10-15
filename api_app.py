@@ -43,7 +43,8 @@ from jwt import PyJWKClient
 # ----------------------------
 # App + config
 # ----------------------------
-app = FastAPI(title="Orifice Pricing API", version="1.0.0")
+from final4.worker import lifespan as manufacturing_lifespan
+app = FastAPI(title="Orifice Pricing API", version="1.0.0", lifespan=manufacturing_lifespan)
 
 ALLOWED_ORIGINS = [
     "https://quote.o-plates.com",
@@ -1928,8 +1929,7 @@ if frozen_plate_enabled(app_env=APP_ENV):
                 raise HTTPException(503, "Manufacturing PostgreSQL configuration unavailable") from None
 
         from final4.runtime import worker as staging_worker
-        app.add_event_handler("startup", staging_worker().start)
-        app.add_event_handler("shutdown", staging_worker().stop)
+        app.state.manufacturing_stager = staging_worker()
 
         @app.get("/admin/manufacturing/staging/{revision_id}", dependencies=[Depends(_rate_limit_admin)])
         def manufacturing_staging_status(revision_id: str):

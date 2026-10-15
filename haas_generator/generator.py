@@ -4,7 +4,7 @@ from hashlib import sha256
 import json
 from math import ceil, cos, pi, sin
 from . import STATUS, VERSION
-from .contract import digest, snapshot
+from .contract import digest, snapshot, material_code
 
 RADIAL_STEP = 0.035
 FINISH_STOCK = 0.010
@@ -37,7 +37,9 @@ def plan(record, profile, parameters=None):
     chord_tolerance = parameters.chord_tolerance if parameters else CHORD_TOLERANCE
     if p.max_radial_wear >= finish_stock:
         raise ValueError("wear exceeds configured finish stock")
-    if r.material != p.approved_material:
+    if not material_code(r.material) or material_code(r.material) != material_code(
+        p.approved_material
+    ):
         raise ValueError("material has no approved profile cutting parameters")
     tool_r = p.t1_diameter / 2
     blank_min_r = r.actual_blank_bore / 2 - r.blank_radial_uncertainty
