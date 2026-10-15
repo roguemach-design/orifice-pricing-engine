@@ -431,11 +431,6 @@ def files(client, rev, plate, order, is_current, is_approved):
             "Rough-blank cut file · DXF",
             "Bore 0.125 in undersize on diameter (0.0625 in per side)",
         ),
-        (
-            "json",
-            "Internal spec record · JSON",
-            "Frozen canonical specification · internal only",
-        ),
     ]:
         artifact = rev.get("artifacts", {}).get(kind)
         with st.container(border=True, key=f"mc_card_file_{rev['id']}_{kind}"):
@@ -444,7 +439,7 @@ def files(client, rev, plate, order, is_current, is_approved):
             if not artifact:
                 st.caption("Artifact metadata unavailable.")
                 continue
-            st.caption(f"{artifact['size']:,} bytes · Metadata only until requested")
+            st.caption(f"{artifact['size']:,} bytes · Integrity checked on download")
             if kind == "dxf" and not (is_current and is_approved):
                 st.button("DXF locked", disabled=True, key="mc_locked_" + rev["id"])
                 st.caption(
@@ -467,7 +462,7 @@ def files(client, rev, plate, order, is_current, is_approved):
                         "Authoritative delivery name unavailable. Stored file is unchanged; DXF download blocked."
                     )
                     continue
-                st.caption("Saves as " + filename)
+            st.write(filename)
             if "mc_download_access" not in st.session_state:
                 st.session_state["mc_download_access"] = DownloadAccess(client)
             st.download_button(
@@ -646,7 +641,15 @@ def line_detail(client, plate, order):
             )
         files(client, rev, plate, order, current, is_approved)
         from .derived import show as derived_files
-        derived_files(client, rev, plate, current, is_approved)
+
+        derived_files(
+            client,
+            rev,
+            plate,
+            current,
+            is_approved,
+            frozen_audit=lambda: frozen_audit_files(client, rev, plate),
+        )
     history(client, detail)
     with st.container(border=True, key=f"mc_card_source_{rev['id']}"):
         st.subheader(f"Sourcing · R{rev['number']}")
@@ -669,29 +672,46 @@ def line_detail(client, plate, order):
         st.caption(
             "Recorded for review only. Several routes may be present. Nothing is sent to SendCutSend, Alro or Rogue Internal from this portal."
         )
-    with st.expander(
-        "Engineering details · UUIDs, SHA-256, original filenames, versions"
-    ):
-        # Explicit field allowlist excludes object locations, tokens, fingerprints and audit payloads.
-        pairs(
-            [
-                ("Plate ID", plate["id"]),
-                ("Revision ID", rid),
-                ("Spec SHA-256", rev.get("spec_sha256")),
-                ("Source SHA-256", rev.get("source_sha256")),
-                ("Generator", rev.get("generator_version")),
-                ("Geometry", rev.get("geometry_version")),
-                ("Spec schema", rev.get("spec_schema")),
-            ]
+
+
+def frozen_audit_files(client, rev, plate):
+    # Explicit field allowlist excludes object locations, tokens, fingerprints and audit payloads.
+    pairs(
+        [
+            ("Plate ID", plate["id"]),
+            ("Revision ID", rev["id"]),
+            ("Spec SHA-256", rev.get("spec_sha256")),
+            ("Source SHA-256", rev.get("source_sha256")),
+            ("Generator", rev.get("generator_version")),
+            ("Geometry", rev.get("geometry_version")),
+            ("Spec schema", rev.get("spec_schema")),
+        ]
+    )
+    for kind, a in rev.get("artifacts", {}).items():
+        st.markdown("**" + kind.upper() + " · original stored file**")
+        st.code(
+            f"{a['filename']}\n{a['size']} bytes\nSHA-256 {a['sha256']}",
+            language=None,
         )
-        for kind, a in rev.get("artifacts", {}).items():
-            st.markdown("**" + kind.upper() + " · original stored file**")
-            st.code(
-                f"{a['filename']}\n{a['size']} bytes\nSHA-256 {a['sha256']}",
-                language=None,
-            )
-        with st.expander("Frozen canonical specification"):
-            st.json(spec)
+    with st.expander("Frozen canonical specification"):
+        st.json(frozen_spec(rev))
+    artifact = rev.get("artifacts", {}).get("json")
+    if artifact:
+        if "mc_download_access" not in st.session_state:
+            st.session_state["mc_download_access"] = DownloadAccess(client)
+        st.download_button(
+            "Download JSON",
+            data=download_callable(
+                st.session_state["mc_download_access"],
+                rev,
+                "json",
+                artifact["filename"],
+            ),
+            file_name=artifact["filename"],
+            mime="application/json",
+            on_click="ignore",
+            key="mc_save_" + rev["id"] + "_json",
+        )
 
 
 def order_detail(client, order_id, snapshot):

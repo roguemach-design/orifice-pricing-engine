@@ -97,11 +97,27 @@ def test_packaging_independent_dxf_reader(od, width, length, thickness):
     assert doc.units == ezdxf.units.IN
     d = layout(s, c)
     cuts = [e for e in doc.modelspace() if e.dxf.layer.startswith("CUT_")]
-    assert len(cuts) == 1 + 2 * d["nest_layers"]
+    assert len(cuts) == 2 * d["nest_layers"]
     assert all(e.dxftype() == "LWPOLYLINE" and e.closed for e in cuts)
-    folds = [e for e in doc.modelspace() if e.dxf.layer == "SCORE_FOLD"]
-    assert len(folds) == 4 and all(e.dxftype() == "LINE" for e in folds)
-    assert not list(doc.modelspace().query('*[layer=="PERF_FOLD"]'))
+    folds = [e for e in doc.modelspace() if e.dxf.layer.startswith("PERF_FOLD_")]
+    assert {e.dxf.layer for e in folds} == {"PERF_FOLD_LEFT", "PERF_FOLD_RIGHT"}
+    for layer in ("PERF_FOLD_LEFT", "PERF_FOLD_RIGHT"):
+        segments = [e for e in folds if e.dxf.layer == layer]
+        assert len({round(e.dxf.start.x, 9) for e in segments}) == 2
+        assert all(
+            e.dxftype() == "LINE" and e.dxf.start.x == e.dxf.end.x for e in segments
+        )
+        assert all(
+            e.dxf.start.y >= c.fold_end_bridge
+            and e.dxf.end.y <= d["panel_height"] - c.fold_end_bridge
+            for e in segments
+        )
+        assert all(
+            e.dxf.end.y - e.dxf.start.y == pytest.approx(c.stitch_length)
+            for e in segments
+        )
+    assert not any(e.dxftype() in ("TEXT", "MTEXT") for e in doc.modelspace())
+    assert not list(doc.modelspace().query('*[layer=="SCORE_FOLD"]'))
     shell = [e for e in cuts if e.dxf.layer == "CUT_SHELL"][0]
     pts = list(shell.get_points("xy"))
     assert max(x for x, y in pts) - min(x for x, y in pts) == pytest.approx(
@@ -112,7 +128,7 @@ def test_packaging_independent_dxf_reader(od, width, length, thickness):
     hole = [e for e in cuts if e.dxf.layer == "CUT_NEST"][0]
     coords = list(hole.get_points("xy"))
     hole_poly = Polygon(coords)
-    x0, y0 = d["frame_positions"][0]
+    x0, y0 = d["center_nest_position"]
     for seg in build_plate_geometry(s).segments:
         for i in range(101):
             if seg.kind == "arc":
@@ -123,7 +139,8 @@ def test_packaging_independent_dxf_reader(od, width, length, thickness):
             else:
                 x, y = [a + (b - a) * i / 100 for a, b in zip(seg.start, seg.end)]
             point = Point(
-                -y + d["panel_width"] / 2 + x0, x + c.margin + s.finished_od / 2 + y0
+                -y + d["nest_transform"]["xoff"] + x0,
+                x + d["nest_transform"]["yoff"] + y0,
             )
             assert hole_poly.contains(point)
             assert (
@@ -181,7 +198,7 @@ def test_sheet_layer_and_thickness_bounds():
         (
             replace(
                 spec(),
-                finished_od=24,
+                finished_od=25,
                 handle_width=6,
                 centerline_to_handle_end=36,
                 thickness=0.5,
