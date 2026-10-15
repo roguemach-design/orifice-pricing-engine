@@ -16,8 +16,8 @@ def fmt(value):
     return f"{0 if abs(value) < .0000005 else value:.6f}"
 
 
-def circle(radius, z, *, clockwise=False):
-    n = max(72, ceil(pi / (2 * CHORD_TOLERANCE / radius) ** 0.5))
+def circle(radius, z, *, clockwise=False, chord_tolerance=CHORD_TOLERANCE):
+    n = max(72, ceil(pi / (2 * chord_tolerance / radius) ** 0.5))
     direction = -1 if clockwise else 1
     return [
         [
@@ -29,21 +29,26 @@ def circle(radius, z, *, clockwise=False):
     ]
 
 
-def plan(record, profile):
+def plan(record, profile, parameters=None):
     """Tool center paths; stock envelopes are separate from programmed radii."""
     r, p = record, profile
+    radial_step = parameters.radial_step if parameters else RADIAL_STEP
+    finish_stock = parameters.finish_stock if parameters else FINISH_STOCK
+    chord_tolerance = parameters.chord_tolerance if parameters else CHORD_TOLERANCE
+    if p.max_radial_wear >= finish_stock:
+        raise ValueError("wear exceeds configured finish stock")
     if r.material != p.approved_material:
         raise ValueError("material has no approved profile cutting parameters")
     tool_r = p.t1_diameter / 2
     blank_min_r = r.actual_blank_bore / 2 - r.blank_radial_uncertainty
     start_r = blank_min_r - tool_r - p.entry_clearance
     finish_r = r.finished_bore / 2 - tool_r
-    rough_r = finish_r - FINISH_STOCK
+    rough_r = finish_r - finish_stock
     if start_r <= 0 or rough_r <= 0 or start_r >= rough_r:
         raise ValueError("blank/tool/stock geometry cannot support outward spiral")
     if (
         finish_r - p.finish_lead <= 0
-        or p.finish_lead <= FINISH_STOCK + p.max_radial_wear
+        or p.finish_lead <= finish_stock + p.max_radial_wear
     ):
         raise ValueError("finish lead must start inside the roughed bore")
     if r.thickness - p.cut_bottom_z > p.t1_flute_length:
@@ -62,10 +67,10 @@ def plan(record, profile):
         raise ValueError("probe insertion envelope does not fit blank")
     if p.center_error_bound > r.blank_radial_uncertainty:
         raise ValueError("blank uncertainty must include maximum centering shift")
-    turns = (rough_r - start_r) / RADIAL_STEP
+    turns = (rough_r - start_r) / radial_step
     angle = 2 * pi * turns
     max_radius = max(rough_r, finish_r, p.t2_max_diameter / 2)
-    dtheta = min(pi / 90, (8 * CHORD_TOLERANCE / max_radius) ** 0.5)
+    dtheta = min(pi / 90, (8 * chord_tolerance / max_radius) ** 0.5)
     n = ceil(angle / dtheta)
     if n > MAX_POINTS:
         raise ValueError("spiral exceeds bounded review complexity")
@@ -85,10 +90,16 @@ def plan(record, profile):
         ]
         for i in range(1, seam_n + 1)
     ]
-    rough = spiral + seam + circle(rough_r, p.cut_bottom_z)[1:]
-    finish = circle(finish_r, p.cut_bottom_z)
+    rough = (
+        spiral
+        + seam
+        + circle(rough_r, p.cut_bottom_z, chord_tolerance=chord_tolerance)[1:]
+    )
+    finish = circle(finish_r, p.cut_bottom_z, chord_tolerance=chord_tolerance)
     # CCW G41: positive radial wear moves inward, reducing finished diameter.
-    compensated = circle(finish_r - p.radial_wear, p.cut_bottom_z)
+    compensated = circle(
+        finish_r - p.radial_wear, p.cut_bottom_z, chord_tolerance=chord_tolerance
+    )
     chamfer = []
     chamfer_radius = None
     if r.top_chamfer_width:
@@ -105,7 +116,9 @@ def plan(record, profile):
             raise ValueError("chamfer tip crosses fixture datum or path radius invalid")
         if p.t2_max_diameter / 2 + p.entry_clearance >= r.finished_bore / 2:
             raise ValueError("chamfer tool cannot enter finished bore at center")
-        chamfer = circle(chamfer_radius, r.thickness - depth)
+        chamfer = circle(
+            chamfer_radius, r.thickness - depth, chord_tolerance=chord_tolerance
+        )
     paths = {
         "rough_tool_center": rough,
         "finish_nominal_tool_center": finish,
@@ -167,9 +180,9 @@ def plan(record, profile):
         "probe_ball_center_z": probe_center_z,
         "probe_tip_z": probe_tip_z,
         "chamfer_center_radius": chamfer_radius,
-        "radial_pitch_per_revolution": RADIAL_STEP,
-        "finish_radial_stock": FINISH_STOCK,
-        "chord_tolerance": CHORD_TOLERANCE,
+        "radial_pitch_per_revolution": radial_step,
+        "finish_radial_stock": finish_stock,
+        "chord_tolerance": chord_tolerance,
         "holds": holds,
         "paths": paths,
         "simulation_limits": [
@@ -287,8 +300,8 @@ def path_svg(record, geometry):
     return "\n".join(result) + "\n"
 
 
-def generate(record, profile):
-    g = plan(record, profile)
+def generate(record, profile, parameters=None):
+    g = plan(record, profile, parameters)
     inputs = snapshot(record, profile)
     record_hash, profile_hash = digest(inputs["record"]), digest(inputs["profile"])
     nc = [
