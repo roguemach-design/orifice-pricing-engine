@@ -1,6 +1,7 @@
 """Owner API factory. Mount with EXISTING admin auth; no public/customer generation."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.routing import APIRoute
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 from frozen_plate.repository import WorkflowError
@@ -23,8 +24,29 @@ class GenerateRequest(BaseModel):
     reviewed_record: dict | None = None
 
 
+class BoundedRoute(APIRoute):
+    def get_route_handler(self):
+        original = super().get_route_handler()
+
+        async def bounded(request: Request):
+            if request.method == "POST":
+                data = bytearray()
+                async for chunk in request.stream():
+                    data.extend(chunk)
+                    if len(data) > 65536:
+                        raise HTTPException(413, "Manufacturing request too large")
+                request._body = bytes(data)
+            return await original(request)
+
+        return bounded
+
+
 def router(admin_auth, get_service, *, server_actor):
-    r = APIRouter(prefix="/admin/manufacturing", dependencies=[Depends(admin_auth)])
+    r = APIRouter(
+        prefix="/admin/manufacturing",
+        dependencies=[Depends(admin_auth)],
+        route_class=BoundedRoute,
+    )
 
     def run(action):
         try:

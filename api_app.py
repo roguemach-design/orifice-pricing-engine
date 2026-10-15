@@ -1902,3 +1902,20 @@ if frozen_plate_enabled(app_env=APP_ENV):
     from frozen_plate.api import router as frozen_plate_router
     app.include_router(frozen_plate_router(_require_customer_user_id, _rate_limit_admin,
                                           _frozen_plate_order_snapshot))
+
+# Additive owner-only tooling. Existing customer/checkout routes remain untouched.
+if frozen_plate_enabled(app_env=APP_ENV):
+    from final4.runtime import enabled as final4_enabled
+    if final4_enabled():
+        from final4.api import router as final4_router
+        from final4.runtime import service as derived_service, configuration as derived_configuration
+        app.include_router(final4_router(_rate_limit_admin, derived_service,
+                           server_actor="owner-manufacturing-review"))
+
+        @app.get("/admin/manufacturing/configuration", dependencies=[Depends(_rate_limit_admin)])
+        def manufacturing_configuration():
+            from frozen_plate.repository import WorkflowError
+            try:
+                return derived_configuration()
+            except (WorkflowError, ValueError, OSError):
+                raise HTTPException(503, "Manufacturing PostgreSQL configuration unavailable") from None

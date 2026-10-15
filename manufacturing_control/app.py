@@ -645,6 +645,8 @@ def line_detail(client, plate, order):
                 + "</div>"
             )
         files(client, rev, plate, order, current, is_approved)
+        from .derived import show as derived_files
+        derived_files(client, rev, plate, current, is_approved)
     history(client, detail)
     with st.container(border=True, key=f"mc_card_source_{rev['id']}"):
         st.subheader(f"Sourcing · R{rev['number']}")

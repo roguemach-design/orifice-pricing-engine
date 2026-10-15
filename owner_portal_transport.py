@@ -108,6 +108,58 @@ class OwnerClient:
             raise PortalError("name")
         return response.content
 
+    def manufacturing_post(self, path, body):
+        if path not in (
+            "/admin/manufacturing/bundles",
+            "/admin/manufacturing/bundles/query",
+        ):
+            raise PortalError("missing")
+        if not self.credential:
+            raise PortalError("authorization")
+        try:
+            response = requests.post(
+                self.base + path,
+                json=body,
+                headers={"x-api-key": self.credential},
+                timeout=(10, 120),
+                allow_redirects=False,
+            )
+        except requests.RequestException:
+            raise PortalError("service") from None
+        if response.status_code != 200:
+            raise PortalError(
+                {
+                    401: "authorization",
+                    403: "authorization",
+                    404: "missing",
+                    409: "conflict",
+                    429: "rate",
+                }.get(response.status_code, "service")
+            )
+        try:
+            return response.json()
+        except ValueError:
+            raise PortalError("service") from None
+
+    def derived_artifact(self, bundle_id, artifact):
+        from urllib.parse import quote
+
+        response = self.get(
+            "/admin/manufacturing/bundles/"
+            + quote(bundle_id, safe="")
+            + "/files/"
+            + quote(artifact["name"], safe="")
+        )
+        if (
+            len(response.content) != artifact["size"]
+            or sha256(response.content).hexdigest() != artifact["sha256"]
+            or response.headers.get("X-Artifact-SHA256") != artifact["sha256"]
+            or response.headers.get("Content-Disposition")
+            != f'attachment; filename="{artifact["filename"]}"'
+        ):
+            raise PortalError("integrity")
+        return response.content
+
 
 def clear_owner_session(state):
     access = state.get("mc_download_access")
@@ -141,6 +193,20 @@ class DownloadAccess:
             raise RuntimeError("Download blocked: owner session is locked.")
         try:
             content = client.artifact(revision, kind, filename)
+        except PortalError as error:
+            raise RuntimeError("Download blocked: " + ERRORS[error.category]) from None
+        with self._lock:
+            if not self._active:
+                raise RuntimeError("Download blocked: owner session is locked.")
+        return content
+
+    def load_derived(self, bundle_id, artifact):
+        with self._lock:
+            client = self._client if self._active else None
+        if client is None:
+            raise RuntimeError("Download blocked: owner session is locked.")
+        try:
+            content = client.derived_artifact(bundle_id, artifact)
         except PortalError as error:
             raise RuntimeError("Download blocked: " + ERRORS[error.category]) from None
         with self._lock:
