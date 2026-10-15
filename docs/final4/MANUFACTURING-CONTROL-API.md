@@ -90,7 +90,10 @@ keys with existing storage hooks and are verified before metadata commit.
 Failure can leave unreferenced private objects; no partially committed bundle is
 returned. Reconcile orphans by an audited maintenance process, never ordinary GET.
 
-Production PostgreSQL migration is NOT applied. Before production integration,
+An unapplied SQL proposal is included at `docs/final4/postgres-additive-PROPOSAL.sql`;
+it requires an explicit existing schema, reuses its restricted backend role and
+immutability function, and enables/forces RLS on only the three new tables. It has
+not been executed against PostgreSQL. Production PostgreSQL migration is NOT applied. Before production integration,
 translate/install these additive tables in the existing private schema, equivalent
 immutability triggers, restricted table grants and appropriate RLS policies under
 the accepted service-role boundary. Verify with the production/staging adapter and
