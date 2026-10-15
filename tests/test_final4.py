@@ -217,6 +217,7 @@ def test_candidate_post_requires_independent_exact_fingerprint():
     p = replace(
         p, verified_by="SYNTHETIC ONLY", evidence={k: "TEST EVIDENCE" for k in CHECKS}
     )
+    r = replace(r, top_chamfer_width=0)
     b = engineering_bundle(r, p, params, {})
     a = {
         "programmer": "independent",
@@ -226,6 +227,7 @@ def test_candidate_post_requires_independent_exact_fingerprint():
         ),
         "input_sha256": json.loads(b["manifest.json"])["input_sha256"],
         "post_version": POST_VERSION,
+        "program_number": 1001,
     }
     candidate = post_candidate(
         r, p, params, {}, authorization=a, generator_actor="owner"
@@ -537,3 +539,92 @@ def test_staging_harness_authentication_and_exact_download(monkeypatch):
     monkeypatch.setenv("APP_ENV", "production")
     with pytest.raises(ValueError):
         create_app()
+
+
+def test_chamfer_orientation_bound_to_frozen_spec(system):
+    svc, a, r, s = system
+    s = replace(
+        s,
+        chamfer=True,
+        chamfer_width=0.01,
+        chamfer_angle_degrees=45,
+        chamfer_side="downstream",
+        flow_orientation="left-to-right",
+        chamfer_width_definition="radial-angle-from-face",
+    )
+    rev = svc.repo.create_revision(
+        a["plate_id"],
+        s,
+        expected_current=a["revision_id"],
+        reason="chamfer revision",
+        actor="owner",
+        source_snapshot={},
+    )
+    delivery = svc.repo.create_delivery(rev["id"])
+    svc.repo.approve(delivery["token"], "synthetic-customer")
+    a = {
+        **a,
+        "revision_id": rev["id"],
+        "spec_sha256": rev["spec_sha256"],
+        "source_sha256": rev["source_sha256"],
+    }
+    r = replace(
+        r,
+        top_chamfer_width=0.01,
+        drawing_revision="R2",
+        source_sha256=rev["spec_sha256"],
+    )
+    for ctx in (
+        None,
+        [],
+        {"top_face_side": "upstream", "fixture_orientation_reference": "test"},
+    ):
+        with pytest.raises(WorkflowError):
+            svc.create(
+                "HAAS",
+                a,
+                actor="owner",
+                reviewed_record={**asdict(r), "setup_context": ctx},
+            )
+    b = svc.create(
+        "HAAS",
+        a,
+        actor="owner",
+        reviewed_record={
+            **asdict(r),
+            "setup_context": {
+                "top_face_side": "downstream",
+                "fixture_orientation_reference": "TEST FIXTURE REVIEW",
+            },
+        },
+    )
+    raw = json.loads(svc.download(b["id"], "inputs.json")[2])
+    assert raw["setup_context"]["top_face_side"] == "downstream"
+
+
+def test_candidate_cannot_post_chamfer_without_face_context():
+    r, p, _, params = fixture_inputs()
+    p = replace(p, verified_by="SYNTHETIC", evidence={k: "TEST" for k in CHECKS})
+    b = engineering_bundle(r, p, params, {})
+    a = {
+        "programmer": "independent",
+        "evidence_reference": "TEST",
+        "profile_sha256": digest(
+            json.dumps(asdict(p), sort_keys=True, separators=(",", ":"))
+        ),
+        "input_sha256": json.loads(b["manifest.json"])["input_sha256"],
+        "post_version": POST_VERSION,
+        "program_number": 1001,
+    }
+    with pytest.raises(ValueError, match="holds"):
+        post_candidate(r, p, params, {}, authorization=a, generator_actor="owner")
+    for number in (True, 9000, 0):
+        with pytest.raises(ValueError, match="program number"):
+            post_candidate(
+                r,
+                p,
+                params,
+                {},
+                authorization={**a, "program_number": number},
+                generator_actor="owner",
+            )

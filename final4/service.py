@@ -114,7 +114,16 @@ class DerivedService:
             r, spec, _, _ = self._parent(db, association, require_current=True)
             parent = {**association, "revision": f"R{r['number']}"}
             if family == "HAAS":
-                record = construct(ReviewedRecord, reviewed_record)
+                record_data = dict(reviewed_record or {})
+                setup_context = record_data.pop("setup_context", None)
+                record = construct(ReviewedRecord, record_data)
+                if spec.chamfer and (
+                    not isinstance(setup_context, dict)
+                    or setup_context.get("top_face_side") != spec.chamfer_side
+                ):
+                    raise WorkflowError(
+                        "explicit physical top-face orientation must match chamfer side"
+                    )
                 expected = (
                     spec.finished_bore_diameter,
                     spec.bore_tolerance,
@@ -157,11 +166,16 @@ class DerivedService:
                 files = {
                     k: v.encode("ascii")
                     for k, v in engineering_bundle(
-                        record, self.profile, self.parameters, parent
+                        record,
+                        self.profile,
+                        self.parameters,
+                        parent,
+                        setup_context=setup_context,
                     ).items()
                 }
                 inputs = {
                     "record": asdict(record),
+                    "setup_context": setup_context,
                     "profile": asdict(self.profile),
                     "parameters": asdict(self.parameters),
                 }

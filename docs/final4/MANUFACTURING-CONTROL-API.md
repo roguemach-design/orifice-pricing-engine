@@ -110,3 +110,13 @@ Regression coverage: exact parent fields, spec mismatch, unapproved and supersed
 parents, concurrent append-only generation, storage length/hash failures, original
 revision identity, owner route protection, profile override rejection, synthetic
 staging startup/generation/download and absent release routes.
+
+For a chamfered machining request, `reviewed_record.setup_context` must contain
+`top_face_side` matching the frozen `chamfer_side` and a nonempty safe-ASCII
+`fixture_orientation_reference`. It is included in the input fingerprint and setup
+sheet. Missing/contradictory physical face orientation is rejected. Standalone
+chamfer review examples without this context stay on SETUP VERIFICATION REQUIRED.
+Offline candidate authorization also requires an explicit programmer-verified
+`program_number` in 1–8999; protected macro-number range is excluded. Verify slot
+availability on the real controller. The old guarded review O09001 is not an
+executable program assignment for the shop.

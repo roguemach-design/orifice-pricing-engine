@@ -103,10 +103,24 @@ def verify_geometry(record, profile, geometry):
     }
 
 
-def engineering_bundle(record, profile, parameters, parent):
+def engineering_bundle(record, profile, parameters, parent, *, setup_context=None):
     if not 0.125 <= record.thickness <= 0.5:
         raise ValueError("engineering thickness scope .125-.500 inch")
     g = plan(record, profile, parameters)
+    if setup_context is not None:
+        if set(setup_context) != {
+            "top_face_side",
+            "fixture_orientation_reference",
+        } or setup_context["top_face_side"] not in ("upstream", "downstream"):
+            raise ValueError("explicit fixture orientation context required")
+        label(
+            "fixture_orientation_reference",
+            setup_context["fixture_orientation_reference"],
+        )
+    if record.top_chamfer_width and setup_context is None:
+        g["holds"].append(
+            "verify chamfer top face against drawing and fixture orientation"
+        )
     verification = verify_geometry(record, profile, g)
     files = generate(
         record, profile, parameters
@@ -114,6 +128,7 @@ def engineering_bundle(record, profile, parameters, parent):
     inputs = {
         **snapshot(record, profile),
         "parameters": asdict(parameters),
+        "setup_context": setup_context,
         "parent": parent,
         "generator_version": VERSION,
         "post_version": POST_VERSION,
@@ -143,6 +158,9 @@ def engineering_bundle(record, profile, parameters, parent):
     files[
         "setup.md"
     ] += f"\nEngineering version: {VERSION}\nInput fingerprint: {fingerprint}\nParent: {json.dumps(parent,sort_keys=True)}\n"
+    files[
+        "setup.md"
+    ] += f"\nFixture orientation context: {json.dumps(setup_context,sort_keys=True)}\n"
     files["verification.json"] = (
         json.dumps(verification, sort_keys=True, indent=2) + "\n"
     )
@@ -191,7 +209,14 @@ def engineering_bundle(record, profile, parameters, parent):
 
 
 def post_candidate(
-    record, profile, parameters, parent, *, authorization, generator_actor
+    record,
+    profile,
+    parameters,
+    parent,
+    *,
+    authorization,
+    generator_actor,
+    setup_context=None,
 ):
     """Offline trusted programmer workflow, never exposed by HTTP.
 
@@ -206,12 +231,20 @@ def post_candidate(
         "input_sha256",
         "profile_sha256",
         "post_version",
+        "program_number",
     }
     if set(authorization) != required:
         raise ValueError("complete independent programmer authorization required")
+    if (
+        type(authorization["program_number"]) is not int
+        or not 1 <= authorization["program_number"] <= 8999
+    ):
+        raise ValueError("explicit verified nonreserved program number required")
     for key in ("programmer", "evidence_reference"):
         label(key, authorization[key])
-    bundle = engineering_bundle(record, profile, parameters, parent)
+    bundle = engineering_bundle(
+        record, profile, parameters, parent, setup_context=setup_context
+    )
     manifest = json.loads(bundle["manifest.json"])
     if (
         authorization["programmer"] == generator_actor
@@ -223,13 +256,13 @@ def post_candidate(
             "authorization identity or exact input/post fingerprint mismatch"
         )
     g = plan(record, profile, parameters)
-    if g["holds"]:
+    if json.loads(bundle["readiness.json"])["holds"]:
         raise ValueError("unresolved engineering holds")
     # Deliberately distinct from review NC; absence of alarm is not release authority.
     nc = "\n".join(
         [
             "%",
-            "O09001",
+            f"O{authorization['program_number']:05d}",
             "(PROVE OUT CANDIDATE - NOT MANUFACTURING APPROVED)",
             f"(INPUT SHA256 {manifest['input_sha256']})",
             "M00",
