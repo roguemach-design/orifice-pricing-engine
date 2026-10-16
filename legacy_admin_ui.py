@@ -377,9 +377,11 @@ st.dataframe(df[show_cols], use_container_width=True, hide_index=True, height=_d
 order_ids = df["id"].tolist() if "id" in df.columns else []
 order_labels = []
 for _, row in df.iterrows():
-    label = (row.get("order_number_display") or "").strip() or row.get("id", "")
-    email = (row.get("customer_email") or "").strip()
-    created = (row.get("created_at") or "").strip()
+    def label_text(value):
+        return value.strip() if isinstance(value, str) else ""
+    label = label_text(row.get("order_number_display")) or label_text(row.get("id"))
+    email = label_text(row.get("customer_email"))
+    created = label_text(row.get("created_at"))
     order_labels.append(f"{label} — {email} — {created}")
 
 selected = st.selectbox("Select an order", options=list(range(len(order_ids))), format_func=lambda i: order_labels[i])

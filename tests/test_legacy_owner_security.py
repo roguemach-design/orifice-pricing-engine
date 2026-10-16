@@ -153,3 +153,18 @@ def test_redirect_does_not_authenticate(setup, monkeypatch):
     monkeypatch.setattr(auth.requests, 'get', lambda *a, **kw: Mock(status_code=302))
     a = unlock(app())
     assert not a.exception and 'legacy_owner_session' not in a.session_state
+
+def test_historical_orders_with_missing_display_fields_render(setup, monkeypatch):
+    original = auth.requests.request
+    def request(method, url, **kwargs):
+        if url.endswith('/admin/orders'):
+            r = Mock(status_code=200)
+            r.json.return_value = [
+                {'id': 'synthetic-a', 'order_number_display': None, 'customer_email': None, 'created_at': None},
+                {'id': 'synthetic-b', 'order_number_display': 'OP-TEST', 'customer_email': 'fixture@example.test', 'created_at': '2026-01-01T00:00:00Z'}]
+            return r
+        return original(method, url, **kwargs)
+    monkeypatch.setattr(auth.requests, 'request', request)
+    a = unlock(app())
+    assert not a.exception
+    assert next(s for s in a.selectbox if s.label == 'Select an order')
