@@ -132,6 +132,8 @@ class _InMemoryRateLimiter:
 
 _RATE_LIMITER = _InMemoryRateLimiter()
 
+from pricing_configuration import PROCESS_KEYS, project as project_config, version as config_version, validate as validate_config
+
 # Snapshot of file-based defaults so we can restore after applying DB overrides
 _CFG_BASELINE = {
     "PRICE_PER_SQ_IN": copy.deepcopy(getattr(cfg, "PRICE_PER_SQ_IN", {})),
@@ -146,6 +148,7 @@ _CFG_BASELINE = {
     "MAX_BORE_DIA_IN": getattr(cfg, "MAX_BORE_DIA_IN", 19.0),
     "MAX_HANDLE_LABEL_CHARS": getattr(cfg, "MAX_HANDLE_LABEL_CHARS", 40),
 }
+_CFG_BASELINE.update({key.upper(): copy.deepcopy(getattr(cfg, key.upper())) for key in PROCESS_KEYS})
 
 
 # ----------------------------
@@ -660,6 +663,8 @@ def _get_or_seed_active_config(db) -> dict:
 
 
 def _restore_cfg_baseline() -> None:
+    for key in PROCESS_KEYS:
+        setattr(cfg, key.upper(), copy.deepcopy(_CFG_BASELINE[key.upper()]))
     cfg.PRICE_PER_SQ_IN = copy.deepcopy(_CFG_BASELINE["PRICE_PER_SQ_IN"])
     cfg.MATERIAL_ENABLED = copy.deepcopy(_CFG_BASELINE["MATERIAL_ENABLED"])
     cfg.THICKNESS_ENABLED_BY_MATERIAL = copy.deepcopy(_CFG_BASELINE["THICKNESS_ENABLED_BY_MATERIAL"])
@@ -681,6 +686,11 @@ def _apply_cfg_from_db_config(config_json: dict) -> None:
     - If DB is missing/empty price_per_sq_in, we fall back to baseline price table
       so /quote doesn't 500 from an empty cfg.PRICE_PER_SQ_IN.
     """
+    for key in PROCESS_KEYS:
+        value = copy.deepcopy(config_json.get(key, _CFG_BASELINE[key.upper()]))
+        if key == "inspection_mins_by_tol":
+            value = {float(k): v for k, v in value.items()}
+        setattr(cfg, key.upper(), value)
     material_enabled = config_json.get("material_enabled") or {}
     th_enabled_by_mat = config_json.get("thickness_enabled_by_material") or {}
     lt_enabled = config_json.get("lead_time_enabled") or {}
@@ -772,7 +782,7 @@ def _apply_cfg_from_db_config(config_json: dict) -> None:
     cfg.PRICE_PER_SQ_IN = final_ppsi
 
     # Lead time multiplier: filter baseline master by enabled keys
-    master_lt = copy.deepcopy(_CFG_BASELINE.get("LEAD_TIME_MULTIPLIER") or getattr(cfg, "LEAD_TIME_MULTIPLIER", {}))
+    master_lt = {int(k): v for k, v in config_json.get("lead_time_multipliers", _CFG_BASELINE["LEAD_TIME_MULTIPLIER"]).items()}
     cfg.LEAD_TIME_MULTIPLIER = {
         int(d): float(master_lt[int(d)])
         for d, enabled in cfg.LEAD_TIME_ENABLED.items()
@@ -968,87 +978,99 @@ async def quote(request: Request):
 # ----------------------------
 # Admin config endpoints
 # ----------------------------
+def _config_snapshot(db):
+    active = _get_or_seed_active_config(db)
+    row = db.query(AppConfig).filter(AppConfig.id == "active").first()
+    return row, project_config(active, _CFG_BASELINE)
+
+
 @app.get("/admin/config", dependencies=[Depends(_rate_limit_admin)])
 def admin_get_config():
     _db_required()
-    db = SessionLocal()
+    with SessionLocal() as db:
+        row, active = _config_snapshot(db)
+        return {**active, "_version": config_version(row)}
+
+
+@app.get("/admin/config/editor", dependencies=[Depends(_rate_limit_admin)])
+def admin_config_editor():
+    _db_required()
+    with SessionLocal() as db:
+        row, active = _config_snapshot(db)
+        history = db.query(AppConfig).filter(AppConfig.id.like("pricing-history-%")).order_by(AppConfig.updated_at.desc()).limit(50).all()
+        return {"config": active, "version": config_version(row),
+                "defaults": project_config(_default_knobs_config(), _CFG_BASELINE),
+                "history": [{"id": item.id, "saved_at": item.updated_at.isoformat(),
+                             "config": project_config(item.config_json, _CFG_BASELINE)} for item in history]}
+
+
+async def _write_config(request, action):
+    _db_required()
     try:
-        active = _get_or_seed_active_config(db)
-        return active
-    finally:
-        db.close()
+        payload = await request.json()
+    except ValueError:
+        raise HTTPException(422, "Malformed JSON.") from None
+    if not isinstance(payload, dict):
+        raise HTTPException(422, "Configuration must be an object.")
+    expected = payload.pop("_version", None)
+    confirmation = payload.pop("_confirmation", None)
+    required_confirmation = {"save": "SAVE CHANGES", "reset": "RESET DEFAULTS", "restore": "RESTORE CONFIGURATION"}[action]
+    if not expected:
+        raise HTTPException(428, "Reload configuration before saving; a version is required.")
+    if confirmation != required_confirmation:
+        raise HTTPException(422, "Explicit change confirmation is required.")
+    with SessionLocal() as db:
+        row, active = _config_snapshot(db)
+        if config_version(row) != expected:
+            raise HTTPException(409, "Configuration changed in another session. Reload and review your changes.")
+        defaults = project_config(_default_knobs_config(), _CFG_BASELINE)
+        if action == "reset":
+            candidate = defaults
+        elif action == "restore":
+            prior_id = payload.get("history_id", "")
+            if not isinstance(prior_id, str) or not prior_id.startswith("pricing-history-"):
+                raise HTTPException(422, "Select a saved configuration.")
+            prior = db.query(AppConfig).filter(AppConfig.id == prior_id).first()
+            if not prior:
+                raise HTTPException(404, "Saved configuration not found.")
+            candidate = project_config(prior.config_json, _CFG_BASELINE)
+        else:
+            candidate = payload
+        try:
+            candidate = validate_config(candidate, defaults)
+        except (ValueError, TypeError, OverflowError) as exc:
+            raise HTTPException(422, str(exc)) from None
+        candidate["updated_by"] = "owner"
+        now = datetime.now(timezone.utc)
+        candidate["updated_at"] = now.isoformat()
+        previous = copy.deepcopy(row.config_json)
+        old_timestamp = row.updated_at
+        # Atomic compare-and-swap: works across API processes, not just threads.
+        count = db.query(AppConfig).filter(AppConfig.id == "active", AppConfig.updated_at == old_timestamp).update(
+            {AppConfig.config_json: candidate, AppConfig.updated_at: now}, synchronize_session=False)
+        if count != 1:
+            db.rollback()
+            raise HTTPException(409, "Configuration changed in another session. Reload and review your changes.")
+        db.add(AppConfig(id="pricing-history-" + str(uuid.uuid4()), config_json=previous, updated_at=now))
+        db.commit()
+        db.expire_all()
+        saved = db.query(AppConfig).filter(AppConfig.id == "active").first()
+        return {"ok": True, "config": saved.config_json, "version": config_version(saved)}
 
 
 @app.put("/admin/config", dependencies=[Depends(_rate_limit_admin)])
 async def admin_put_config(request: Request):
-    _db_required()
-    payload = await request.json()
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="Config must be a JSON object")
-
-    # Light validation
-    for k in ("material_enabled", "lead_time_enabled", "thickness_enabled_by_material", "price_per_sq_in"):
-        if k in payload and payload[k] is not None and not isinstance(payload[k], dict):
-            raise HTTPException(status_code=400, detail=f"{k} must be an object")
-
-    if "default_lead_time_days" in payload:
-        try:
-            payload["default_lead_time_days"] = int(payload["default_lead_time_days"])
-        except Exception:
-            raise HTTPException(status_code=400, detail="default_lead_time_days must be an integer")
-
-    for key in ("max_paddle_dia_in", "max_bore_dia_in"):
-        if key in payload:
-            try:
-                payload[key] = float(payload[key])
-            except Exception:
-                raise HTTPException(status_code=400, detail=f"{key} must be numeric")
-    if "max_handle_label_chars" in payload:
-        try:
-            payload["max_handle_label_chars"] = int(payload["max_handle_label_chars"])
-        except Exception:
-            raise HTTPException(status_code=400, detail="max_handle_label_chars must be an integer")
-
-    payload["updated_at"] = datetime.now(timezone.utc).isoformat()
-
-    db = SessionLocal()
-    try:
-        row = db.query(AppConfig).filter(AppConfig.id == "active").first()
-        if not row:
-            row = AppConfig(id="active", config_json=payload)
-            db.add(row)
-        else:
-            row.config_json = payload
-            row.updated_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(row)
-        return {"ok": True, "config": row.config_json}
-    finally:
-        db.close()
+    return await _write_config(request, "save")
 
 
 @app.post("/admin/config/reset", dependencies=[Depends(_rate_limit_admin)])
-def admin_reset_config():
-    """
-    Reset the DB 'active' config to the current file defaults (tuning_knobs.py baseline).
-    This is the escape hatch when DB config gets out of sync / missing price tables.
-    """
-    _db_required()
-    db = SessionLocal()
-    try:
-        fresh = _default_knobs_config()
-        row = db.query(AppConfig).filter(AppConfig.id == "active").first()
-        if not row:
-            row = AppConfig(id="active", config_json=fresh)
-            db.add(row)
-        else:
-            row.config_json = fresh
-            row.updated_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(row)
-        return {"ok": True, "config": row.config_json}
-    finally:
-        db.close()
+async def admin_reset_config(request: Request):
+    return await _write_config(request, "reset")
+
+
+@app.post("/admin/config/restore", dependencies=[Depends(_rate_limit_admin)])
+async def admin_restore_config(request: Request):
+    return await _write_config(request, "restore")
 
 
 def _checkout_recovery_reference(customer_id, idempotency_key, kind, *, owner_test=False):
@@ -1126,7 +1148,10 @@ def checkout_create(
     _db_required()
 
     inputs = QuoteInputs(**req.inputs.model_dump())
-    result = _calculate_quote_with_db_knobs(inputs)
+    try:
+        result = _calculate_quote_with_db_knobs(inputs)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
 
     if req.pricing_config_version and req.pricing_config_version != result.get("pricing_config_version"):
         raise HTTPException(
@@ -1269,10 +1294,17 @@ def checkout_cart_create(
     ship_nextday_cents = 0
 
     normalized_items = []
+    cart_config_version = None
 
     for it in req.items:
         inputs = QuoteInputs(**it.model_dump())
-        res = _calculate_quote_with_db_knobs(inputs)
+        try:
+            res = _calculate_quote_with_db_knobs(inputs)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+        if cart_config_version is not None and res.get("pricing_config_version") != cart_config_version:
+            raise HTTPException(409, "Pricing changed while calculating the cart. Review updated prices.")
+        cart_config_version = res.get("pricing_config_version")
 
         if (
             req.pricing_config_version

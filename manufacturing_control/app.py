@@ -839,7 +839,7 @@ def run():
     )
     html("<style>" + Path(__file__).with_name("style.css").read_text() + "</style>")
     html(
-        '<div class="mc-top"><span class="mc-mark">RM</span><div><div class="mc-brand">ROGUE MACHINE / O-PLATES</div><div class="mc-title">Manufacturing Control</div></div><span class="mc-session">Review-only &nbsp; · &nbsp; Owner session · shared key</span></div>'
+        '<div class="mc-top"><span class="mc-mark">RM</span><div><div class="mc-brand">ROGUE MACHINE / O-PLATES</div><div class="mc-title">Manufacturing Control</div></div><span class="mc-session">Owner operations &nbsp; · &nbsp; Owner session · shared key</span></div>'
     )
     if not ui_enabled():
         st.error("Owner portal environment binding is unavailable.")
@@ -863,12 +863,16 @@ def run():
                 "Held only in this browser session. Never saved to the address bar or local storage. No order data loads until unlocked."
             )
         return
+    # Preserve pricing widgets while another workspace is rendered.
+    for key in list(st.session_state):
+        if str(key).startswith("mc_price_"):
+            st.session_state[key] = st.session_state[key]
     with st.sidebar:
         st.caption("ROGUE MACHINE / O-PLATES")
         st.subheader("Manufacturing Control")
         st.radio(
             "Workspace",
-            ["Overview", "Orders", "Frozen Plates", "Sourcing records"],
+            ["Overview", "Orders", "Frozen Plates", "Sourcing records", "Pricing & Availability"],
             key="mc_nav",
             label_visibility="collapsed",
         )
@@ -883,11 +887,17 @@ def run():
             "Viewing never approves, regenerates, emails, records sourcing, submits to a vendor or releases manufacturing."
         )
         st.caption(
-            "Order archive is organizational only. Pricing settings remain in the separate legacy admin."
+            "Order archive is organizational only. Pricing changes require explicit review and confirmation."
         )
+    if st.session_state.get("mc_price_dirty") and st.session_state.get("mc_nav") != "Pricing & Availability":
+        st.warning("Unsaved Pricing & Availability changes are retained in this session. Return there to save or discard before closing.")
     st.button("Refresh", on_click=refresh)
     client = OwnerClient(os.environ.get("API_BASE", ""), st.session_state["mc_key"])
     try:
+        if st.session_state.get("mc_nav") == "Pricing & Availability":
+            from .pricing import run as pricing_workspace
+            pricing_workspace(client)
+            return
         archive_view = st.session_state.get("mc_archive_view", "Active")
         nav = st.session_state.get("mc_nav", "Overview")
         search = (
