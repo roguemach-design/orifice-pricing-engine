@@ -892,6 +892,14 @@ def run():
     html(
         '<div class="mc-top"><span class="mc-mark">RM</span><div><div class="mc-brand">ROGUE MACHINE / O-PLATES</div><div class="mc-title">Manufacturing Control</div></div><span class="mc-session">Owner operations &nbsp; · &nbsp; Owner session · shared key</span></div>'
     )
+    # Explicit replacement removes stale deferred-download fragments, including on Lock.
+    screen = st.empty()
+    screen.empty()
+    with screen.container():
+        render_owner()
+
+
+def render_owner():
     if not ui_enabled():
         st.error("Owner portal environment binding is unavailable.")
         return
@@ -959,47 +967,42 @@ def run():
         )
     st.sidebar.button("Refresh", on_click=refresh, width="stretch")
     client = OwnerClient(os.environ.get("API_BASE", ""), st.session_state["mc_key"])
-    # Clear the previous screen atomically, including deferred download fragments.
-    # Without this placeholder Streamlit can retain stale file controls across workspaces.
-    screen = st.empty()
-    screen.empty()
     try:
-        with screen.container():
-            if st.session_state.get("mc_nav") == "Pricing & Availability":
-                from .pricing import run as pricing_workspace
+        if st.session_state.get("mc_nav") == "Pricing & Availability":
+            from .pricing import run as pricing_workspace
 
-                pricing_workspace(client)
-                return
-            archive_view = st.session_state.get("mc_archive_view", "Active")
-            nav = st.session_state.get("mc_nav", "Overview")
-            search = (
-                st.session_state.get("mc_search", "")
-                if nav in ("Orders", "Sourcing records")
-                else ""
-            )
-            signature = (archive_view, search)
-            if st.session_state.get("mc_snapshot_signature") != signature:
-                st.session_state.pop("mc_snapshot", None)
-                st.session_state["mc_snapshot_signature"] = signature
-            if "mc_snapshot" not in st.session_state:
-                with st.spinner(
-                    "Loading order metadata… Files are not fetched until requested."
-                ):
-                    st.session_state["mc_snapshot"] = client.json(
-                        "/admin/manufacturing-summary",
-                        params={"archive_view": archive_view, "q": search},
-                    )
-            snapshot = st.session_state["mc_snapshot"]
-            selected = st.session_state.get("mc_order")
-            nav = st.session_state.get("mc_nav", "Overview")
-            if selected and nav == "Orders":
-                order_detail(client, selected, snapshot)
-            elif nav == "Overview":
-                overview(snapshot)
-            elif nav == "Frozen Plates":
-                inventory_workspace(client)
-            else:
-                orders_workspace(snapshot, sourcing=nav == "Sourcing records")
+            pricing_workspace(client)
+            return
+        archive_view = st.session_state.get("mc_archive_view", "Active")
+        nav = st.session_state.get("mc_nav", "Overview")
+        search = (
+            st.session_state.get("mc_search", "")
+            if nav in ("Orders", "Sourcing records")
+            else ""
+        )
+        signature = (archive_view, search)
+        if st.session_state.get("mc_snapshot_signature") != signature:
+            st.session_state.pop("mc_snapshot", None)
+            st.session_state["mc_snapshot_signature"] = signature
+        if "mc_snapshot" not in st.session_state:
+            with st.spinner(
+                "Loading order metadata… Files are not fetched until requested."
+            ):
+                st.session_state["mc_snapshot"] = client.json(
+                    "/admin/manufacturing-summary",
+                    params={"archive_view": archive_view, "q": search},
+                )
+        snapshot = st.session_state["mc_snapshot"]
+        selected = st.session_state.get("mc_order")
+        nav = st.session_state.get("mc_nav", "Overview")
+        if selected and nav == "Orders":
+            order_detail(client, selected, snapshot)
+        elif nav == "Overview":
+            overview(snapshot)
+        elif nav == "Frozen Plates":
+            inventory_workspace(client)
+        else:
+            orders_workspace(snapshot, sourcing=nav == "Sourcing records")
     except PortalError as error:
         show_error(error)
         st.button("Try again", on_click=refresh)
