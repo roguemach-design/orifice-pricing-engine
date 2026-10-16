@@ -1,0 +1,459 @@
+# admin_app.py
+import os
+from datetime import datetime
+from typing import Any, Dict, Optional
+
+import pandas as pd
+import requests
+import streamlit as st
+
+# IMPORTANT: set_page_config must be the first Streamlit call
+from legacy_owner_auth import require_owner, owner_request
+
+require_owner()
+
+st.title("O-Plates Admin Dashboard")
+st.caption("View recent orders stored in Postgres via the Orifice Pricing API.")
+
+# ----------------------------
+# Config
+# ----------------------------
+# ----------------------------
+# Helpers
+# ----------------------------
+def _df_height_for_rows(n: int) -> int:
+    if n <= 5:
+        return 220
+    if n <= 12:
+        return 340
+    return 480
+
+
+def _safe_dict(x) -> Dict[str, Any]:
+    return x if isinstance(x, dict) else {}
+
+
+def _kv_table(d: Dict[str, Any], order: Optional[list[str]] = None) -> pd.DataFrame:
+    """Render dict as a clean 2-col dataframe (Field / Value) in a stable order."""
+    rows: list[tuple[str, Any]] = []
+    if order:
+        for k in order:
+            if k in d:
+                rows.append((k, d.get(k, "")))
+        for k in d.keys():
+            if k not in order:
+                rows.append((k, d.get(k, "")))
+    else:
+        for k, v in d.items():
+            rows.append((k, v))
+
+    return pd.DataFrame(rows, columns=["Field", "Value"])
+
+
+def api_get(path: str, *, params: dict | None = None) -> requests.Response:
+    return owner_request("GET", path, params=params)
+
+
+def api_put(path: str, *, json_body: dict | None = None) -> requests.Response:
+    return owner_request("PUT", path, json=json_body)
+
+
+def api_post(path: str, *, json_body: dict | None = None) -> requests.Response:
+    return owner_request("POST", path, json=json_body)
+
+
+def _thickness_sort_key(x: str) -> float:
+    try:
+        return float(x)
+    except Exception:
+        return 0.0
+
+
+# ----------------------------
+# DEBUG OUTPUT (optional)
+# ----------------------------
+with st.sidebar:
+    debug = st.toggle("Debug mode", value=False)
+
+# ----------------------------
+# Pricing knobs (Admin-editable)
+# ----------------------------
+st.subheader("Pricing knobs")
+st.caption("Toggle materials / thickness / lead times without redeploy. Saved in Postgres via the API.")
+
+cfg_data: dict | None = None
+cfg_load_error: Optional[str] = None
+
+try:
+    r_cfg = api_get("/admin/config")
+    if r_cfg.status_code == 200:
+        if "legacy_config_snapshot" not in st.session_state:
+            st.session_state["legacy_config_snapshot"] = r_cfg.json() if isinstance(r_cfg.json(), dict) else None
+        cfg_data = st.session_state["legacy_config_snapshot"]
+        if cfg_data is None:
+            cfg_load_error = "Config response was not a JSON object."
+    elif r_cfg.status_code == 404:
+        cfg_load_error = "API does not have /admin/config yet. Deploy the updated api_app.py."
+    elif r_cfg.status_code == 401:
+        cfg_load_error = "Unauthorized (401). Check ADMIN_API_KEY."
+    else:
+        cfg_load_error = f"Failed to load config: HTTP {r_cfg.status_code}"
+except Exception as e:
+    cfg_load_error = "Pricing configuration could not be loaded."
+
+if st.button("Reload configuration (discards unsaved changes)"):
+    st.session_state.pop("legacy_config_snapshot", None)
+    st.rerun()
+
+if cfg_load_error:
+    st.warning(cfg_load_error)
+
+# ---- Reset button (escape hatch) ----
+r1, r2 = st.columns([1, 3])
+with r1:
+    reset_confirmation = st.text_input("Type RESET DEFAULTS to reset active pricing")
+    if st.button("♻️ Reset knobs to defaults", use_container_width=True, disabled=reset_confirmation != "RESET DEFAULTS" or not cfg_data):
+        try:
+            rr = api_post("/admin/config/reset", json_body={"_version": cfg_data.get("_version"), "_confirmation": "RESET DEFAULTS"})
+            if rr.status_code == 200:
+                st.success("Reset complete. Reloading…")
+                st.session_state.pop("legacy_config_snapshot", None)
+                st.rerun()
+            elif rr.status_code == 404:
+                st.error("API missing /admin/config/reset. Deploy the updated api_app.py.")
+            else:
+                st.error(f"Reset failed: {rr.status_code}")
+                if debug:
+                    st.caption("API response withheld for security.")
+        except Exception as e:
+            st.error("Reset request failed.")
+with r2:
+    st.caption("Use reset if the website isn't reflecting knob changes or pricing tables got out of sync.")
+
+if cfg_data:
+    material_enabled: dict = cfg_data.get("material_enabled", {}) or {}
+    thickness_enabled_by_material: dict = cfg_data.get("thickness_enabled_by_material", {}) or {}
+    lead_time_enabled: dict = cfg_data.get("lead_time_enabled", {}) or {}
+    default_lead_time_days = cfg_data.get("default_lead_time_days", 21)
+    price_per_sq_in: dict = cfg_data.get("price_per_sq_in", {}) or {}
+
+    # ---- Materials ----
+    st.markdown("### Availability")
+    st.markdown("**Materials**")
+
+    mats = sorted(material_enabled.keys())
+    new_material_enabled = dict(material_enabled)
+
+    if not mats:
+        st.info("No materials found in config.")
+    else:
+        mat_cols = st.columns(min(4, max(1, len(mats))))
+        for i, m in enumerate(mats):
+            with mat_cols[i % len(mat_cols)]:
+                new_material_enabled[m] = st.checkbox(
+                    m,
+                    value=bool(material_enabled.get(m, False)),
+                    key=f"mat_{m}",
+                )
+
+    # ---- Lead times ----
+    st.markdown("**Lead times (days)**")
+    lt_days = sorted([int(x) for x in lead_time_enabled.keys()]) if lead_time_enabled else []
+    new_lead_time_enabled = {str(d): bool(lead_time_enabled.get(str(d), False)) for d in lt_days}
+
+    if not lt_days:
+        st.info("No lead times found in config.")
+    else:
+        lt_cols = st.columns(min(4, max(1, len(lt_days))))
+        for i, d in enumerate(lt_days):
+            with lt_cols[i % len(lt_cols)]:
+                new_lead_time_enabled[str(d)] = st.checkbox(
+                    f"{d} days",
+                    value=bool(lead_time_enabled.get(str(d), False)),
+                    key=f"lt_{d}",
+                )
+
+    default_lead_time_days = st.number_input(
+        "Default lead time (days)",
+        min_value=1,
+        max_value=365,
+        value=int(default_lead_time_days) if str(default_lead_time_days).isdigit() else 21,
+        step=1,
+        key="default_lt",
+    )
+
+    # ---- Thickness by material ----
+    st.markdown("**Thickness by material**")
+    new_thickness_enabled_by_material: dict[str, dict[str, bool]] = {}
+
+    if not thickness_enabled_by_material:
+        st.info("No thickness map found in config.")
+    else:
+        for m in sorted(thickness_enabled_by_material.keys()):
+            tmap = thickness_enabled_by_material.get(m, {}) or {}
+            th_keys = sorted(tmap.keys(), key=lambda x: float(x))
+
+            with st.expander(f"{m} thickness availability", expanded=False):
+                th_cols = st.columns(min(4, max(1, len(th_keys))))
+                new_map = dict(tmap)
+                for i, t in enumerate(th_keys):
+                    label = f'{float(t):.3f}"'
+                    with th_cols[i % len(th_cols)]:
+                        new_map[t] = st.checkbox(
+                            label,
+                            value=bool(tmap.get(t, False)),
+                            key=f"th_{m}_{t}",
+                        )
+                new_thickness_enabled_by_material[m] = new_map
+
+    # ----------------------------
+    # NEW: Price table editor
+    # ----------------------------
+    st.markdown("### Price table ($ / sq in)")
+    st.caption("Edit pricing here to update quotes immediately (no redeploy).")
+
+    # Determine thickness columns from whatever exists in DB config
+    all_t = set()
+    for _m, tmap in price_per_sq_in.items():
+        if isinstance(tmap, dict):
+            for t in tmap.keys():
+                all_t.add(str(t))
+
+    thickness_cols = sorted(list(all_t), key=_thickness_sort_key)
+
+    new_price_per_sq_in: dict[str, dict[str, float]] = dict(price_per_sq_in)
+
+    if not price_per_sq_in:
+        st.warning("No `price_per_sq_in` found in config JSON. Use Reset to seed it from defaults.")
+    else:
+        materials = sorted(price_per_sq_in.keys())
+
+        # Build rectangular editor DF
+        rows = []
+        for m in materials:
+            row = {"material": m}
+            tmap = price_per_sq_in.get(m, {}) or {}
+            for t in thickness_cols:
+                v = tmap.get(t)
+                try:
+                    row[t] = float(v) if v is not None else None
+                except Exception:
+                    row[t] = None
+            rows.append(row)
+
+        df_prices = pd.DataFrame(rows)
+
+        edited = st.data_editor(
+            df_prices,
+            use_container_width=True,
+            num_rows="fixed",
+            column_config={
+                "material": st.column_config.TextColumn("Material", disabled=True),
+                **{
+                    t: st.column_config.NumberColumn(
+                        f'{float(t):.3f}"',
+                        min_value=0.0,
+                        step=0.0001,
+                    )
+                    for t in thickness_cols
+                },
+            },
+            key="price_table_editor",
+        )
+
+        # Convert editor DF -> dict[str][str] = float
+        new_price_per_sq_in = {}
+        for _, r in edited.iterrows():
+            mat = str(r["material"])
+            new_price_per_sq_in[mat] = {}
+            for t in thickness_cols:
+                val = r.get(t)
+                if val is None or (isinstance(val, float) and pd.isna(val)):
+                    continue
+                try:
+                    new_price_per_sq_in[mat][str(t)] = float(val)
+                except Exception:
+                    pass
+
+    # ---- Save ----
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        save_confirmed = st.checkbox("I confirm these changes affect future pricing and availability")
+        save_cfg = st.button("💾 Save pricing knobs", type="primary", use_container_width=True, disabled=not save_confirmed)
+    with c2:
+        st.caption("Tip: uncheck a lead time to remove it from quoting immediately (no redeploy).")
+
+    if save_cfg:
+        payload = dict(cfg_data)
+        payload["_confirmation"] = "SAVE CHANGES"
+
+        if mats:
+            payload["material_enabled"] = new_material_enabled
+        if lt_days:
+            payload["lead_time_enabled"] = new_lead_time_enabled
+        payload["default_lead_time_days"] = int(default_lead_time_days)
+
+        if thickness_enabled_by_material:
+            payload["thickness_enabled_by_material"] = new_thickness_enabled_by_material
+
+        # NEW: save updated price table
+        payload["price_per_sq_in"] = new_price_per_sq_in
+
+        try:
+            r_save = api_put("/admin/config", json_body=payload)
+            if r_save.status_code == 200:
+                st.success("Saved. New settings apply immediately for pricing/checkout.")
+                st.session_state.pop("legacy_config_snapshot", None)
+                st.rerun()
+            elif r_save.status_code == 401:
+                st.error("Unauthorized (401) saving config. Check ADMIN_API_KEY.")
+                if debug:
+                    st.caption("API response withheld for security.")
+            else:
+                st.error(f"Failed to save: {r_save.status_code}")
+                if debug:
+                    st.caption("API response withheld for security.")
+        except Exception as e:
+            st.error("Save request failed.")
+
+    if debug:
+        st.subheader("DEBUG: /admin/config raw")
+        st.json(cfg_data)
+
+st.divider()
+
+# ----------------------------
+# Orders viewer
+# ----------------------------
+st.subheader("Orders")
+
+colA, colB, colC = st.columns([2, 1, 1])
+with colA:
+    q = st.text_input("Search (email / session id / order id)", value="")
+with colB:
+    limit = st.number_input("Limit", min_value=1, max_value=200, value=50, step=1)
+with colC:
+    refresh = st.button("🔄 Refresh", use_container_width=True)
+
+params = {"q": q.strip(), "limit": int(limit)} if q.strip() else {"limit": int(limit)}
+
+try:
+    r = api_get("/admin/orders", params=params)
+    if r.status_code != 200:
+        st.error(f"API error: {r.status_code}")
+        if debug:
+            st.caption("API response withheld for security.")
+        st.stop()
+    orders = r.json()
+except Exception as e:
+    st.error("Orders could not be loaded.")
+    st.stop()
+
+if debug:
+    st.subheader("DEBUG: Orders response type")
+    st.write(type(orders))
+    st.subheader("DEBUG: First order JSON")
+    st.json(orders[0] if isinstance(orders, list) and orders else {"note": "No orders returned"})
+
+if not orders:
+    st.info("No orders found.")
+    st.stop()
+
+df = pd.DataFrame(orders)
+
+for c in ["created_at", "amount_total_usd", "amount_shipping_usd"]:
+    if c not in df.columns:
+        df[c] = None
+
+try:
+    df["created_at_dt"] = pd.to_datetime(df["created_at"], errors="coerce")
+    df = df.sort_values("created_at_dt", ascending=False).drop(columns=["created_at_dt"])
+except Exception:
+    pass
+
+show_cols = [c for c in ["order_number_display", "created_at", "customer_email", "amount_total_usd", "shipping_service"] if c in df.columns]
+st.dataframe(df[show_cols], use_container_width=True, hide_index=True, height=_df_height_for_rows(len(df)))
+
+order_ids = df["id"].tolist() if "id" in df.columns else []
+order_labels = []
+for _, row in df.iterrows():
+    label = (row.get("order_number_display") or "").strip() or row.get("id", "")
+    email = (row.get("customer_email") or "").strip()
+    created = (row.get("created_at") or "").strip()
+    order_labels.append(f"{label} — {email} — {created}")
+
+selected = st.selectbox("Select an order", options=list(range(len(order_ids))), format_func=lambda i: order_labels[i])
+order_id = order_ids[selected]
+
+st.subheader("Order detail")
+
+try:
+    r2 = api_get(f"/admin/orders/{order_id}")
+    if r2.status_code != 200:
+        st.error(f"API error: {r2.status_code}")
+        if debug:
+            st.caption("API response withheld for security.")
+        st.stop()
+    detail = r2.json()
+except Exception as e:
+    st.error("Order detail could not be loaded.")
+    st.stop()
+
+top_order = _safe_dict(detail)
+order_df = _kv_table(
+    top_order,
+    order=[
+        "order_number_display",
+        "created_at",
+        "customer_email",
+        "amount_subtotal_usd",
+        "amount_shipping_usd",
+        "amount_total_usd",
+        "shipping_service",
+        "shipping_name",
+        "stripe_session_id",
+        "stripe_payment_intent",
+        "customer_id",
+        "id",
+    ],
+)
+
+st.dataframe(order_df, use_container_width=True, hide_index=True, height=_df_height_for_rows(len(order_df)))
+
+quote_payload = _safe_dict(detail.get("quote_payload"))
+if quote_payload:
+    st.subheader("Quote payload")
+
+    if "cart_items" in quote_payload and isinstance(quote_payload["cart_items"], list):
+        cart_items = quote_payload["cart_items"]
+        st.caption(f"Cart items: {len(cart_items)}")
+        items_df = pd.DataFrame(cart_items)
+        st.dataframe(items_df, use_container_width=True, hide_index=True, height=_df_height_for_rows(len(items_df)))
+    else:
+        inputs_df = _kv_table(
+            quote_payload,
+            order=[
+                "quantity",
+                "material",
+                "thickness",
+                "handle_width",
+                "handle_length_from_bore",
+                "paddle_dia",
+                "bore_dia",
+                "bore_tolerance",
+                "chamfer",
+                "chamfer_width",
+                "handle_label",
+                "ships_in_days",
+            ],
+        )
+
+        st.dataframe(
+            inputs_df,
+            use_container_width=True,
+            hide_index=True,
+            height=_df_height_for_rows(len(inputs_df)),
+        )
+
+with st.expander("Show full order JSON"):
+    st.json(detail)
