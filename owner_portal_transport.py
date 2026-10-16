@@ -88,6 +88,27 @@ class OwnerClient:
         except ValueError:
             raise PortalError("service") from None
 
+    def config_write(self, action, body):
+        import streamlit as st
+        if action not in ("save", "reset", "restore") or not self.credential:
+            raise PortalError("authorization")
+        path = "/admin/config" + ("" if action == "save" else "/" + action)
+        try:
+            response = requests.request(
+                "PUT" if action == "save" else "POST", self.base + path,
+                headers={"x-api-key": self.credential}, json=body,
+                timeout=(10, 30), allow_redirects=False,
+            )
+        except requests.RequestException:
+            st.error("Save outcome could not be confirmed. Reload the active configuration before retrying; your draft is retained.")
+            return None
+        if response.status_code in (409, 422, 428):
+            st.error(response.json().get("detail", "Configuration was not saved."))
+            return None
+        if response.status_code != 200:
+            raise PortalError({401: "authorization", 403: "authorization", 429: "rate"}.get(response.status_code, "service"))
+        return response.json()
+
     def artifact(self, revision, kind, filename):
         rid = revision["id"]
         path = f"/admin/frozen-plates/revisions/{rid}/" + (
