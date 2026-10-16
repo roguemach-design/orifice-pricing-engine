@@ -323,9 +323,9 @@ def test_owner_editor_unsaved_state_and_navigation(monkeypatch):
     ).run()
     assert not app.exception
     assert next(b for b in app.button if b.label == "Save Changes").disabled
-    next(n for n in app.number_input if n.label == "Shop rate · $ / hour").set_value(
-        175
-    ).run()
+    next(
+        n for n in app.number_input if n.label == "Shop labor rate · $ / hour"
+    ).set_value(175).run()
     assert app.session_state["mc_price_dirty"]
     assert not writes
     next(r for r in app.radio if r.label == "Workspace").set_value("Overview").run()
@@ -334,7 +334,9 @@ def test_owner_editor_unsaved_state_and_navigation(monkeypatch):
         "Pricing & Availability"
     ).run()
     assert (
-        next(n for n in app.number_input if n.label == "Shop rate · $ / hour").value
+        next(
+            n for n in app.number_input if n.label == "Shop labor rate · $ / hour"
+        ).value
         == 175
     )
     next(c for c in app.checkbox if c.label.startswith("I reviewed")).check().run()

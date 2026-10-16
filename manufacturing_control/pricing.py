@@ -12,10 +12,10 @@ LABELS = {
     "thickness_enabled_by_material": "Thickness availability by material",
     "price_per_sq_in": "Material price · $ / square inch",
     "lead_time_enabled": "Lead-time availability · days",
-    "lead_time_multipliers": "Lead-time multipliers",
+    "lead_time_multipliers": "Effective lead-time multipliers",
     "default_lead_time_days": "Default lead time · days",
     "laser_per_linear_in": "Laser cost · $ / linear inch",
-    "mill_labor_per_hr": "Shop rate · $ / hour",
+    "mill_labor_per_hr": "Shop labor rate · $ / hour",
     "mill_speed_ipm": "Bore machining speed · inches / minute",
     "chamfer_speed_ipm": "Chamfer speed · inches / minute",
     "load_time_mins": "Load time · minutes",
@@ -107,22 +107,38 @@ def run(client):
             LABELS["price_per_sq_in"], original["price_per_sq_in"], "mc_price_prices"
         )
     with tabs[2]:
-        for key in (
-            "laser_per_linear_in",
-            "mill_labor_per_hr",
-            "mill_speed_ipm",
-            "chamfer_speed_ipm",
-            "load_time_mins",
-        ):
-            draft[key] = st.number_input(
-                LABELS[key],
-                value=float(original[key]),
-                min_value=0.0,
-                format="%.6f",
-                key="mc_price_" + key,
+        rates, timing = st.columns(2, gap="large")
+        with rates:
+            st.subheader("Shop & cutting rates")
+            for key in ("mill_labor_per_hr", "laser_per_linear_in"):
+                draft[key] = st.number_input(
+                    LABELS[key],
+                    value=float(original[key]),
+                    min_value=0.0,
+                    format="%.4f",
+                    key="mc_price_" + key,
+                )
+            st.subheader("Effective lead-time multipliers")
+            draft["lead_time_multipliers"] = edit_map(
+                "Days → effective multiplier",
+                original["lead_time_multipliers"],
+                "mc_price_lead_time_multipliers",
             )
-        for key in ("inspection_mins_by_tol", "lead_time_multipliers"):
-            draft[key] = edit_map(LABELS[key], original[key], "mc_price_" + key)
+        with timing:
+            st.subheader("Machining & handling times")
+            for key in ("mill_speed_ipm", "chamfer_speed_ipm", "load_time_mins"):
+                draft[key] = st.number_input(
+                    LABELS[key],
+                    value=float(original[key]),
+                    min_value=0.0,
+                    format="%.4f",
+                    key="mc_price_" + key,
+                )
+            draft["inspection_mins_by_tol"] = edit_map(
+                LABELS["inspection_mins_by_tol"],
+                original["inspection_mins_by_tol"],
+                "mc_price_inspection_mins_by_tol",
+            )
         st.markdown("**Quantity discount tiers**")
         st.caption(
             "Start at quantity 1; quantities increase and multipliers decrease. A multiplier of 0.97 means 3% off."

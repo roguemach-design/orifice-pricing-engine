@@ -79,6 +79,7 @@ def unlock():
 
 def lock():
     clear_owner_session(st.session_state)
+    st.query_params.clear()
 
 
 def refresh():
@@ -92,11 +93,68 @@ def refresh():
 def open_order(order_id):
     st.session_state["mc_order"] = order_id
     st.session_state["mc_nav"] = "Orders"
+    st.query_params.clear()
 
 
 def nav_to(value):
     st.session_state["mc_nav"] = value
     st.session_state.pop("mc_order", None)
+    sync_navigation()
+
+
+def open_plate(plate_id):
+    st.session_state["mc_plate"] = plate_id
+    st.session_state["mc_nav"] = "Frozen Plates"
+    sync_navigation()
+
+
+def sync_navigation():
+    # Selection only; credentials and customer details never enter the URL.
+    st.query_params.clear()
+    if st.session_state.get("mc_nav") == "Frozen Plates" and st.session_state.get(
+        "mc_plate"
+    ):
+        st.query_params["plate"] = st.session_state["mc_plate"]
+
+
+def order_table(orders, key):
+    """Compact selectable rows; server callbacks retain owner authorization."""
+    with st.container(key="mc_table_" + key):
+        cols = st.columns([1.1, 1.8, 1, 0.8, 0.6, 1.4, 0.8])
+        for col, label in zip(
+            cols,
+            [
+                "Order",
+                "Customer",
+                "Date",
+                "Mode",
+                "Plates",
+                "Drawing approval",
+                "Archive",
+            ],
+        ):
+            col.markdown("**" + label + "**")
+        for order in orders:
+            cols = st.columns([1.1, 1.8, 1, 0.8, 0.6, 1.4, 0.8])
+            cols[0].button(
+                order.get("order_number_display") or order["id"],
+                key=key + order["id"],
+                on_click=open_order,
+                args=(order["id"],),
+                width="stretch",
+            )
+            for col, value in zip(
+                cols[1:],
+                [
+                    order.get("customer_email") or "Unavailable",
+                    (order.get("created_at") or "")[:10] or "Unavailable",
+                    order.get("payment_mode") or "UNKNOWN",
+                    str(len(order.get("lines", []))),
+                    row_approval(order),
+                    "Archived" if order.get("owner_archived_at") else "Active",
+                ],
+            ):
+                col.write(value)
 
 
 def table(rows, headings):
@@ -125,16 +183,17 @@ def row_approval(order):
 
 
 def scope(snapshot):
-    st.warning("Partial scope · " + snapshot["scope"])
     st.caption(
-        "Snapshot "
+        "Scope: "
+        + snapshot["scope"]
+        + " · "
         + stamp(snapshot["snapshot_at"])
-        + ". Filters and pagination apply only to this loaded snapshot. Counts are line records, not manufacturing releases. Email reconciliation is loaded per revision on request."
+        + ". Filters cover this bounded snapshot."
     )
 
 
 def overview(snapshot):
-    st.title("Overview")
+    st.title("Rogue Command Center")
     st.caption(
         "Where every plate stands between customer approval and routing. Nothing here changes a record."
     )
@@ -142,30 +201,33 @@ def overview(snapshot):
     counts = snapshot["counts"]
     metrics = [
         (
+            "Recent orders",
+            len(snapshot["orders"]),
+            "Completed orders in the loaded scope",
+        ),
+        (
             "Awaiting customer approval",
-            counts["awaiting_approval"],
-            "Current revision metadata; not yet approved",
+            sum(
+                any(l["metadata_available"] and not l["approved"] for l in o["lines"])
+                for o in snapshot["orders"]
+            ),
+            "Orders with an unapproved current plate",
         ),
         (
-            "Approved · current revision",
+            "Approved Frozen Plates",
             counts["approved"],
-            "Matching PDF/spec approval evidence; files not yet verified",
+            "Current PDF/spec approval evidence",
         ),
         (
-            "Ready for release",
-            counts["ready_for_release"],
-            "Stored routing readiness only — not released",
-        ),
-        (
-            "Sourcing recorded",
-            counts["sourcing_recorded"],
-            "Line records with review notes; never sent",
-        ),
-        ("HOLD tracking", "—", "Unavailable: no durable HOLD reason is stored"),
-        (
-            "Email needs reconciliation",
-            "—",
-            "Load provider evidence on the selected revision",
+            "Owner attention",
+            sum(
+                not o["lines"]
+                or any(
+                    not l["metadata_available"] or not l["approved"] for l in o["lines"]
+                )
+                for o in snapshot["orders"]
+            ),
+            "Missing records or approval outstanding",
         ),
     ]
     html(
@@ -176,48 +238,29 @@ def overview(snapshot):
         )
         + "</div>"
     )
-    left, right = st.columns([1, 1.4], gap="medium")
-    with left, st.container(border=True, key="mc_card_attention"):
-        st.subheader("Needs attention")
+    st.subheader("Recent orders")
+    order_table(snapshot["orders"][:6], "mc_recent_")
+    st.button("View all loaded orders", on_click=nav_to, args=("Orders",))
+    with st.expander("Owner attention · approval and missing records", expanded=True):
         attention = [
             o
             for o in snapshot["orders"]
-            if not o["lines"] or any(not l["approved"] for l in o["lines"])
+            if not o["lines"]
+            or any(not l["approved"] or not l["metadata_available"] for l in o["lines"])
         ]
-        if not attention:
-            st.caption(
-                "No approval or missing-record issues within this snapshot. Email status has not been checked."
+        if attention:
+            table(
+                [
+                    (o.get("order_number_display") or o["id"], row_approval(o))
+                    for o in attention[:6]
+                ],
+                ["Order", "Review needed"],
             )
-        for order in attention[:6]:
-            html(
-                chip(
-                    "Record unavailable" if not order["lines"] else "Review approval",
-                    "wait",
-                )
-            )
-            st.button(
-                order.get("order_number_display") or order["id"],
-                key="mc_attention_" + order["id"],
-                on_click=open_order,
-                args=(order["id"],),
-                width="stretch",
-            )
-    with right, st.container(border=True, key="mc_card_recent"):
-        st.subheader("Recent completed orders")
-        for order in snapshot["orders"][:5]:
-            html(mode_chip(order.get("payment_mode")) + chip(row_approval(order)))
-            st.button(
-                order.get("order_number_display") or order["id"],
-                key="mc_recent_" + order["id"],
-                on_click=open_order,
-                args=(order["id"],),
-                width="stretch",
-            )
-        if not snapshot["orders"]:
-            st.info("No completed orders within the latest 200 records.")
-        st.button(
-            "View all loaded orders", on_click=nav_to, args=("Orders",), width="stretch"
-        )
+        else:
+            st.caption("No missing-record or approval issues in this scope.")
+    st.caption(
+        "File readiness is checked against stored artifact metadata in each plate workspace. Approval alone is not file verification or manufacturing release."
+    )
 
 
 def orders_workspace(snapshot, *, sourcing=False):
@@ -305,68 +348,28 @@ def orders_workspace(snapshot, *, sourcing=False):
     st.session_state["mc_page"] = page
     if not rows:
         st.info("No records match these filters within the loaded snapshot.")
-    for order in rows[(page - 1) * 10 : page * 10]:
-        with st.container(border=True, key=f"mc_card_order_{order['id']}"):
-            html(
-                mode_chip(order.get("payment_mode"))
-                + chip(
-                    row_approval(order),
-                    (
-                        "good"
-                        if order["lines"] and all(l["approved"] for l in order["lines"])
-                        else ""
-                    ),
-                )
+    sorting = st.selectbox(
+        "Sort orders",
+        ["Newest first", "Oldest first", "Order number", "Customer"],
+        key="mc_order_sort",
+    )
+    rows.sort(
+        key=lambda o: (
+            str(o.get("order_number_display") or o["id"])
+            if sorting == "Order number"
+            else (
+                str(o.get("customer_email") or "")
+                if sorting == "Customer"
+                else str(o.get("created_at") or "")
             )
-            st.button(
-                order.get("order_number_display") or order["id"],
-                key="mc_open_" + order["id"],
-                on_click=open_order,
-                args=(order["id"],),
-                width="stretch",
-            )
-            st.caption(
-                stamp(order.get("created_at"))
-                + " · "
-                + (order.get("customer_email") or "Customer unavailable")
-            )
-            table(
-                [
-                    (
-                        l["line_id"],
-                        l["material"],
-                        l["thickness"],
-                        l["quantity"],
-                        (
-                            f"R{l['revision_number']}"
-                            if l["revision_number"]
-                            else "Unavailable"
-                        ),
-                        (
-                            "Approved"
-                            if l["approved"]
-                            else (
-                                "Awaiting approval"
-                                if l["metadata_available"]
-                                else "Record unavailable"
-                            )
-                        ),
-                    )
-                    for l in order["lines"]
-                ],
-                [
-                    "Line",
-                    "Material",
-                    "Thickness (in)",
-                    "Quantity",
-                    "Current",
-                    "Approval",
-                ],
-            )
-            if not order["lines"]:
-                st.caption(
-                    "Manufacturing record unavailable. Viewing does not create a record."
-                )
+        ),
+        reverse=sorting == "Newest first",
+    )
+    order_table(rows[(page - 1) * 10 : page * 10], "mc_open_")
+    if sourcing:
+        st.caption(
+            "Rows contain stored sourcing evidence. Open an order's Sourcing section to review exact revision associations."
+        )
     st.caption(
         f"Showing {(page-1)*10+1 if rows else 0}–{min(page*10,len(rows))} of {len(rows)} matching orders in this snapshot"
     )
@@ -375,35 +378,67 @@ def orders_workspace(snapshot, *, sourcing=False):
 
 def inventory_workspace(client):
     st.title("Frozen Plates")
+    if st.session_state.get("mc_plate"):
+        plate_id = st.session_state["mc_plate"]
+        detail = client.json("/admin/frozen-plates/" + quote(plate_id, safe=""))
+        plate = detail["plate"]
+        if st.button("← Plate inventory"):
+            st.session_state.pop("mc_plate", None)
+            sync_navigation()
+            st.rerun()
+        st.caption("Plate " + plate["id"] + " · " + plate["line_id"])
+        order = {"id": plate["order_id"]}
+        try:
+            order = client.json("/admin/orders/" + quote(plate["order_id"], safe=""))
+        except PortalError as error:
+            if error.category != "missing":
+                raise
+            st.info(
+                "Associated order unavailable. Stored plate evidence remains accessible."
+            )
+        st.button(
+            "View Associated Order", on_click=open_order, args=(plate["order_id"],)
+        )
+        line_detail(client, plate, order)
+        return
     st.caption(
-        "Latest 200 Frozen Plate records, independent of the order snapshot. An order outside the snapshot is not proof of a missing order."
+        "Independent plate inventory · latest 200 records. Viewing never creates records or regenerates files."
     )
     if "mc_inventory" not in st.session_state:
         st.session_state["mc_inventory"] = client.json("/admin/frozen-plates")
-    plates = st.session_state["mc_inventory"]
     q = st.text_input(
         "Search plate, order ID or line", key="mc_plate_search"
     ).casefold()
-    for plate in plates:
-        if (
-            q
-            not in " ".join(
-                str(plate.get(k, "")) for k in ("id", "order_id", "line_id")
-            ).casefold()
-        ):
-            continue
-        with st.container(border=True, key=f"mc_card_plate_{plate['id']}"):
-            st.subheader(plate["line_id"])
-            st.caption("Plate " + plate["id"])
-            st.caption("Order " + plate["order_id"])
-            st.button(
-                "Review order and revisions",
-                key="mc_plate_" + plate["id"],
-                on_click=open_order,
-                args=(plate["order_id"],),
-            )
-    if not plates:
-        st.info("No Frozen Plate records available.")
+    plates = [
+        p
+        for p in st.session_state["mc_inventory"]
+        if q
+        in " ".join(str(p.get(k, "")) for k in ("id", "order_id", "line_id")).casefold()
+    ]
+    pages = max(1, math.ceil(len(plates) / 10))
+    page = st.number_input("Inventory page", min_value=1, max_value=pages, value=1)
+    for plate in plates[(page - 1) * 10 : page * 10]:
+        detail = client.json("/admin/frozen-plates/" + quote(plate["id"], safe=""))
+        rev = detail.get("revision")
+        cols = st.columns([1.1, 2, 2, 0.7, 1.2])
+        cols[0].button(
+            plate["line_id"],
+            key="mc_plate_" + plate["id"],
+            on_click=open_plate,
+            args=(plate["id"],),
+            width="stretch",
+        )
+        cols[1].caption("Plate " + plate["id"])
+        cols[2].caption("Order " + plate["order_id"])
+        cols[3].write(f"R{rev['number']}" if rev else "Unavailable")
+        cols[4].write(
+            "Approved"
+            if rev and approved(rev, detail.get("approvals", []))
+            else "Awaiting approval" if rev else "Revision unavailable"
+        )
+    st.caption(
+        f"{len(plates)} matching plates · select a line to review its exact revisions"
+    )
 
 
 def frozen_spec(rev):
@@ -424,66 +459,77 @@ def files(client, rev, plate, order, is_current, is_approved):
         (
             "pdf",
             "Finished-part drawing · PDF",
-            "Finished geometry · customer confirmation drawing",
+            "Exact stored customer drawing",
+        ),
+        (
+            "json",
+            "Frozen Plate specification · JSON",
+            "Exact stored immutable revision record",
         ),
         (
             "dxf",
-            "Rough-blank cut file · DXF",
-            "Bore 0.125 in undersize on diameter (0.0625 in per side)",
+            "Rough-blank steel cut file · DXF",
+            "Rough bore · 0.125 in diametral allowance",
         ),
     ]:
         artifact = rev.get("artifacts", {}).get(kind)
         with st.container(border=True, key=f"mc_card_file_{rev['id']}_{kind}"):
-            st.markdown("**" + title + "**")
-            st.caption(desc)
-            if not artifact:
-                st.caption("Artifact metadata unavailable.")
-                continue
-            st.caption(f"{artifact['size']:,} bytes · Integrity checked on download")
-            if kind == "dxf" and not (is_current and is_approved):
-                st.button("DXF locked", disabled=True, key="mc_locked_" + rev["id"])
-                st.caption(
-                    "Superseded revision — historical review only."
-                    if not is_current
-                    else "Current revision awaits matching customer PDF/spec approval."
-                )
-                continue
-            filename = artifact["filename"]
-            if kind == "dxf":
-                try:
-                    filename = dxf_delivery_name(
-                        spec,
-                        order.get("order_number_display"),
-                        plate["line_id"],
-                        rev["number"],
+            label_col, action_col = st.columns([1.45, 1], gap="small")
+            with label_col:
+                st.markdown("**" + title + "**")
+                st.caption(desc)
+            with action_col:
+                if not artifact:
+                    st.button(
+                        "Download " + kind.upper(),
+                        disabled=True,
+                        key=f"mc_missing_{rev['id']}_{kind}",
+                        width="stretch",
                     )
-                except ValueError:
+                    st.caption("Artifact metadata unavailable.")
+                    continue
+
+                if kind == "dxf" and not (is_current and is_approved):
+                    st.button("DXF locked", disabled=True, key="mc_locked_" + rev["id"])
                     st.caption(
-                        "Authoritative delivery name unavailable. Stored file is unchanged; DXF download blocked."
+                        "Superseded revision — historical review only."
+                        if not is_current
+                        else "Current revision awaits matching customer PDF/spec approval."
                     )
                     continue
-            st.write(filename)
-            if "mc_download_access" not in st.session_state:
-                st.session_state["mc_download_access"] = DownloadAccess(client)
-            st.download_button(
-                "Download " + kind.upper(),
-                data=download_callable(
-                    st.session_state["mc_download_access"], rev, kind, filename
-                ),
-                file_name=filename,
-                mime={
-                    "pdf": "application/pdf",
-                    "dxf": "application/dxf",
-                    "json": "application/json",
-                }[kind],
-                key=f"mc_save_{rev['id']}_{kind}",
-                type="primary" if kind == "dxf" else "secondary",
-                on_click="ignore",
-                width="stretch",
-            )
-    st.caption(
-        "Approval and metadata alone do not verify file bytes. Downloads do not release manufacturing."
-    )
+                filename = artifact["filename"]
+                if kind == "dxf":
+                    try:
+                        filename = dxf_delivery_name(
+                            spec,
+                            order.get("order_number_display"),
+                            plate["line_id"],
+                            rev["number"],
+                        )
+                    except ValueError:
+                        st.caption(
+                            "Authoritative delivery name unavailable. Stored file is unchanged; DXF download blocked."
+                        )
+                        continue
+                if "mc_download_access" not in st.session_state:
+                    st.session_state["mc_download_access"] = DownloadAccess(client)
+                st.download_button(
+                    "Download " + kind.upper(),
+                    data=download_callable(
+                        st.session_state["mc_download_access"], rev, kind, filename
+                    ),
+                    file_name=filename,
+                    help=filename,
+                    mime={
+                        "pdf": "application/pdf",
+                        "dxf": "application/dxf",
+                        "json": "application/json",
+                    }[kind],
+                    key=f"mc_save_{rev['id']}_{kind}",
+                    type="primary" if kind == "dxf" else "secondary",
+                    on_click="ignore",
+                    width="stretch",
+                )
 
 
 def history(client, detail):
@@ -560,7 +606,16 @@ def line_detail(client, plate, order):
             for r in revisions
             if r["id"] == i
         ),
+        index=next(
+            (
+                i
+                for i, r in enumerate(revisions)
+                if r["id"] == plate["current_revision"]
+            ),
+            0,
+        ),
         key="mc_revision_" + plate["id"],
+        label_visibility="collapsed",
     )
     detail = client.json(
         f"/admin/frozen-plates/{quote(plate['id'],safe='')}",
@@ -573,105 +628,118 @@ def line_detail(client, plate, order):
     current = rid == detail["plate"]["current_revision"]
     is_approved = approved(rev, detail.get("approvals", []))
     spec = frozen_spec(rev)
-    with st.container(border=True, key=f"mc_card_line_{rev['id']}"):
-        html(
-            f'<div class="mc-row"><h3>{text(plate["line_id"].replace("line-","Line "))}</h3>'
-            + chip(
-                f"{'Current' if current else 'Superseded'} R{rev['number']}",
-                "current" if current else "",
-            )
-            + chip(
-                "Approved" if is_approved else "Awaiting approval",
-                "good" if is_approved else "wait",
-            )
-            + "</div>"
-        )
-        if not current:
-            st.warning(
-                f"Viewing historical R{rev['number']}. Current revision differs. DXF is blocked."
-            )
-        vals = [
-            ("Material", spec.get("material")),
-            ("Thickness", f"{spec['thickness']} in" if spec.get("thickness") else None),
-            ("Quantity", spec.get("quantity")),
-            ("Finished OD", spec.get("finished_od")),
-            ("Finished bore", spec.get("finished_bore_diameter")),
-            (
-                "Handle · C/L to end × width",
-                (
-                    f"{spec['centerline_to_handle_end']} × {spec['handle_width']} in"
-                    if all(
-                        k in spec for k in ("centerline_to_handle_end", "handle_width")
-                    )
-                    else None
-                ),
-            ),
-            ("Bore tolerance", spec.get("bore_tolerance")),
-            (
-                "Chamfer",
-                (
-                    "No"
-                    if spec.get("chamfer") is False
-                    else (
-                        f"Yes · {spec.get('chamfer_width')} in"
-                        if spec.get("chamfer") is True and spec.get("chamfer_width")
-                        else "Unspecified"
-                    )
-                ),
-            ),
-            ("Handle hole", "Yes" if spec.get("handle_hole_enabled") else "No"),
-        ]
-        html(
-            '<div class="mc-specs">'
-            + "".join(
-                f'<div><div class="mc-label">{text(k)}</div><div class="mc-value">{text(v)}</div></div>'
-                for k, v in vals
-            )
-            + "</div>"
-        )
-        st.caption(
-            f"Values from frozen R{rev['number']} specification. Dimensions in inches; not the editable order payload."
-        )
-        if is_approved:
-            matches = [a for a in detail.get("approvals", []) if approved(rev, [a])]
-            html(
-                '<div class="mc-approved">Customer approved this exact PDF and specification · '
-                + text(stamp(matches[0].get("approved_at")))
-                + "</div>"
-            )
-        files(client, rev, plate, order, current, is_approved)
-        from .derived import show as derived_files
+    with st.container(key="mc_workspace"):
+        file_col, info_col = st.columns([1, 1.35], gap="medium")
+        with file_col, st.container(key="mc_files"):
+            files(client, rev, plate, order, current, is_approved)
+            from .derived import show as derived_files
 
-        derived_files(
-            client,
-            rev,
-            plate,
-            current,
-            is_approved,
-            frozen_audit=lambda: frozen_audit_files(client, rev, plate),
-        )
-    history(client, detail)
-    with st.container(border=True, key=f"mc_card_source_{rev['id']}"):
-        st.subheader(f"Sourcing · R{rev['number']}")
-        html(chip("Not released"))
-        sources = sorted(
-            detail.get("sourcing", []),
-            key=lambda s: s.get("selected_at") or "",
-            reverse=True,
-        )
-        if not sources:
-            st.info("No sourcing records for this revision.")
-        for source in sources:
-            pairs(
-                [
-                    ("Route", source.get("route")),
-                    ("State", source.get("selection_status")),
-                    ("Recorded", stamp(source.get("selected_at"))),
-                ]
+            config, bundles = derived_files(
+                client, rev, plate, current, is_approved, include_audit=False
             )
-        st.caption(
-            "Recorded for review only. Several routes may be present. Nothing is sent to SendCutSend, Alro or Rogue Internal from this portal."
-        )
+        with info_col:
+            with st.container(border=True, key=f"mc_card_line_{rev['id']}"):
+                html(
+                    f'<div class="mc-row"><h3>{text(plate["line_id"].replace("line-","Line "))}</h3>'
+                    + chip(
+                        f"{'Current' if current else 'Superseded'} R{rev['number']}",
+                        "current" if current else "",
+                    )
+                    + chip(
+                        "Approved" if is_approved else "Awaiting approval",
+                        "good" if is_approved else "wait",
+                    )
+                    + "</div>"
+                )
+                if not current:
+                    st.warning(
+                        f"Viewing historical R{rev['number']}. Current revision differs. DXF is blocked."
+                    )
+                vals = [
+                    ("Material", spec.get("material")),
+                    (
+                        "Thickness",
+                        f"{spec['thickness']} in" if spec.get("thickness") else None,
+                    ),
+                    ("Quantity", spec.get("quantity")),
+                    ("Finished OD", spec.get("finished_od")),
+                    ("Finished bore", spec.get("finished_bore_diameter")),
+                    (
+                        "Handle · C/L to end × width",
+                        (
+                            f"{spec['centerline_to_handle_end']} × {spec['handle_width']} in"
+                            if all(
+                                k in spec
+                                for k in ("centerline_to_handle_end", "handle_width")
+                            )
+                            else None
+                        ),
+                    ),
+                    ("Bore tolerance", spec.get("bore_tolerance")),
+                    (
+                        "Chamfer",
+                        (
+                            "No"
+                            if spec.get("chamfer") is False
+                            else (
+                                f"Yes · {spec.get('chamfer_width')} in"
+                                if spec.get("chamfer") is True
+                                and spec.get("chamfer_width")
+                                else "Unspecified"
+                            )
+                        ),
+                    ),
+                    ("Handle hole", "Yes" if spec.get("handle_hole_enabled") else "No"),
+                ]
+                html(
+                    '<div class="mc-specs">'
+                    + "".join(
+                        f'<div><div class="mc-label">{text(k)}</div><div class="mc-value">{text(v)}</div></div>'
+                        for k, v in vals
+                    )
+                    + "</div>"
+                )
+                st.caption(
+                    f"Values from frozen R{rev['number']} specification. Dimensions in inches; not the editable order payload."
+                )
+                if is_approved:
+                    matches = [
+                        a for a in detail.get("approvals", []) if approved(rev, [a])
+                    ]
+                    html(
+                        '<div class="mc-approved">Customer approved this exact PDF and specification · '
+                        + text(stamp(matches[0].get("approved_at")))
+                        + "</div>"
+                    )
+            with st.expander("Revision history & customer approval evidence"):
+                history(client, detail)
+            with st.expander(f"Sourcing · R{rev['number']}"):
+                st.subheader(f"Sourcing · R{rev['number']}")
+                html(chip("Not released"))
+                sources = sorted(
+                    detail.get("sourcing", []),
+                    key=lambda s: s.get("selected_at") or "",
+                    reverse=True,
+                )
+                if not sources:
+                    st.info("No sourcing records for this revision.")
+                for source in sources:
+                    pairs(
+                        [
+                            ("Route", source.get("route")),
+                            ("State", source.get("selection_status")),
+                            ("Recorded", stamp(source.get("selected_at"))),
+                        ]
+                    )
+                st.caption(
+                    "Recorded for review only. Several routes may be present. Nothing is sent to SendCutSend, Alro or Rogue Internal from this portal."
+                )
+
+            with st.expander("Manufacturing specification & audit evidence"):
+                frozen_audit_files(client, rev, plate)
+                from .derived import audit_details
+
+                audit_details(client, config, bundles)
 
 
 def frozen_audit_files(client, rev, plate):
@@ -695,27 +763,10 @@ def frozen_audit_files(client, rev, plate):
         )
     with st.expander("Frozen canonical specification"):
         st.json(frozen_spec(rev))
-    artifact = rev.get("artifacts", {}).get("json")
-    if artifact:
-        if "mc_download_access" not in st.session_state:
-            st.session_state["mc_download_access"] = DownloadAccess(client)
-        st.download_button(
-            "Download JSON",
-            data=download_callable(
-                st.session_state["mc_download_access"],
-                rev,
-                "json",
-                artifact["filename"],
-            ),
-            file_name=artifact["filename"],
-            mime="application/json",
-            on_click="ignore",
-            key="mc_save_" + rev["id"] + "_json",
-        )
 
 
 def order_detail(client, order_id, snapshot):
-    st.button("← Orders", on_click=nav_to, args=("Orders",))
+    st.sidebar.button("← Orders", on_click=nav_to, args=("Orders",))
     try:
         order = client.json("/admin/orders/" + quote(order_id, safe=""))
     except PortalError as error:
@@ -726,11 +777,14 @@ def order_detail(client, order_id, snapshot):
             "No matching order record. Existing Frozen Plate evidence remains reviewable; order details are unavailable."
         )
     plates = client.json("/admin/frozen-plates", params={"order_id": order_id})
-    st.title(order.get("order_number_display") or "Frozen Plate review")
     mode = order.get("payment_mode", "UNKNOWN")
     html(
-        mode_chip(mode)
-        + chip(order.get("status", "Order record unavailable").capitalize())
+        '<div class="mc-row"><h1>'
+        + text(order.get("order_number_display") or "Frozen Plate review")
+        + "</h1>"
+        + mode_chip(mode)
+        + chip(str(order.get("status") or "Order record unavailable").capitalize())
+        + "</div>"
     )
     if mode in ("TEST", "OWNER TEST"):
         html(
@@ -746,89 +800,86 @@ def order_detail(client, order_id, snapshot):
             + stamp(order["owner_archived_at"])
             + " · organizational only; manufacturing history retained"
         )
-    if order.get("status") == "completed" or mode in ("TEST", "OWNER TEST"):
-        if st.button(
-            "Unarchive order" if archived else "Archive order", key="mc_archive_action"
-        ):
-            try:
-                client.archive(order_id, not archived)
-                refresh()
-                st.rerun()
-            except PortalError as error:
-                show_error(error)
-    st.caption(
-        "Created "
-        + stamp(order.get("created_at"))
-        + " · Paid "
-        + stamp(order.get("paid_at"))
-    )
-    main, aside = st.columns([2.2, 1], gap="medium")
-    with main:
-        if not plates:
-            st.info(
-                "Manufacturing record unavailable. No files exist to download. Viewing does not create one. This is not a stored HOLD."
+    if not plates:
+        st.info(
+            "Manufacturing record unavailable. Viewing does not create records or files."
+        )
+    else:
+        if len(plates) == 1:
+            selected = plates[0]["id"]
+        else:
+            selected = st.selectbox(
+                "Plate / line",
+                [p["id"] for p in plates],
+                format_func=lambda i: next(
+                    p["line_id"] + " · " + p["id"] for p in plates if p["id"] == i
+                ),
+                key="mc_line_" + order_id,
             )
-        for plate in plates:
-            try:
-                line_detail(client, plate, order)
-            except PortalError as error:
-                show_error(error)
-    with aside:
-        with st.container(border=True, key="mc_card_order_record"):
-            st.subheader("Order record")
-            pairs(
-                [
-                    ("Order", order.get("order_number_display")),
-                    ("Status", order.get("status")),
-                    ("Payment mode", mode),
-                    ("Created", stamp(order.get("created_at"))),
-                    ("Paid", stamp(order.get("paid_at"))),
-                ]
-            )
-        with st.container(border=True, key="mc_card_customer"):
-            st.subheader("Customer")
-            st.caption("Customer contact from the order record")
-            st.write(order.get("customer_email") or "Email not provided")
-        with st.container(border=True, key="mc_card_shipping"):
-            st.subheader("Shipping")
-            address = order.get("shipping_address")
-            if isinstance(address, dict) and address:
-                st.write(order.get("shipping_name") or "Recipient not provided")
-                for field in (
-                    "line1",
-                    "line2",
-                    "city",
-                    "state",
-                    "postal_code",
-                    "country",
-                ):
-                    if address.get(field):
-                        st.write(str(address[field]))
-            else:
-                st.write("Not provided on this order.")
-            st.caption(
-                "Service: " + str(order.get("shipping_service") or "Not provided")
-            )
-            st.caption("Tracking, labels and fulfillment are not part of this portal.")
-        with st.container(border=True, key="mc_card_totals"):
-            st.subheader("Order totals")
+        line_detail(client, next(p for p in plates if p["id"] == selected), order)
+    with st.expander("Organize order · archive"):
+        if order.get("status") == "completed" or mode in ("TEST", "OWNER TEST"):
+            if st.button(
+                "Unarchive order" if archived else "Archive order",
+                key="mc_archive_action",
+            ):
+                try:
+                    client.archive(order_id, not archived)
+                    refresh()
+                    st.rerun()
+                except PortalError as error:
+                    show_error(error)
+    with st.expander("Order record"):
+        st.subheader("Order record")
+        pairs(
+            [
+                ("Order", order.get("order_number_display")),
+                ("Status", order.get("status")),
+                ("Payment mode", mode),
+                ("Created", stamp(order.get("created_at"))),
+                ("Paid", stamp(order.get("paid_at"))),
+            ]
+        )
+    with st.expander("Customer"):
+        st.subheader("Customer")
+        st.caption("Customer contact from the order record")
+        st.write(order.get("customer_email") or "Email not provided")
+    with st.expander("Shipping"):
+        st.subheader("Shipping")
+        address = order.get("shipping_address")
+        if isinstance(address, dict) and address:
+            st.write(order.get("shipping_name") or "Recipient not provided")
+            for field in (
+                "line1",
+                "line2",
+                "city",
+                "state",
+                "postal_code",
+                "country",
+            ):
+                if address.get(field):
+                    st.write(str(address[field]))
+        else:
+            st.write("Not provided on this order.")
+        st.caption("Service: " + str(order.get("shipping_service") or "Not provided"))
+        st.caption("Tracking, labels and fulfillment are not part of this portal.")
+    with st.expander("Order totals"):
+        st.subheader("Order totals")
 
-            def money(k):
-                value = order.get(k)
-                return (
-                    f"${value:,.2f}"
-                    if isinstance(value, (float, int))
-                    else "Unavailable"
-                )
-
-            pairs(
-                [
-                    ("Subtotal", money("amount_subtotal_usd")),
-                    ("Shipping", money("amount_shipping_usd")),
-                    ("Total", money("amount_total_usd")),
-                ]
+        def money(k):
+            value = order.get(k)
+            return (
+                f"${value:,.2f}" if isinstance(value, (float, int)) else "Unavailable"
             )
-            st.caption("Order-level totals only. Per-line prices are not split out.")
+
+        pairs(
+            [
+                ("Subtotal", money("amount_subtotal_usd")),
+                ("Shipping", money("amount_shipping_usd")),
+                ("Total", money("amount_total_usd")),
+            ]
+        )
+        st.caption("Order-level totals only. Per-line prices are not split out.")
 
 
 def run():
@@ -863,6 +914,9 @@ def run():
                 "Held only in this browser session. Never saved to the address bar or local storage. No order data loads until unlocked."
             )
         return
+    if "mc_nav" not in st.session_state and st.query_params.get("plate"):
+        st.session_state["mc_nav"] = "Frozen Plates"
+        st.session_state["mc_plate"] = st.query_params["plate"]
     # Preserve pricing widgets while another workspace is rendered.
     for key in list(st.session_state):
         if str(key).startswith("mc_price_"):
@@ -872,8 +926,15 @@ def run():
         st.subheader("Manufacturing Control")
         st.radio(
             "Workspace",
-            ["Overview", "Orders", "Frozen Plates", "Sourcing records", "Pricing & Availability"],
+            [
+                "Overview",
+                "Orders",
+                "Frozen Plates",
+                "Sourcing records",
+                "Pricing & Availability",
+            ],
             key="mc_nav",
+            on_change=sync_navigation,
             label_visibility="collapsed",
         )
         st.radio(
@@ -889,13 +950,19 @@ def run():
         st.caption(
             "Order archive is organizational only. Pricing changes require explicit review and confirmation."
         )
-    if st.session_state.get("mc_price_dirty") and st.session_state.get("mc_nav") != "Pricing & Availability":
-        st.warning("Unsaved Pricing & Availability changes are retained in this session. Return there to save or discard before closing.")
-    st.button("Refresh", on_click=refresh)
+    if (
+        st.session_state.get("mc_price_dirty")
+        and st.session_state.get("mc_nav") != "Pricing & Availability"
+    ):
+        st.warning(
+            "Unsaved Pricing & Availability changes are retained in this session. Return there to save or discard before closing."
+        )
+    st.sidebar.button("Refresh", on_click=refresh, width="stretch")
     client = OwnerClient(os.environ.get("API_BASE", ""), st.session_state["mc_key"])
     try:
         if st.session_state.get("mc_nav") == "Pricing & Availability":
             from .pricing import run as pricing_workspace
+
             pricing_workspace(client)
             return
         archive_view = st.session_state.get("mc_archive_view", "Active")

@@ -29,6 +29,7 @@ def download(client, bundle, artifact, label, *, audit=False):
             historical=audit,
         ),
         file_name=artifact["filename"],
+        help=artifact["filename"],
         mime=(
             "application/dxf"
             if artifact["name"].endswith(".dxf")
@@ -40,7 +41,9 @@ def download(client, bundle, artifact, label, *, audit=False):
     )
 
 
-def show(client, rev, plate, current, approved, *, frozen_audit=None):
+def show(
+    client, rev, plate, current, approved, *, frozen_audit=None, include_audit=True
+):
     bundles, config, staging = [], None, {}
     if all(rev.get(k) for k in ("id", "spec_sha256", "source_sha256")):
         try:
@@ -63,14 +66,14 @@ def show(client, rev, plate, current, approved, *, frozen_audit=None):
             "Haas bore program",
             "program.NC",
             "Download NC",
-            "REVIEW / SETUP VERIFICATION REQUIRED · Programmer review, physical setup verification and prove-out remain required. No machine transmission or manufacturing release.",
+            "REVIEW / SETUP VERIFICATION REQUIRED · Not machine-proven or released.",
         ),
         (
             "PACKAGING",
             "Corrugated packaging",
             "packaging.dxf",
             "Download Packaging DXF",
-            "PROTOTYPE / ENGINEERING REVIEW · Cardboard cutting, folding, closure and shipping acceptance remain required.",
+            "PROTOTYPE / ENGINEERING REVIEW · Not physically qualified for shipping.",
         ),
     ):
         expected = (config or {}).get("staging_profiles", {}).get(family)
@@ -84,76 +87,80 @@ def show(client, rev, plate, current, approved, *, frozen_audit=None):
         ]
         latest = max(found, key=lambda b: (b["created_at"], b["id"])) if found else None
         with st.container(border=True, key=f'mc_card_derived_{rev["id"]}_{family}'):
-            st.markdown("**" + title + "**")
-            st.caption(
-                f'R{rev["number"]} · '
-                + (
-                    "Current Frozen Plate revision"
-                    if current
-                    else "Superseded revision · historical audit only"
+            label_col, action_col = st.columns([1.45, 1], gap="small")
+            with label_col:
+                st.markdown("**" + title + "**")
+                st.caption(warning)
+            with action_col:
+                artifact = next(
+                    (f for f in (latest or {}).get("files", []) if f["name"] == output),
+                    None,
                 )
-            )
-            st.caption(warning)
-            artifact = next(
-                (f for f in (latest or {}).get("files", []) if f["name"] == output),
-                None,
-            )
-            if current and approved and artifact:
-                st.write(artifact["filename"])
-                st.caption(
-                    "Staged · exact stored bytes · Integrity checked on download"
-                )
-                if family == "HAAS":
-                    ref = latest["staging"].get("machine_profile") or {}
+                if current and approved and artifact:
+                    download(client, latest, artifact, label)
+                elif not (current and approved):
+                    st.button(
+                        label,
+                        disabled=True,
+                        key=f"mc_derived_locked_{rev['id']}_{family}",
+                        width="stretch",
+                    )
                     st.caption(
-                        "Machine profile: " + str(ref.get("revision") or "Unavailable")
+                        "Available only for the current customer-approved Frozen Plate revision. Historical files remain in audit."
                     )
-                download(client, latest, artifact, label)
-            elif not (current and approved):
-                st.caption(
-                    "Available only for the current customer-approved Frozen Plate revision. Historical files remain in audit."
-                )
-            else:
-                state = staging.get(family, {})
-                st.info(state.get("state", "Automatic staging pending"))
-                st.caption(
-                    state.get(
-                        "detail",
-                        "Files are staged automatically after approval. Refresh to check readiness; this view does not generate files.",
+                else:
+                    st.button(
+                        label,
+                        disabled=True,
+                        key=f"mc_derived_missing_{rev['id']}_{family}",
+                        width="stretch",
                     )
-                )
-    with st.expander("Engineering details / audit files", expanded=False):
-        if frozen_audit:
-            frozen_audit()
-        if config:
-            with st.expander(
-                "Controlled machine / fixture / generator profiles", expanded=False
-            ):
-                for name in (
-                    "machine_profile",
-                    "fixture_profile",
-                    "machining_parameters",
-                    "packaging_configuration",
-                ):
-                    if name in config:
-                        st.markdown("**" + name.replace("_", " ").capitalize() + "**")
-                        st.json(config[name])
-        st.caption(
-            "Stored artifacts are immutable. Historical audit downloads retrieve verified stored bytes. No download regenerates a file or releases manufacturing."
-        )
-        with st.expander(f"Generation history ({len(bundles)})", expanded=False):
-            for bundle in reversed(bundles):
-                with st.expander(
-                    f'{bundle["family"]} · {bundle["created_at"]} · {bundle["id"][:8]}',
-                    expanded=False,
-                ):
-                    st.caption(bundle["generator_version"] + " · " + bundle["state"])
-                    for artifact in bundle["files"]:
-                        download(
-                            client,
-                            bundle,
-                            artifact,
-                            "Download " + artifact["name"],
-                            audit=True,
+                    state = staging.get(family, {})
+                    st.info(state.get("state", "Automatic staging pending"))
+                    st.caption(
+                        state.get(
+                            "detail",
+                            "Files are staged automatically after approval. Refresh to check readiness; this view does not generate files.",
                         )
-                    st.json(bundle)
+                    )
+    if include_audit:
+        with st.expander("Engineering details / audit files", expanded=False):
+            if frozen_audit:
+                frozen_audit()
+            audit_details(client, config, bundles)
+    return config, bundles
+
+
+def audit_details(client, config, bundles):
+    if config:
+        with st.expander(
+            "Controlled machine / fixture / generator profiles", expanded=False
+        ):
+            for name in (
+                "machine_profile",
+                "fixture_profile",
+                "machining_parameters",
+                "packaging_configuration",
+            ):
+                if name in config:
+                    st.markdown("**" + name.replace("_", " ").capitalize() + "**")
+                    st.json(config[name])
+    st.caption(
+        "Stored artifacts are immutable. Historical audit downloads retrieve verified stored bytes. No download regenerates a file or releases manufacturing."
+    )
+    with st.expander(f"Generation history ({len(bundles)})", expanded=False):
+        for bundle in reversed(bundles):
+            with st.expander(
+                f'{bundle["family"]} · {bundle["created_at"]} · {bundle["id"][:8]}',
+                expanded=False,
+            ):
+                st.caption(bundle["generator_version"] + " · " + bundle["state"])
+                for artifact in bundle["files"]:
+                    download(
+                        client,
+                        bundle,
+                        artifact,
+                        "Download " + artifact["name"],
+                        audit=True,
+                    )
+                st.json(bundle)

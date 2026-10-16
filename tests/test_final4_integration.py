@@ -80,6 +80,6 @@ show(Client(),rev,plate,True,True)
     at = AppTest.from_string(source).run()
     assert not at.exception
     assert "generated" not in at.session_state
-    assert not at.button and not at.checkbox
+    assert all(b.disabled for b in at.button) and not at.checkbox
     assert not at.number_input and not at.text_input and not at.selectbox
     assert any(e.label == "Engineering details / audit files" for e in at.expander)
