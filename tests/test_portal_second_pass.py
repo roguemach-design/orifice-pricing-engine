@@ -197,7 +197,7 @@ def test_normal_screen_has_no_review_or_generation_fields():
         and not at.selectbox
         and not at.checkbox
     )
-    assert not at.button
+    assert all(b.disabled for b in at.button)
     assert "generated" not in at.session_state
 
 
@@ -208,6 +208,6 @@ def test_failed_bundle_query_blocks_generation_and_preserves_audit():
     )
     at = AppTest.from_string(source).run()
     assert not at.exception and "generated" not in at.session_state
-    assert not at.button
+    assert all(b.disabled for b in at.button)
     assert any(e.label == "Engineering details / audit files" for e in at.expander)
     assert any("Too many requests" in i.value for i in at.info)
