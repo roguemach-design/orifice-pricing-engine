@@ -87,42 +87,42 @@ def show(
         ]
         latest = max(found, key=lambda b: (b["created_at"], b["id"])) if found else None
         with st.container(border=True, key=f'mc_card_derived_{rev["id"]}_{family}'):
-            st.markdown("**" + title + "**")
-            st.caption(warning)
-            artifact = next(
-                (f for f in (latest or {}).get("files", []) if f["name"] == output),
-                None,
-            )
-            if current and approved and artifact:
-                st.caption(
-                    "Staged · exact stored bytes · Integrity checked on download"
+            label_col, action_col = st.columns([1.45, 1], gap="small")
+            with label_col:
+                st.markdown("**" + title + "**")
+                st.caption(warning)
+            with action_col:
+                artifact = next(
+                    (f for f in (latest or {}).get("files", []) if f["name"] == output),
+                    None,
                 )
-                download(client, latest, artifact, label)
-            elif not (current and approved):
-                st.button(
-                    label,
-                    disabled=True,
-                    key=f"mc_derived_locked_{rev['id']}_{family}",
-                    width="stretch",
-                )
-                st.caption(
-                    "Available only for the current customer-approved Frozen Plate revision. Historical files remain in audit."
-                )
-            else:
-                st.button(
-                    label,
-                    disabled=True,
-                    key=f"mc_derived_missing_{rev['id']}_{family}",
-                    width="stretch",
-                )
-                state = staging.get(family, {})
-                st.info(state.get("state", "Automatic staging pending"))
-                st.caption(
-                    state.get(
-                        "detail",
-                        "Files are staged automatically after approval. Refresh to check readiness; this view does not generate files.",
+                if current and approved and artifact:
+                    download(client, latest, artifact, label)
+                elif not (current and approved):
+                    st.button(
+                        label,
+                        disabled=True,
+                        key=f"mc_derived_locked_{rev['id']}_{family}",
+                        width="stretch",
                     )
-                )
+                    st.caption(
+                        "Available only for the current customer-approved Frozen Plate revision. Historical files remain in audit."
+                    )
+                else:
+                    st.button(
+                        label,
+                        disabled=True,
+                        key=f"mc_derived_missing_{rev['id']}_{family}",
+                        width="stretch",
+                    )
+                    state = staging.get(family, {})
+                    st.info(state.get("state", "Automatic staging pending"))
+                    st.caption(
+                        state.get(
+                            "detail",
+                            "Files are staged automatically after approval. Refresh to check readiness; this view does not generate files.",
+                        )
+                    )
     if include_audit:
         with st.expander("Engineering details / audit files", expanded=False):
             if frozen_audit:

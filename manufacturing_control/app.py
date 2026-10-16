@@ -459,7 +459,7 @@ def files(client, rev, plate, order, is_current, is_approved):
         (
             "pdf",
             "Finished-part drawing · PDF",
-            "Finished geometry · customer confirmation drawing",
+            "Exact stored customer drawing",
         ),
         (
             "json",
@@ -469,64 +469,67 @@ def files(client, rev, plate, order, is_current, is_approved):
         (
             "dxf",
             "Rough-blank steel cut file · DXF",
-            "Bore 0.125 in undersize on diameter (0.0625 in per side)",
+            "Rough bore · 0.125 in diametral allowance",
         ),
     ]:
         artifact = rev.get("artifacts", {}).get(kind)
         with st.container(border=True, key=f"mc_card_file_{rev['id']}_{kind}"):
-            st.markdown("**" + title + "**")
-            st.caption(desc)
-            if not artifact:
-                st.button(
-                    "Download " + kind.upper(),
-                    disabled=True,
-                    key=f"mc_missing_{rev['id']}_{kind}",
-                    width="stretch",
-                )
-                st.caption("Artifact metadata unavailable.")
-                continue
-
-            if kind == "dxf" and not (is_current and is_approved):
-                st.button("DXF locked", disabled=True, key="mc_locked_" + rev["id"])
-                st.caption(
-                    "Superseded revision — historical review only."
-                    if not is_current
-                    else "Current revision awaits matching customer PDF/spec approval."
-                )
-                continue
-            filename = artifact["filename"]
-            if kind == "dxf":
-                try:
-                    filename = dxf_delivery_name(
-                        spec,
-                        order.get("order_number_display"),
-                        plate["line_id"],
-                        rev["number"],
+            label_col, action_col = st.columns([1.45, 1], gap="small")
+            with label_col:
+                st.markdown("**" + title + "**")
+                st.caption(desc)
+            with action_col:
+                if not artifact:
+                    st.button(
+                        "Download " + kind.upper(),
+                        disabled=True,
+                        key=f"mc_missing_{rev['id']}_{kind}",
+                        width="stretch",
                     )
-                except ValueError:
+                    st.caption("Artifact metadata unavailable.")
+                    continue
+
+                if kind == "dxf" and not (is_current and is_approved):
+                    st.button("DXF locked", disabled=True, key="mc_locked_" + rev["id"])
                     st.caption(
-                        "Authoritative delivery name unavailable. Stored file is unchanged; DXF download blocked."
+                        "Superseded revision — historical review only."
+                        if not is_current
+                        else "Current revision awaits matching customer PDF/spec approval."
                     )
                     continue
-            if "mc_download_access" not in st.session_state:
-                st.session_state["mc_download_access"] = DownloadAccess(client)
-            st.download_button(
-                "Download " + kind.upper(),
-                data=download_callable(
-                    st.session_state["mc_download_access"], rev, kind, filename
-                ),
-                file_name=filename,
-                help=filename,
-                mime={
-                    "pdf": "application/pdf",
-                    "dxf": "application/dxf",
-                    "json": "application/json",
-                }[kind],
-                key=f"mc_save_{rev['id']}_{kind}",
-                type="primary" if kind == "dxf" else "secondary",
-                on_click="ignore",
-                width="stretch",
-            )
+                filename = artifact["filename"]
+                if kind == "dxf":
+                    try:
+                        filename = dxf_delivery_name(
+                            spec,
+                            order.get("order_number_display"),
+                            plate["line_id"],
+                            rev["number"],
+                        )
+                    except ValueError:
+                        st.caption(
+                            "Authoritative delivery name unavailable. Stored file is unchanged; DXF download blocked."
+                        )
+                        continue
+                if "mc_download_access" not in st.session_state:
+                    st.session_state["mc_download_access"] = DownloadAccess(client)
+                st.download_button(
+                    "Download " + kind.upper(),
+                    data=download_callable(
+                        st.session_state["mc_download_access"], rev, kind, filename
+                    ),
+                    file_name=filename,
+                    help=filename,
+                    mime={
+                        "pdf": "application/pdf",
+                        "dxf": "application/dxf",
+                        "json": "application/json",
+                    }[kind],
+                    key=f"mc_save_{rev['id']}_{kind}",
+                    type="primary" if kind == "dxf" else "secondary",
+                    on_click="ignore",
+                    width="stretch",
+                )
 
 
 def history(client, detail):
