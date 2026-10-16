@@ -73,3 +73,6 @@
 .st-key-mc_files [data-testid="stMarkdownContainer"] p{overflow-wrap:anywhere}
 /* Streamlit flex containers must retain content height inside the sticky rail. */
 .st-key-mc_files,.st-key-mc_files [data-testid="stVerticalBlock"],.st-key-mc_files [data-testid="stLayoutWrapper"],.st-key-mc_files [data-testid="stElementContainer"]{flex:0 0 auto!important;height:auto!important;min-height:min-content}
+/* Keep workspace navigation reachable after collapsing the sidebar on small screens. */
+[data-testid="stExpandSidebarButton"]{visibility:visible!important;position:fixed;left:12px;top:12px;z-index:1000001}
+[data-testid="stExpandSidebarButton"] *{visibility:visible!important}
