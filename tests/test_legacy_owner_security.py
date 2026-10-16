@@ -163,6 +163,10 @@ def test_historical_orders_with_missing_display_fields_render(setup, monkeypatch
                 {'id': 'synthetic-a', 'order_number_display': None, 'customer_email': None, 'created_at': None},
                 {'id': 'synthetic-b', 'order_number_display': 'OP-TEST', 'customer_email': 'fixture@example.test', 'created_at': '2026-01-01T00:00:00Z'}]
             return r
+        if '/admin/orders/' in url:
+            r = Mock(status_code=200)
+            r.json.return_value = {'id': 'synthetic-b', 'quote_payload': {}}
+            return r
         return original(method, url, **kwargs)
     monkeypatch.setattr(auth.requests, 'request', request)
     a = unlock(app())
