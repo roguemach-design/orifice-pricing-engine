@@ -800,12 +800,6 @@ def order_detail(client, order_id, snapshot):
             + stamp(order["owner_archived_at"])
             + " · organizational only; manufacturing history retained"
         )
-    st.caption(
-        "Created "
-        + stamp(order.get("created_at"))
-        + " · Paid "
-        + stamp(order.get("paid_at"))
-    )
     if not plates:
         st.info(
             "Manufacturing record unavailable. Viewing does not create records or files."
@@ -813,7 +807,6 @@ def order_detail(client, order_id, snapshot):
     else:
         if len(plates) == 1:
             selected = plates[0]["id"]
-            st.caption("Selected plate · " + plates[0]["line_id"])
         else:
             selected = st.selectbox(
                 "Plate / line",

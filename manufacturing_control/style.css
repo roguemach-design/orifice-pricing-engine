@@ -64,7 +64,7 @@
 .st-key-mc_files [class*="st-key-mc_card_"]{padding:10px!important;gap:4px}
 .st-key-mc_files [data-testid="stVerticalBlock"]{gap:4px}
 .st-key-mc_files [data-testid="stCaptionContainer"] p{font-size:11px;line-height:1.35}
-.st-key-mc_files p{font-size:13px;margin:0}
+.st-key-mc_files p{font-size:13px}
 @media(max-width:1000px){.mc-grid{grid-template-columns:repeat(2,minmax(0,1fr))}[data-testid="stMainBlockContainer"]{padding:4.5rem 1rem 2rem}.mc-session{display:none}.mc-top{padding-left:50px}.mc-specs{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:850px){.st-key-mc_workspace>[data-testid="stLayoutWrapper"]>[data-testid="stHorizontalBlock"]{flex-direction:column}.st-key-mc_workspace>[data-testid="stLayoutWrapper"]>[data-testid="stHorizontalBlock"]>[data-testid="stColumn"]{min-width:100%!important;width:100%!important;position:static!important;order:initial!important}[class*="st-key-mc_table_"]{overflow-x:auto}[class*="st-key-mc_table_"] [data-testid="stHorizontalBlock"]{min-width:760px;flex-wrap:nowrap}[class*="st-key-mc_table_"] [data-testid="stColumn"]{min-width:0!important}.mc-table{font-size:12px}.mc-table td,.mc-table th{padding:6px}.mc-brand{font-size:9px}}
 
