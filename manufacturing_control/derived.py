@@ -29,6 +29,7 @@ def download(client, bundle, artifact, label, *, audit=False):
             historical=audit,
         ),
         file_name=artifact["filename"],
+        help=artifact["filename"],
         mime=(
             "application/dxf"
             if artifact["name"].endswith(".dxf")
@@ -65,14 +66,14 @@ def show(
             "Haas bore program",
             "program.NC",
             "Download NC",
-            "REVIEW / SETUP VERIFICATION REQUIRED · Programmer review, physical setup verification and prove-out remain required. No machine transmission or manufacturing release.",
+            "REVIEW / SETUP VERIFICATION REQUIRED · Not machine-proven or released.",
         ),
         (
             "PACKAGING",
             "Corrugated packaging",
             "packaging.dxf",
             "Download Packaging DXF",
-            "PROTOTYPE / ENGINEERING REVIEW · Cardboard cutting, folding, closure and shipping acceptance remain required.",
+            "PROTOTYPE / ENGINEERING REVIEW · Not physically qualified for shipping.",
         ),
     ):
         expected = (config or {}).get("staging_profiles", {}).get(family)
@@ -87,29 +88,15 @@ def show(
         latest = max(found, key=lambda b: (b["created_at"], b["id"])) if found else None
         with st.container(border=True, key=f'mc_card_derived_{rev["id"]}_{family}'):
             st.markdown("**" + title + "**")
-            st.caption(
-                f'R{rev["number"]} · '
-                + (
-                    "Current Frozen Plate revision"
-                    if current
-                    else "Superseded revision · historical audit only"
-                )
-            )
             st.caption(warning)
             artifact = next(
                 (f for f in (latest or {}).get("files", []) if f["name"] == output),
                 None,
             )
             if current and approved and artifact:
-                st.write(artifact["filename"])
                 st.caption(
                     "Staged · exact stored bytes · Integrity checked on download"
                 )
-                if family == "HAAS":
-                    ref = latest["staging"].get("machine_profile") or {}
-                    st.caption(
-                        "Machine profile: " + str(ref.get("revision") or "Unavailable")
-                    )
                 download(client, latest, artifact, label)
             elif not (current and approved):
                 st.button(

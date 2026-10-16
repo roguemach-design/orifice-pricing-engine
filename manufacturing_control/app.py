@@ -183,11 +183,12 @@ def row_approval(order):
 
 
 def scope(snapshot):
-    st.warning("Partial scope · " + snapshot["scope"])
     st.caption(
-        "Snapshot "
+        "Scope: "
+        + snapshot["scope"]
+        + " · "
         + stamp(snapshot["snapshot_at"])
-        + ". Filters and pagination apply only to this loaded snapshot. Counts are line records, not manufacturing releases. Email reconciliation is loaded per revision on request."
+        + ". Filters cover this bounded snapshot."
     )
 
 
@@ -484,7 +485,7 @@ def files(client, rev, plate, order, is_current, is_approved):
                 )
                 st.caption("Artifact metadata unavailable.")
                 continue
-            st.caption(f"{artifact['size']:,} bytes · Integrity checked on download")
+
             if kind == "dxf" and not (is_current and is_approved):
                 st.button("DXF locked", disabled=True, key="mc_locked_" + rev["id"])
                 st.caption(
@@ -507,7 +508,6 @@ def files(client, rev, plate, order, is_current, is_approved):
                         "Authoritative delivery name unavailable. Stored file is unchanged; DXF download blocked."
                     )
                     continue
-            st.write(filename)
             if "mc_download_access" not in st.session_state:
                 st.session_state["mc_download_access"] = DownloadAccess(client)
             st.download_button(
@@ -516,6 +516,7 @@ def files(client, rev, plate, order, is_current, is_approved):
                     st.session_state["mc_download_access"], rev, kind, filename
                 ),
                 file_name=filename,
+                help=filename,
                 mime={
                     "pdf": "application/pdf",
                     "dxf": "application/dxf",
@@ -611,6 +612,7 @@ def line_detail(client, plate, order):
             0,
         ),
         key="mc_revision_" + plate["id"],
+        label_visibility="collapsed",
     )
     detail = client.json(
         f"/admin/frozen-plates/{quote(plate['id'],safe='')}",
@@ -761,7 +763,7 @@ def frozen_audit_files(client, rev, plate):
 
 
 def order_detail(client, order_id, snapshot):
-    st.button("← Orders", on_click=nav_to, args=("Orders",))
+    st.sidebar.button("← Orders", on_click=nav_to, args=("Orders",))
     try:
         order = client.json("/admin/orders/" + quote(order_id, safe=""))
     except PortalError as error:
@@ -772,11 +774,14 @@ def order_detail(client, order_id, snapshot):
             "No matching order record. Existing Frozen Plate evidence remains reviewable; order details are unavailable."
         )
     plates = client.json("/admin/frozen-plates", params={"order_id": order_id})
-    st.title(order.get("order_number_display") or "Frozen Plate review")
     mode = order.get("payment_mode", "UNKNOWN")
     html(
-        mode_chip(mode)
-        + chip(order.get("status", "Order record unavailable").capitalize())
+        '<div class="mc-row"><h1>'
+        + text(order.get("order_number_display") or "Frozen Plate review")
+        + "</h1>"
+        + mode_chip(mode)
+        + chip(str(order.get("status") or "Order record unavailable").capitalize())
+        + "</div>"
     )
     if mode in ("TEST", "OWNER TEST"):
         html(
@@ -792,16 +797,6 @@ def order_detail(client, order_id, snapshot):
             + stamp(order["owner_archived_at"])
             + " · organizational only; manufacturing history retained"
         )
-    if order.get("status") == "completed" or mode in ("TEST", "OWNER TEST"):
-        if st.button(
-            "Unarchive order" if archived else "Archive order", key="mc_archive_action"
-        ):
-            try:
-                client.archive(order_id, not archived)
-                refresh()
-                st.rerun()
-            except PortalError as error:
-                show_error(error)
     st.caption(
         "Created "
         + stamp(order.get("created_at"))
@@ -813,15 +808,31 @@ def order_detail(client, order_id, snapshot):
             "Manufacturing record unavailable. Viewing does not create records or files."
         )
     else:
-        selected = st.selectbox(
-            "Plate / line",
-            [p["id"] for p in plates],
-            format_func=lambda i: next(
-                p["line_id"] + " · " + p["id"] for p in plates if p["id"] == i
-            ),
-            key="mc_line_" + order_id,
-        )
+        if len(plates) == 1:
+            selected = plates[0]["id"]
+            st.caption("Selected plate · " + plates[0]["line_id"])
+        else:
+            selected = st.selectbox(
+                "Plate / line",
+                [p["id"] for p in plates],
+                format_func=lambda i: next(
+                    p["line_id"] + " · " + p["id"] for p in plates if p["id"] == i
+                ),
+                key="mc_line_" + order_id,
+            )
         line_detail(client, next(p for p in plates if p["id"] == selected), order)
+    with st.expander("Organize order · archive"):
+        if order.get("status") == "completed" or mode in ("TEST", "OWNER TEST"):
+            if st.button(
+                "Unarchive order" if archived else "Archive order",
+                key="mc_archive_action",
+            ):
+                try:
+                    client.archive(order_id, not archived)
+                    refresh()
+                    st.rerun()
+                except PortalError as error:
+                    show_error(error)
     with st.expander("Order record"):
         st.subheader("Order record")
         pairs(
@@ -950,7 +961,7 @@ def run():
         st.warning(
             "Unsaved Pricing & Availability changes are retained in this session. Return there to save or discard before closing."
         )
-    st.button("Refresh", on_click=refresh)
+    st.sidebar.button("Refresh", on_click=refresh, width="stretch")
     client = OwnerClient(os.environ.get("API_BASE", ""), st.session_state["mc_key"])
     try:
         if st.session_state.get("mc_nav") == "Pricing & Availability":
