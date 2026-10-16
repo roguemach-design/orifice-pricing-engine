@@ -892,6 +892,14 @@ def run():
     html(
         '<div class="mc-top"><span class="mc-mark">RM</span><div><div class="mc-brand">ROGUE MACHINE / O-PLATES</div><div class="mc-title">Manufacturing Control</div></div><span class="mc-session">Owner operations &nbsp; · &nbsp; Owner session · shared key</span></div>'
     )
+    # Explicit replacement removes stale deferred-download fragments, including on Lock.
+    screen = st.empty()
+    screen.empty()
+    with screen.container():
+        render_owner()
+
+
+def render_owner():
     if not ui_enabled():
         st.error("Owner portal environment binding is unavailable.")
         return
