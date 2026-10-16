@@ -71,3 +71,5 @@
 @media(min-width:851px){.mc-top{left:230px}.st-key-mc_workspace>[data-testid="stLayoutWrapper"]>[data-testid="stHorizontalBlock"]{align-items:flex-start}}
 .mc-top .mc-title,.mc-top .mc-brand{line-height:1.3}
 .st-key-mc_files [data-testid="stMarkdownContainer"] p{overflow-wrap:anywhere}
+/* Streamlit flex containers must retain content height inside the sticky rail. */
+.st-key-mc_files,.st-key-mc_files [data-testid="stVerticalBlock"],.st-key-mc_files [data-testid="stLayoutWrapper"],.st-key-mc_files [data-testid="stElementContainer"]{flex:0 0 auto!important;height:auto!important;min-height:min-content}
