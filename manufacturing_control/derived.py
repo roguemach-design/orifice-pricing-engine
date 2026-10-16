@@ -40,7 +40,9 @@ def download(client, bundle, artifact, label, *, audit=False):
     )
 
 
-def show(client, rev, plate, current, approved, *, frozen_audit=None):
+def show(
+    client, rev, plate, current, approved, *, frozen_audit=None, include_audit=True
+):
     bundles, config, staging = [], None, {}
     if all(rev.get(k) for k in ("id", "spec_sha256", "source_sha256")):
         try:
@@ -110,10 +112,22 @@ def show(client, rev, plate, current, approved, *, frozen_audit=None):
                     )
                 download(client, latest, artifact, label)
             elif not (current and approved):
+                st.button(
+                    label,
+                    disabled=True,
+                    key=f"mc_derived_locked_{rev['id']}_{family}",
+                    width="stretch",
+                )
                 st.caption(
                     "Available only for the current customer-approved Frozen Plate revision. Historical files remain in audit."
                 )
             else:
+                st.button(
+                    label,
+                    disabled=True,
+                    key=f"mc_derived_missing_{rev['id']}_{family}",
+                    width="stretch",
+                )
                 state = staging.get(family, {})
                 st.info(state.get("state", "Automatic staging pending"))
                 st.caption(
@@ -122,38 +136,44 @@ def show(client, rev, plate, current, approved, *, frozen_audit=None):
                         "Files are staged automatically after approval. Refresh to check readiness; this view does not generate files.",
                     )
                 )
-    with st.expander("Engineering details / audit files", expanded=False):
-        if frozen_audit:
-            frozen_audit()
-        if config:
-            with st.expander(
-                "Controlled machine / fixture / generator profiles", expanded=False
+    if include_audit:
+        with st.expander("Engineering details / audit files", expanded=False):
+            if frozen_audit:
+                frozen_audit()
+            audit_details(client, config, bundles)
+    return config, bundles
+
+
+def audit_details(client, config, bundles):
+    if config:
+        with st.expander(
+            "Controlled machine / fixture / generator profiles", expanded=False
+        ):
+            for name in (
+                "machine_profile",
+                "fixture_profile",
+                "machining_parameters",
+                "packaging_configuration",
             ):
-                for name in (
-                    "machine_profile",
-                    "fixture_profile",
-                    "machining_parameters",
-                    "packaging_configuration",
-                ):
-                    if name in config:
-                        st.markdown("**" + name.replace("_", " ").capitalize() + "**")
-                        st.json(config[name])
-        st.caption(
-            "Stored artifacts are immutable. Historical audit downloads retrieve verified stored bytes. No download regenerates a file or releases manufacturing."
-        )
-        with st.expander(f"Generation history ({len(bundles)})", expanded=False):
-            for bundle in reversed(bundles):
-                with st.expander(
-                    f'{bundle["family"]} · {bundle["created_at"]} · {bundle["id"][:8]}',
-                    expanded=False,
-                ):
-                    st.caption(bundle["generator_version"] + " · " + bundle["state"])
-                    for artifact in bundle["files"]:
-                        download(
-                            client,
-                            bundle,
-                            artifact,
-                            "Download " + artifact["name"],
-                            audit=True,
-                        )
-                    st.json(bundle)
+                if name in config:
+                    st.markdown("**" + name.replace("_", " ").capitalize() + "**")
+                    st.json(config[name])
+    st.caption(
+        "Stored artifacts are immutable. Historical audit downloads retrieve verified stored bytes. No download regenerates a file or releases manufacturing."
+    )
+    with st.expander(f"Generation history ({len(bundles)})", expanded=False):
+        for bundle in reversed(bundles):
+            with st.expander(
+                f'{bundle["family"]} · {bundle["created_at"]} · {bundle["id"][:8]}',
+                expanded=False,
+            ):
+                st.caption(bundle["generator_version"] + " · " + bundle["state"])
+                for artifact in bundle["files"]:
+                    download(
+                        client,
+                        bundle,
+                        artifact,
+                        "Download " + artifact["name"],
+                        audit=True,
+                    )
+                st.json(bundle)
