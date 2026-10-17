@@ -123,3 +123,11 @@ def test_dedicated_entry_point_is_locked_and_has_no_customer_routes(monkeypatch)
     # Entry point uses exactly one explicit callable page, never the customer page directory.
     source = (Path(__file__).resolve().parents[1] / 'owner_app/main.py').read_text()
     assert 'st.Page(run,' in source and 'pages/' not in source
+
+
+def test_lead_time_comes_from_selected_frozen_source():
+    from manufacturing_control.app import frozen_lead_days
+    assert frozen_lead_days({'source_json': '{"configuration":{"ships_in_days":21}}'}) == 21
+    assert frozen_lead_days({'source_json': '{"configuration":{"ships_in_days":7}}'}) == 7
+    for source in ({}, {'source_json':'invalid'}, {'source_json':'[]'}):
+        assert frozen_lead_days(source) is None

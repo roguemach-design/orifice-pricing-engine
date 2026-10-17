@@ -865,13 +865,23 @@ def payment_summary(order):
         st.caption("Order-level totals. Drawing approval does not release manufacturing.")
 
 
+def frozen_lead_days(rev):
+    """Lead time belongs to the exact frozen source configuration, not current pricing."""
+    try:
+        source = json.loads(rev.get("source_json") or "{}")
+        value = source.get("configuration", {}).get("ships_in_days")
+        return value if type(value) is int and value > 0 else None
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
 def order_line_workspace(client, plate, order, detail, current, is_approved):
     rev = detail["revision"]
     spec = frozen_spec(rev)
     with st.container(border=True, key="mc_card_selected_line"):
         st.subheader("Selected plate · " + plate["line_id"])
         html(chip(f"{'Current' if current else 'Superseded'} R{rev['number']}") + chip("Approved" if is_approved else "Awaiting approval", "good" if is_approved else "wait"))
-        vals = [("Material", spec.get("material")), ("Finished OD", spec.get("finished_od")), ("Finished bore", spec.get("finished_bore_diameter")), ("Thickness", spec.get("thickness")), ("Quantity", spec.get("quantity")), ("Lead time · days", spec.get("lead_days", spec.get("lead_time_days")))]
+        vals = [("Material", spec.get("material")), ("Finished OD", spec.get("finished_od")), ("Finished bore", spec.get("finished_bore_diameter")), ("Thickness", spec.get("thickness")), ("Quantity", spec.get("quantity")), ("Lead time · days", frozen_lead_days(rev))]
         html('<div class="mc-specs">' + ''.join(f'<div><div class="mc-label">{text(k)}</div><div class="mc-value">{text(v)}</div></div>' for k,v in vals) + '</div>')
         st.caption("Dimensions in inches · exact frozen revision specification")
     payment_summary(order)
