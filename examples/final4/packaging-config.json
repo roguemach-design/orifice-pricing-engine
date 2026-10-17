@@ -1,0 +1,20 @@
+{
+  "version": "prototype-board-2-perforated",
+  "board_reference": "SYNTHETIC BOARD - measure actual caliper before prototype cutting",
+  "caliper": 0.125,
+  "compression_fraction": 0.1,
+  "clearance": 0.025,
+  "depth_clearance": 0.02,
+  "margin": 1.0,
+  "fold_allowance": 0.0625,
+  "kerf": 0.01,
+  "closure_edge_distance": 0.25,
+  "flute_direction": "X_PERPENDICULAR_TO_FOLD",
+  "closure": "CHAIN_STITCH_REVIEW",
+  "max_sheet_width": 120,
+  "max_sheet_height": 120,
+  "max_layers": 12,
+  "stitch_length": 0.25,
+  "stitch_web": 0.125,
+  "fold_end_bridge": 0.25
+}

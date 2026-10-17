@@ -1,0 +1,18 @@
+{
+  "actual_blank_bore": 1.423,
+  "blank_radial_uncertainty": 0.005,
+  "bore_tolerance": 0.001,
+  "drawing_revision": "R1",
+  "finished_bore": 1.548,
+  "job_id": "SYNTHETIC-001",
+  "material": "304 Stainless Steel",
+  "part_id": "SAMPLE-PLATE",
+  "review_reference": "TEST FIXTURE ONLY",
+  "reviewed_by": "SYNTHETIC TEST REVIEWER",
+  "schema_version": "1",
+  "source_kind": "manual",
+  "source_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "thickness": 0.125,
+  "top_chamfer_width": 0.01,
+  "units": "inch"
+}

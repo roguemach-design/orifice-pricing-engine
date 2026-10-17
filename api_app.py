@@ -17,7 +17,7 @@ from typing import Optional, List, Dict, Any, Literal
 import stripe
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import model_validator, BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import StrictBool, model_validator, BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from pricing_engine import QuoteInputs, calculate_quote
 
@@ -43,7 +43,8 @@ from jwt import PyJWKClient
 # ----------------------------
 # App + config
 # ----------------------------
-app = FastAPI(title="Orifice Pricing API", version="1.0.0")
+from final4.worker import lifespan as manufacturing_lifespan
+app = FastAPI(title="Orifice Pricing API", version="1.0.0", lifespan=manufacturing_lifespan)
 
 ALLOWED_ORIGINS = [
     "https://quote.o-plates.com",
@@ -131,6 +132,8 @@ class _InMemoryRateLimiter:
 
 _RATE_LIMITER = _InMemoryRateLimiter()
 
+from pricing_configuration import PROCESS_KEYS, project as project_config, version as config_version, validate as validate_config
+
 # Snapshot of file-based defaults so we can restore after applying DB overrides
 _CFG_BASELINE = {
     "PRICE_PER_SQ_IN": copy.deepcopy(getattr(cfg, "PRICE_PER_SQ_IN", {})),
@@ -145,6 +148,7 @@ _CFG_BASELINE = {
     "MAX_BORE_DIA_IN": getattr(cfg, "MAX_BORE_DIA_IN", 19.0),
     "MAX_HANDLE_LABEL_CHARS": getattr(cfg, "MAX_HANDLE_LABEL_CHARS", 40),
 }
+_CFG_BASELINE.update({key.upper(): copy.deepcopy(getattr(cfg, key.upper())) for key in PROCESS_KEYS})
 
 
 # ----------------------------
@@ -166,6 +170,7 @@ class Order(Base):
     stripe_payment_intent = Column(String, nullable=True)
     status = Column(String, default="pending", nullable=False, index=True)
     paid_at = Column(DateTime, nullable=True)
+    owner_archived_at = Column(DateTime, nullable=True)
     last_stripe_event_id = Column(String, nullable=True, unique=True)
 
     customer_email = Column(String, nullable=True)
@@ -208,6 +213,7 @@ def init_db() -> None:
         conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS status VARCHAR NOT NULL DEFAULT 'pending'"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(status)"))
         conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP WITH TIME ZONE"))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS owner_archived_at TIMESTAMP WITH TIME ZONE"))
         conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS last_stripe_event_id VARCHAR"))
         conn.execute(
             text(
@@ -657,6 +663,8 @@ def _get_or_seed_active_config(db) -> dict:
 
 
 def _restore_cfg_baseline() -> None:
+    for key in PROCESS_KEYS:
+        setattr(cfg, key.upper(), copy.deepcopy(_CFG_BASELINE[key.upper()]))
     cfg.PRICE_PER_SQ_IN = copy.deepcopy(_CFG_BASELINE["PRICE_PER_SQ_IN"])
     cfg.MATERIAL_ENABLED = copy.deepcopy(_CFG_BASELINE["MATERIAL_ENABLED"])
     cfg.THICKNESS_ENABLED_BY_MATERIAL = copy.deepcopy(_CFG_BASELINE["THICKNESS_ENABLED_BY_MATERIAL"])
@@ -678,6 +686,11 @@ def _apply_cfg_from_db_config(config_json: dict) -> None:
     - If DB is missing/empty price_per_sq_in, we fall back to baseline price table
       so /quote doesn't 500 from an empty cfg.PRICE_PER_SQ_IN.
     """
+    for key in PROCESS_KEYS:
+        value = copy.deepcopy(config_json.get(key, _CFG_BASELINE[key.upper()]))
+        if key == "inspection_mins_by_tol":
+            value = {float(k): v for k, v in value.items()}
+        setattr(cfg, key.upper(), value)
     material_enabled = config_json.get("material_enabled") or {}
     th_enabled_by_mat = config_json.get("thickness_enabled_by_material") or {}
     lt_enabled = config_json.get("lead_time_enabled") or {}
@@ -769,7 +782,7 @@ def _apply_cfg_from_db_config(config_json: dict) -> None:
     cfg.PRICE_PER_SQ_IN = final_ppsi
 
     # Lead time multiplier: filter baseline master by enabled keys
-    master_lt = copy.deepcopy(_CFG_BASELINE.get("LEAD_TIME_MULTIPLIER") or getattr(cfg, "LEAD_TIME_MULTIPLIER", {}))
+    master_lt = {int(k): v for k, v in config_json.get("lead_time_multipliers", _CFG_BASELINE["LEAD_TIME_MULTIPLIER"]).items()}
     cfg.LEAD_TIME_MULTIPLIER = {
         int(d): float(master_lt[int(d)])
         for d, enabled in cfg.LEAD_TIME_ENABLED.items()
@@ -965,87 +978,99 @@ async def quote(request: Request):
 # ----------------------------
 # Admin config endpoints
 # ----------------------------
+def _config_snapshot(db):
+    active = _get_or_seed_active_config(db)
+    row = db.query(AppConfig).filter(AppConfig.id == "active").first()
+    return row, project_config(active, _CFG_BASELINE)
+
+
 @app.get("/admin/config", dependencies=[Depends(_rate_limit_admin)])
 def admin_get_config():
     _db_required()
-    db = SessionLocal()
+    with SessionLocal() as db:
+        row, active = _config_snapshot(db)
+        return {**active, "_version": config_version(row)}
+
+
+@app.get("/admin/config/editor", dependencies=[Depends(_rate_limit_admin)])
+def admin_config_editor():
+    _db_required()
+    with SessionLocal() as db:
+        row, active = _config_snapshot(db)
+        history = db.query(AppConfig).filter(AppConfig.id.like("pricing-history-%")).order_by(AppConfig.updated_at.desc()).limit(50).all()
+        return {"config": active, "version": config_version(row),
+                "defaults": project_config(_default_knobs_config(), _CFG_BASELINE),
+                "history": [{"id": item.id, "saved_at": item.updated_at.isoformat(),
+                             "config": project_config(item.config_json, _CFG_BASELINE)} for item in history]}
+
+
+async def _write_config(request, action):
+    _db_required()
     try:
-        active = _get_or_seed_active_config(db)
-        return active
-    finally:
-        db.close()
+        payload = await request.json()
+    except ValueError:
+        raise HTTPException(422, "Malformed JSON.") from None
+    if not isinstance(payload, dict):
+        raise HTTPException(422, "Configuration must be an object.")
+    expected = payload.pop("_version", None)
+    confirmation = payload.pop("_confirmation", None)
+    required_confirmation = {"save": "SAVE CHANGES", "reset": "RESET DEFAULTS", "restore": "RESTORE CONFIGURATION"}[action]
+    if not expected:
+        raise HTTPException(428, "Reload configuration before saving; a version is required.")
+    if confirmation != required_confirmation:
+        raise HTTPException(422, "Explicit change confirmation is required.")
+    with SessionLocal() as db:
+        row, active = _config_snapshot(db)
+        if config_version(row) != expected:
+            raise HTTPException(409, "Configuration changed in another session. Reload and review your changes.")
+        defaults = project_config(_default_knobs_config(), _CFG_BASELINE)
+        if action == "reset":
+            candidate = defaults
+        elif action == "restore":
+            prior_id = payload.get("history_id", "")
+            if not isinstance(prior_id, str) or not prior_id.startswith("pricing-history-"):
+                raise HTTPException(422, "Select a saved configuration.")
+            prior = db.query(AppConfig).filter(AppConfig.id == prior_id).first()
+            if not prior:
+                raise HTTPException(404, "Saved configuration not found.")
+            candidate = project_config(prior.config_json, _CFG_BASELINE)
+        else:
+            candidate = payload
+        try:
+            candidate = validate_config(candidate, defaults)
+        except (ValueError, TypeError, OverflowError) as exc:
+            raise HTTPException(422, str(exc)) from None
+        candidate["updated_by"] = "owner"
+        now = datetime.now(timezone.utc)
+        candidate["updated_at"] = now.isoformat()
+        previous = copy.deepcopy(row.config_json)
+        old_timestamp = row.updated_at
+        # Atomic compare-and-swap: works across API processes, not just threads.
+        count = db.query(AppConfig).filter(AppConfig.id == "active", AppConfig.updated_at == old_timestamp).update(
+            {AppConfig.config_json: candidate, AppConfig.updated_at: now}, synchronize_session=False)
+        if count != 1:
+            db.rollback()
+            raise HTTPException(409, "Configuration changed in another session. Reload and review your changes.")
+        db.add(AppConfig(id="pricing-history-" + str(uuid.uuid4()), config_json=previous, updated_at=now))
+        db.commit()
+        db.expire_all()
+        saved = db.query(AppConfig).filter(AppConfig.id == "active").first()
+        return {"ok": True, "config": saved.config_json, "version": config_version(saved)}
 
 
 @app.put("/admin/config", dependencies=[Depends(_rate_limit_admin)])
 async def admin_put_config(request: Request):
-    _db_required()
-    payload = await request.json()
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="Config must be a JSON object")
-
-    # Light validation
-    for k in ("material_enabled", "lead_time_enabled", "thickness_enabled_by_material", "price_per_sq_in"):
-        if k in payload and payload[k] is not None and not isinstance(payload[k], dict):
-            raise HTTPException(status_code=400, detail=f"{k} must be an object")
-
-    if "default_lead_time_days" in payload:
-        try:
-            payload["default_lead_time_days"] = int(payload["default_lead_time_days"])
-        except Exception:
-            raise HTTPException(status_code=400, detail="default_lead_time_days must be an integer")
-
-    for key in ("max_paddle_dia_in", "max_bore_dia_in"):
-        if key in payload:
-            try:
-                payload[key] = float(payload[key])
-            except Exception:
-                raise HTTPException(status_code=400, detail=f"{key} must be numeric")
-    if "max_handle_label_chars" in payload:
-        try:
-            payload["max_handle_label_chars"] = int(payload["max_handle_label_chars"])
-        except Exception:
-            raise HTTPException(status_code=400, detail="max_handle_label_chars must be an integer")
-
-    payload["updated_at"] = datetime.now(timezone.utc).isoformat()
-
-    db = SessionLocal()
-    try:
-        row = db.query(AppConfig).filter(AppConfig.id == "active").first()
-        if not row:
-            row = AppConfig(id="active", config_json=payload)
-            db.add(row)
-        else:
-            row.config_json = payload
-            row.updated_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(row)
-        return {"ok": True, "config": row.config_json}
-    finally:
-        db.close()
+    return await _write_config(request, "save")
 
 
 @app.post("/admin/config/reset", dependencies=[Depends(_rate_limit_admin)])
-def admin_reset_config():
-    """
-    Reset the DB 'active' config to the current file defaults (tuning_knobs.py baseline).
-    This is the escape hatch when DB config gets out of sync / missing price tables.
-    """
-    _db_required()
-    db = SessionLocal()
-    try:
-        fresh = _default_knobs_config()
-        row = db.query(AppConfig).filter(AppConfig.id == "active").first()
-        if not row:
-            row = AppConfig(id="active", config_json=fresh)
-            db.add(row)
-        else:
-            row.config_json = fresh
-            row.updated_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(row)
-        return {"ok": True, "config": row.config_json}
-    finally:
-        db.close()
+async def admin_reset_config(request: Request):
+    return await _write_config(request, "reset")
+
+
+@app.post("/admin/config/restore", dependencies=[Depends(_rate_limit_admin)])
+async def admin_restore_config(request: Request):
+    return await _write_config(request, "restore")
 
 
 def _checkout_recovery_reference(customer_id, idempotency_key, kind, *, owner_test=False):
@@ -1123,7 +1148,10 @@ def checkout_create(
     _db_required()
 
     inputs = QuoteInputs(**req.inputs.model_dump())
-    result = _calculate_quote_with_db_knobs(inputs)
+    try:
+        result = _calculate_quote_with_db_knobs(inputs)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
 
     if req.pricing_config_version and req.pricing_config_version != result.get("pricing_config_version"):
         raise HTTPException(
@@ -1266,10 +1294,17 @@ def checkout_cart_create(
     ship_nextday_cents = 0
 
     normalized_items = []
+    cart_config_version = None
 
     for it in req.items:
         inputs = QuoteInputs(**it.model_dump())
-        res = _calculate_quote_with_db_knobs(inputs)
+        try:
+            res = _calculate_quote_with_db_knobs(inputs)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+        if cart_config_version is not None and res.get("pricing_config_version") != cart_config_version:
+            raise HTTPException(409, "Pricing changed while calculating the cart. Review updated prices.")
+        cart_config_version = res.get("pricing_config_version")
 
         if (
             req.pricing_config_version
@@ -1521,8 +1556,47 @@ def me_order_detail(order_id: str, customer_user_id: str = Depends(_require_cust
         db.close()
 
 
+def _admin_payment_mode(order):
+    session = order.stripe_session_id or ""
+    if not isinstance(session, str):
+        return "UNKNOWN"
+    if re.fullmatch(r"cs_test_[A-Za-z0-9_]+", session):
+        try:
+            return "OWNER TEST" if _is_owner_test_order(order) else "TEST"
+        except (AttributeError, TypeError):
+            return "TEST"
+    if re.fullmatch(r"cs_live_[A-Za-z0-9_]+", session):
+        return "LIVE"
+    return "UNKNOWN"
+
+
+@app.get("/admin/manufacturing-summary", dependencies=[Depends(_rate_limit_admin)])
+def admin_manufacturing_summary(archive_view: Literal["Active", "Archived", "All"] = "Active", q: Optional[str] = None):
+    if not frozen_plate_enabled(app_env=APP_ENV):
+        raise HTTPException(503, "Manufacturing records unavailable")
+    from frozen_plate.api import repository
+    from frozen_plate.control_data import bounded_summary
+    from frozen_plate.repository import WorkflowError
+    try:
+        return bounded_summary(admin_list_orders(q=q, limit=200, archive_view=archive_view), repository(), archive_view=archive_view, search=q)
+    except (WorkflowError, ValueError, KeyError):
+        raise HTTPException(503, "Manufacturing records unavailable") from None
+
+
+@app.get("/admin/sales", dependencies=[Depends(_rate_limit_admin)])
+def admin_sales(period: Literal["1y", "6m", "3m", "1m"] = "1y"):
+    """Full-history aggregate; no writes or Stripe requests."""
+    from owner_sales import aggregate_sales
+    _db_required()
+    db = SessionLocal()
+    try:
+        return aggregate_sales(db, Order, period)
+    finally:
+        db.close()
+
+
 @app.get("/admin/orders", dependencies=[Depends(_rate_limit_admin)])
-def admin_list_orders(q: Optional[str] = None, limit: int = 50):
+def admin_list_orders(q: Optional[str] = None, limit: int = 50, archive_view: Literal["Active", "Archived", "All"] = "Active", offset: int = 0):
     _db_required()
     limit = max(1, min(int(limit), 200))
 
@@ -1530,24 +1604,19 @@ def admin_list_orders(q: Optional[str] = None, limit: int = 50):
     try:
         query = db.query(Order).order_by(Order.created_at.desc())
 
-        if q and q.strip():
-            qq = q.strip()
-            query = query.filter(
-                or_(
-                    Order.id.ilike(f"%{qq}%"),
-                    Order.customer_email.ilike(f"%{qq}%"),
-                    Order.stripe_session_id.ilike(f"%{qq}%"),
-                )
-            )
+        from owner_order_archive import filter_orders
+        query = filter_orders(query, Order, archive_view=archive_view, search=q)
 
-        orders = query.limit(limit).all()
+        orders = query.offset(max(0, int(offset))).limit(limit).all()
         return [
             {
                 "id": o.id,
                 "status": o.status,
-                "payment_mode": "OWNER TEST" if _is_owner_test_order(o) else ("TEST" if (o.stripe_session_id or "").startswith("cs_test_") else "LIVE"),
+                "owner_archived_at": o.owner_archived_at.isoformat() if o.owner_archived_at else None,
+                "payment_mode": _admin_payment_mode(o),
                 "order_number_display": _format_order_number(o.order_number),
                 "created_at": o.created_at.isoformat() if o.created_at else None,
+                "paid_at": o.paid_at.isoformat() if o.paid_at else None,
                 "customer_email": o.customer_email,
                 "amount_total_usd": (o.amount_total_cents or 0) / 100.0,
                 "amount_shipping_usd": (o.amount_shipping_cents or 0) / 100.0,
@@ -1577,6 +1646,22 @@ def debug_whoami(
     }
 
 
+class OrderArchiveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    archived: StrictBool
+
+
+@app.put("/admin/orders/{order_id}/archive", dependencies=[Depends(_rate_limit_admin)])
+def admin_archive_order(order_id: str, body: OrderArchiveRequest):
+    _db_required()
+    from owner_order_archive import set_archived
+    db = SessionLocal()
+    try:
+        return set_archived(db, Order, order_id, body.archived)
+    finally:
+        db.close()
+
+
 @app.get("/admin/orders/{order_id}", dependencies=[Depends(_rate_limit_admin)])
 def admin_get_order(order_id: str):
     _db_required()
@@ -1589,9 +1674,11 @@ def admin_get_order(order_id: str):
         return {
             "id": o.id,
             "status": o.status,
-            "payment_mode": "OWNER TEST" if _is_owner_test_order(o) else ("TEST" if (o.stripe_session_id or "").startswith("cs_test_") else "LIVE"),
+            "owner_archived_at": o.owner_archived_at.isoformat() if o.owner_archived_at else None,
+            "payment_mode": _admin_payment_mode(o),
             "order_number_display": _format_order_number(o.order_number),
             "created_at": o.created_at.isoformat() if o.created_at else None,
+            "paid_at": o.paid_at.isoformat() if o.paid_at else None,
             "stripe_session_id": o.stripe_session_id,
             "stripe_payment_intent": o.stripe_payment_intent,
             "customer_email": o.customer_email,
@@ -1849,6 +1936,7 @@ def _frozen_plate_order_snapshot(order_id):
             raise HTTPException(404, "Completed live customer order not found")
         return {"id": order.id, "customer_id": order.customer_id,
                 "customer_email": order.customer_email,
+                "order_number_display": _format_order_number(order.order_number),
                 "quote_payload": copy.deepcopy(order.quote_payload)}
     finally:
         db.close()
@@ -1857,5 +1945,36 @@ def _frozen_plate_order_snapshot(order_id):
 # Explicit production opt-in; production and staging retain separate bindings.
 if frozen_plate_enabled(app_env=APP_ENV):
     from frozen_plate.api import router as frozen_plate_router
+    def notify_manufacturing_approval():
+        from final4.runtime import enabled
+        if enabled():
+            from final4.worker import request_scan
+            request_scan()
+
     app.include_router(frozen_plate_router(_require_customer_user_id, _rate_limit_admin,
-                                          _frozen_plate_order_snapshot))
+                                          _frozen_plate_order_snapshot,
+                                          approval_committed=notify_manufacturing_approval))
+
+# Additive owner-only tooling. Existing customer/checkout routes remain untouched.
+if frozen_plate_enabled(app_env=APP_ENV):
+    from final4.runtime import enabled as final4_enabled
+    if final4_enabled():
+        from final4.api import router as final4_router
+        from final4.runtime import service as derived_service, configuration as derived_configuration
+        app.include_router(final4_router(_rate_limit_admin, derived_service,
+                           server_actor="owner-manufacturing-review"))
+
+        @app.get("/admin/manufacturing/configuration", dependencies=[Depends(_rate_limit_admin)])
+        def manufacturing_configuration():
+            from frozen_plate.repository import WorkflowError
+            try:
+                return derived_configuration()
+            except (WorkflowError, ValueError, TypeError, OSError):
+                raise HTTPException(503, "Manufacturing PostgreSQL configuration unavailable") from None
+
+        from final4.runtime import worker as staging_worker
+        app.state.manufacturing_stager = staging_worker()
+
+        @app.get("/admin/manufacturing/staging/{revision_id}", dependencies=[Depends(_rate_limit_admin)])
+        def manufacturing_staging_status(revision_id: str):
+            return staging_worker().status(revision_id)
