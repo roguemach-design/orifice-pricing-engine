@@ -158,7 +158,8 @@ def test_authorized_owner_page_shows_exact_downloads_without_writes(monkeypatch)
     app.text_input[0].set_value('customer-key')
     next(b for b in app.button if b.label == 'Unlock').click().run()
     assert app.error and not app.get('download_button')
-    next(b for b in app.button if b.label == 'Lock').click().run()
+    assert 'mc_key' not in app.session_state
+    assert any(b.label == 'Unlock' for b in app.button)
     app.text_input[0].set_value('fixture-owner')
     next(b for b in app.button if b.label == 'Unlock').click().run()
     assert not app.exception
