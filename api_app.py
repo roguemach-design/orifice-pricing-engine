@@ -1583,6 +1583,18 @@ def admin_manufacturing_summary(archive_view: Literal["Active", "Archived", "All
         raise HTTPException(503, "Manufacturing records unavailable") from None
 
 
+@app.get("/admin/sales", dependencies=[Depends(_rate_limit_admin)])
+def admin_sales(period: Literal["1y", "6m", "3m", "1m"] = "1y"):
+    """Full-history aggregate; no writes or Stripe requests."""
+    from owner_sales import aggregate_sales
+    _db_required()
+    db = SessionLocal()
+    try:
+        return aggregate_sales(db, Order, period)
+    finally:
+        db.close()
+
+
 @app.get("/admin/orders", dependencies=[Depends(_rate_limit_admin)])
 def admin_list_orders(q: Optional[str] = None, limit: int = 50, archive_view: Literal["Active", "Archived", "All"] = "Active", offset: int = 0):
     _db_required()

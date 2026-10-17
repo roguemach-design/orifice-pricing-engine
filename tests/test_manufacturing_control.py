@@ -286,6 +286,8 @@ def configure_ui(monkeypatch):
             return SimpleNamespace(status_code=401)
         path = url.split(".com")[-1]
         data = {
+            "/admin/orders": [order],
+            "/admin/sales": {"total_cents": 0, "order_count": 0, "start": "2025-11-01", "end": "2026-10-17", "points": [{"date": "2026-10-01", "amount_cents": 0, "order_count": 0}], "basis": "Recorded paid timestamp (UTC). Not net revenue."},
             "/admin/manufacturing-summary": summary,
             "/admin/orders/o1": order,
             "/admin/frozen-plates": [plate],
@@ -312,7 +314,7 @@ def test_session_unlock_lock_no_lazy_reads_and_selected_context(monkeypatch):
     app.text_input[0].set_value("fixture-owner")
     next(b for b in app.button if b.label == "Unlock").click().run()
     assert not app.exception
-    assert app.session_state["owner_admin_credential"] == ""
+    assert "owner_admin_credential" not in app.session_state
     next(b for b in app.button if b.label == "OP-0014").click().run()
     assert not app.exception and app.session_state["mc_order"] == "o1"
     assert any("OWNER TEST" in e.value for e in app.markdown)
