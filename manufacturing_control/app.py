@@ -71,10 +71,15 @@ def show_error(error):
 
 
 def unlock():
-    st.session_state["mc_key"] = st.session_state.get(
-        "owner_admin_credential", ""
-    ).strip()
-    st.session_state["owner_admin_credential"] = ""
+    credential = st.session_state.pop("owner_admin_credential", "").strip()
+    try:
+        OwnerClient(os.environ.get("API_BASE", ""), credential).json("/admin/orders", params={"limit": 1})
+    except PortalError as error:
+        clear_owner_session(st.session_state)
+        st.session_state["mc_login_error"] = error.category
+    else:
+        st.session_state["mc_key"] = credential
+
 
 
 def lock():
@@ -192,7 +197,7 @@ def scope(snapshot):
     )
 
 
-def overview(snapshot):
+def overview(snapshot, client):
     st.title("Rogue Command Center")
     st.caption(
         "Where every plate stands between customer approval and routing. Nothing here changes a record."
@@ -238,10 +243,12 @@ def overview(snapshot):
         )
         + "</div>"
     )
+    from .sales import render as sales_chart
+    sales_chart(client)
     st.subheader("Recent orders")
-    order_table(snapshot["orders"][:6], "mc_recent_")
-    st.button("View all loaded orders", on_click=nav_to, args=("Orders",))
-    with st.expander("Owner attention · approval and missing records", expanded=True):
+    order_table(snapshot["orders"][:5], "mc_recent_")
+    st.button("View All Orders", on_click=nav_to, args=("Orders",))
+    with st.expander("Owner attention · approval and missing records"):
         attention = [
             o
             for o in snapshot["orders"]
@@ -587,7 +594,7 @@ def history(client, detail):
         )
 
 
-def line_detail(client, plate, order):
+def line_detail(client, plate, order, *, order_layout=False):
     revisions = client.json(
         f"/admin/frozen-plates/{quote(plate['id'],safe='')}/revisions"
     )
@@ -628,6 +635,9 @@ def line_detail(client, plate, order):
     current = rid == detail["plate"]["current_revision"]
     is_approved = approved(rev, detail.get("approvals", []))
     spec = frozen_spec(rev)
+    if order_layout:
+        order_line_workspace(client, plate, order, detail, current, is_approved)
+        return
     with st.container(key="mc_workspace"):
         file_col, info_col = st.columns([1, 1.35], gap="medium")
         with file_col, st.container(key="mc_files"):
@@ -800,86 +810,100 @@ def order_detail(client, order_id, snapshot):
             + stamp(order["owner_archived_at"])
             + " · organizational only; manufacturing history retained"
         )
-    if not plates:
-        st.info(
-            "Manufacturing record unavailable. Viewing does not create records or files."
-        )
-    else:
-        if len(plates) == 1:
-            selected = plates[0]["id"]
-        else:
-            selected = st.selectbox(
-                "Plate / line",
-                [p["id"] for p in plates],
-                format_func=lambda i: next(
-                    p["line_id"] + " · " + p["id"] for p in plates if p["id"] == i
-                ),
-                key="mc_line_" + order_id,
-            )
-        line_detail(client, next(p for p in plates if p["id"] == selected), order)
-    with st.expander("Organize order · archive"):
-        if order.get("status") == "completed" or mode in ("TEST", "OWNER TEST"):
-            if st.button(
-                "Unarchive order" if archived else "Archive order",
-                key="mc_archive_action",
-            ):
-                try:
-                    client.archive(order_id, not archived)
-                    refresh()
-                    st.rerun()
-                except PortalError as error:
-                    show_error(error)
-    with st.expander("Order record"):
-        st.subheader("Order record")
-        pairs(
-            [
-                ("Order", order.get("order_number_display")),
-                ("Status", order.get("status")),
-                ("Payment mode", mode),
-                ("Created", stamp(order.get("created_at"))),
-                ("Paid", stamp(order.get("paid_at"))),
-            ]
-        )
-    with st.expander("Customer"):
-        st.subheader("Customer")
-        st.caption("Customer contact from the order record")
-        st.write(order.get("customer_email") or "Email not provided")
-    with st.expander("Shipping"):
-        st.subheader("Shipping")
-        address = order.get("shipping_address")
-        if isinstance(address, dict) and address:
-            st.write(order.get("shipping_name") or "Recipient not provided")
-            for field in (
-                "line1",
-                "line2",
-                "city",
-                "state",
-                "postal_code",
-                "country",
-            ):
-                if address.get(field):
-                    st.write(str(address[field]))
-        else:
-            st.write("Not provided on this order.")
-        st.caption("Service: " + str(order.get("shipping_service") or "Not provided"))
-        st.caption("Tracking, labels and fulfillment are not part of this portal.")
-    with st.expander("Order totals"):
-        st.subheader("Order totals")
+    with st.container(key="mc_order_layout"):
+        main, aside = st.columns([7, 3], gap="medium")
+        with main:
+            if not plates:
+                st.info("Manufacturing record unavailable. Viewing does not create records or files.")
+                payment_summary(order)
+            else:
+                selected = plates[0]["id"] if len(plates) == 1 else st.selectbox(
+                    "Plate / line", [p["id"] for p in plates],
+                    format_func=lambda i: next(p["line_id"] + " · " + p["id"] for p in plates if p["id"] == i),
+                    key="mc_line_" + order_id,
+                )
+                line_detail(client, next(p for p in plates if p["id"] == selected), order, order_layout=True)
+        with aside:
+            with st.container(border=True, key="mc_card_customer"):
+                st.subheader("Customer")
+                st.write(order.get("shipping_name") or "Name not recorded")
+                st.write(order.get("customer_email") or "Email not provided")
+            with st.container(border=True, key="mc_card_shipping"):
+                st.subheader("Shipping address")
+                address = order.get("shipping_address")
+                if isinstance(address, dict) and address:
+                    for field in ("line1", "line2", "city", "state", "postal_code", "country"):
+                        if address.get(field):
+                            st.write(str(address[field]))
+                else:
+                    st.write("Not recorded")
+                st.caption("Shipping method: " + str(order.get("shipping_service") or "Not recorded"))
+            with st.container(border=True, key="mc_card_order_record"):
+                st.subheader("Order information")
+                pairs([("Created", stamp(order.get("created_at"))), ("Paid", stamp(order.get("paid_at"))), ("Payment mode", mode)])
+                st.caption("Billing address is not stored in this order record.")
+            with st.expander("Organize order · archive"):
+                if order.get("status") == "completed" or mode in ("TEST", "OWNER TEST"):
+                    if st.button("Unarchive order" if archived else "Archive order", key="mc_archive_action"):
+                        try:
+                            client.archive(order_id, not archived)
+                            refresh()
+                            st.rerun()
+                        except PortalError as error:
+                            show_error(error)
 
-        def money(k):
-            value = order.get(k)
-            return (
-                f"${value:,.2f}" if isinstance(value, (float, int)) else "Unavailable"
-            )
 
-        pairs(
-            [
-                ("Subtotal", money("amount_subtotal_usd")),
-                ("Shipping", money("amount_shipping_usd")),
-                ("Total", money("amount_total_usd")),
-            ]
-        )
-        st.caption("Order-level totals only. Per-line prices are not split out.")
+def payment_summary(order):
+    def money(k):
+        v = order.get(k)
+        return f"${v:,.2f}" if isinstance(v, (int, float)) else "Not recorded"
+    with st.container(border=True, key="mc_card_payment"):
+        st.subheader("Payment & totals")
+        pairs([("Subtotal", money("amount_subtotal_usd")), ("Shipping", money("amount_shipping_usd")), ("Total", money("amount_total_usd"))])
+        paid = order.get("status") == "completed" and bool(order.get("paid_at"))
+        st.caption(("Payment completion recorded" if paid else "Payment completion not recorded") + " · " + str(order.get("payment_mode", "UNKNOWN")))
+        st.caption("Order-level totals. Drawing approval does not release manufacturing.")
+
+
+def frozen_lead_days(rev):
+    """Lead time belongs to the exact frozen source configuration, not current pricing."""
+    try:
+        source = json.loads(rev.get("source_json") or "{}")
+        value = source.get("configuration", {}).get("ships_in_days")
+        return value if type(value) is int and value > 0 else None
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def order_line_workspace(client, plate, order, detail, current, is_approved):
+    rev = detail["revision"]
+    spec = frozen_spec(rev)
+    with st.container(border=True, key="mc_card_selected_line"):
+        st.subheader("Selected plate · " + plate["line_id"])
+        html(chip(f"{'Current' if current else 'Superseded'} R{rev['number']}") + chip("Approved" if is_approved else "Awaiting approval", "good" if is_approved else "wait"))
+        vals = [("Material", spec.get("material")), ("Finished OD", spec.get("finished_od")), ("Finished bore", spec.get("finished_bore_diameter")), ("Thickness", spec.get("thickness")), ("Quantity", spec.get("quantity")), ("Lead time · days", frozen_lead_days(rev))]
+        html('<div class="mc-specs">' + ''.join(f'<div><div class="mc-label">{text(k)}</div><div class="mc-value">{text(v)}</div></div>' for k,v in vals) + '</div>')
+        st.caption("Dimensions in inches · exact frozen revision specification")
+    payment_summary(order)
+    if not current:
+        st.warning(f"Historical R{rev['number']} — superseded. Manufacturing downloads remain restricted.")
+    with st.container(key="mc_files"):
+        files(client, rev, plate, order, current, is_approved)
+        from .derived import show as derived_files
+        config, bundles = derived_files(client, rev, plate, current, is_approved, include_audit=False)
+    with st.expander("Revision history & customer approval evidence"):
+        history(client, detail)
+    with st.expander("Engineering details & audit evidence"):
+        frozen_audit_files(client, rev, plate)
+        from .derived import audit_details
+        audit_details(client, config, bundles)
+    with st.expander("Sourcing evidence"):
+        html(chip("Not released"))
+        for source in detail.get("sourcing", []):
+            pairs([("Route", source.get("route")), ("State", source.get("selection_status")), ("Recorded", stamp(source.get("selected_at")))])
+        if not detail.get("sourcing"):
+            st.caption("No sourcing records for this revision.")
+        st.caption("Review only. No vendor actions or manufacturing release.")
 
 
 def run():
@@ -904,6 +928,8 @@ def render_owner():
         st.error("Owner portal environment binding is unavailable.")
         return
     if not st.session_state.get("mc_key"):
+        if st.session_state.get("mc_login_error"):
+            st.error(ERRORS[st.session_state.pop("mc_login_error")])
         with st.container(border=True, key="mc_card_unlock"):
             st.title("Manufacturing Control")
             st.write(
@@ -932,24 +958,21 @@ def render_owner():
     with st.sidebar:
         st.caption("ROGUE MACHINE / O-PLATES")
         st.subheader("Manufacturing Control")
-        st.radio(
-            "Workspace",
-            [
-                "Overview",
-                "Orders",
-                "Frozen Plates",
-                "Sourcing records",
-                "Pricing & Availability",
-            ],
-            key="mc_nav",
-            on_change=sync_navigation,
-            label_visibility="collapsed",
-        )
+        primary = ["Overview", "Orders", "Pricing & Availability"]
+        nav = st.session_state.get("mc_nav", "Overview")
+        st.session_state["mc_primary_nav"] = nav if nav in primary else None
+        st.radio("Workspace", primary, key="mc_primary_nav", index=None,
+                 on_change=lambda: nav_to(st.session_state["mc_primary_nav"]), label_visibility="collapsed")
         st.radio(
             "Orders visibility", ["Active", "Archived", "All"], key="mc_archive_view"
         )
         st.button("Lock", on_click=lock, width="stretch")
         st.caption("Owner session · shared key")
+        st.divider()
+        st.caption("Manufacturing Records")
+        for secondary in ("Frozen Plates", "Sourcing records"):
+            st.button(secondary, on_click=nav_to, args=(secondary,), width="stretch",
+                      type="primary" if nav == secondary else "secondary")
         st.divider()
         st.markdown("**Manufacturing review only**")
         st.caption(
@@ -998,11 +1021,15 @@ def render_owner():
         if selected and nav == "Orders":
             order_detail(client, selected, snapshot)
         elif nav == "Overview":
-            overview(snapshot)
+            overview(snapshot, client)
         elif nav == "Frozen Plates":
             inventory_workspace(client)
         else:
             orders_workspace(snapshot, sourcing=nav == "Sourcing records")
     except PortalError as error:
+        if error.category == "authorization":
+            lock()
+            st.session_state["mc_login_error"] = error.category
+            st.rerun()
         show_error(error)
         st.button("Try again", on_click=refresh)

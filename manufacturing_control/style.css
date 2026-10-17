@@ -76,3 +76,7 @@
 /* Keep workspace navigation reachable after collapsing the sidebar on small screens. */
 [data-testid="stExpandSidebarButton"]{visibility:visible!important;position:fixed;left:12px;top:12px;z-index:1000001}
 [data-testid="stExpandSidebarButton"] *{visibility:visible!important}
+
+/* Dedicated order detail: main content before customer cards on mobile. */
+.st-key-mc_order_layout > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"]{align-items:flex-start}
+@media(max-width:850px){.st-key-mc_order_layout > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"]{flex-direction:column}.st-key-mc_order_layout > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]{width:100%!important;min-width:100%!important}}
