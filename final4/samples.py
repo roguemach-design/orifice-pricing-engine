@@ -58,7 +58,7 @@ def main():
             finished_od=1,
             finished_bore_diameter=0.3,
             handle_width=0.25,
-            centerline_to_handle_end=1,
+            centerline_to_handle_end=3,
         ),
         "packaging-long": replace(s, centerline_to_handle_end=30, thickness=0.375),
         "packaging-wide": replace(

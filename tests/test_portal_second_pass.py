@@ -33,17 +33,21 @@ def test_laser_file_center_nest_disjoint_closed_contours_and_intact_fold_webs():
         assert e.closed
         coords = list(e.get_points("xy"))
         assert len(coords) == len(set(coords))
-        poly = Polygon(coords)
+        from packaging_generator.audit import decode
+
+        poly, _ = decode(e)
         assert poly.is_valid and poly.area > 0
         boundaries.append(poly.boundary)
     for i, boundary in enumerate(boundaries):
         for other in boundaries[i + 1 :]:
             assert boundary.disjoint(other)
     center = next(e for e in contours if e.dxf.layer == "CUT_NEST")
-    center_poly = Polygon(center.get_points("xy"))
+    center_poly, _ = decode(center)
     xmin, ymin, xmax, ymax = center_poly.bounds
-    assert (xmin + xmax) / 2 == pytest.approx(d["center_x"] + d["panel_width"] / 2)
-    assert (ymin + ymax) / 2 == pytest.approx(d["panel_height"] / 2)
+    assert (xmin + xmax) / 2 == pytest.approx(
+        d["center_x"] + d["panel_width"] / 2, abs=0.00002
+    )
+    assert (ymin + ymax) / 2 == pytest.approx(d["panel_height"] / 2, abs=0.00002)
     assert center_poly.area == pytest.approx(d["nest"].area)
     signatures = set()
     for e in doc.modelspace():
@@ -211,3 +215,18 @@ def test_failed_bundle_query_blocks_generation_and_preserves_audit():
     assert all(b.disabled for b in at.button)
     assert any(e.label == "Engineering details / audit files" for e in at.expander)
     assert any("Too many requests" in i.value for i in at.info)
+
+
+def test_packaging_upgrade_retains_old_download_without_accepting_old_haas_profile():
+    source = portal_source().replace(
+        "'HAAS':'h','PACKAGING':'p'", "'HAAS':'new-h','PACKAGING':'new-p'"
+    )
+    at = AppTest.from_string(source).run()
+    assert not at.exception and "generated" not in at.session_state
+    labels = [b.proto.label for b in at.get("download_button")]
+    assert "Download Packaging DXF" in labels
+    assert "Download NC" not in labels
+    assert any(
+        "Retained packaging prototype: corrugated-trifold-2" in c.value
+        for c in at.caption
+    )

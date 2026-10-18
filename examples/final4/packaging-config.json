@@ -1,5 +1,5 @@
 {
-  "version": "prototype-board-2-perforated",
+  "version": "prototype-board-3-arcs-side-access",
   "board_reference": "SYNTHETIC BOARD - measure actual caliper before prototype cutting",
   "caliper": 0.125,
   "compression_fraction": 0.1,
@@ -16,5 +16,8 @@
   "max_layers": 12,
   "stitch_length": 0.25,
   "stitch_web": 0.125,
-  "fold_end_bridge": 0.25
+  "fold_end_bridge": 0.25,
+  "finger_diameter": 0.75,
+  "finger_min_diameter": 0.25,
+  "finger_min_bridge": 0.125
 }
