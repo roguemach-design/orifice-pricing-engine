@@ -1,5 +1,6 @@
 from dataclasses import replace
 from hashlib import sha256
+from pathlib import Path
 import json
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -305,7 +306,8 @@ def configure_ui(monkeypatch):
     monkeypatch.setattr(
         requests, "post", lambda *a, **k: (_ for _ in ()).throw(AssertionError("write"))
     )
-    return customer_page_test("pages/6_Internal_Sourcing.py").run(), calls, rev
+    from streamlit.testing.v1 import AppTest
+    return AppTest.from_file(Path(__file__).resolve().parents[1] / "owner_app/main.py", default_timeout=20).run(), calls, rev
 
 
 def test_session_unlock_lock_no_lazy_reads_and_selected_context(monkeypatch):

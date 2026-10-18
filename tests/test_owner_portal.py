@@ -142,7 +142,19 @@ def test_owner_page_is_hidden_and_anonymous_has_no_data_requests(monkeypatch):
     app = customer_page_test("pages/6_Internal_Sourcing.py").run()
     assert not app.exception
     assert not app.selectbox and not app.get("download_button")
-    assert app.text_input[0].label == "Internal admin credential"
+    assert not app.text_input
+    assert app.title[0].value == "Manufacturing Control has moved"
+    assert app.get("link_button")[0].url == "https://mfgcontrol.o-plates.com/"
+    from unittest.mock import Mock
+    access = Mock()
+    app.session_state["mc_download_access"] = access
+    app.session_state["mc_key"] = "test-only-owner-key"
+    app.query_params["return_to"] = "https://example.invalid/"
+    app.run()
+    access.revoke.assert_called_once()
+    assert "mc_key" not in app.session_state
+    assert "mc_download_access" not in app.session_state
+    assert not app.query_params
     source = Path("pages/6_Internal_Sourcing.py").read_text()
     assert "requests.post" not in source and "Create revised drawing" not in source
     navigation = Path("customer_navigation.py").read_text()
