@@ -70,12 +70,12 @@ def spec(**kw):
 @pytest.mark.parametrize(
     "od,width,length,thickness",
     [
-        (1, 0.25, 1, 0.125),
+        (1, 0.25, 3, 0.125),
         (5, 2, 10.5, 0.125),
         (5, 2, 10.5, 0.5),
         (16, 4, 20, 0.5),
         (5, 4.8, 6, 0.25),
-        (5, 0.1, 2.6, 0.125),
+        (5, 0.5, 7, 0.125),
         (5, 2, 30, 0.375),
         (20, 6, 30, 0.5),
     ],
@@ -126,8 +126,9 @@ def test_packaging_independent_dxf_reader(od, width, length, thickness):
     assert max(y for x, y in pts) == pytest.approx(d["flat_shell"][1])
     # Independent analytic sample: every canonical arc point lies INSIDE the cut hole.
     hole = [e for e in cuts if e.dxf.layer == "CUT_NEST"][0]
-    coords = list(hole.get_points("xy"))
-    hole_poly = Polygon(coords)
+    from packaging_generator.audit import decode
+
+    hole_poly, _ = decode(hole)
     x0, y0 = d["center_nest_position"]
     for seg in build_plate_geometry(s).segments:
         for i in range(101):

@@ -2,12 +2,18 @@
 
 from dataclasses import asdict
 import json
+from datetime import datetime, timezone
 from frozen_plate.repository import canonical, digest, WorkflowError
 from packaging_generator import VERSION as PACKAGING_VERSION
 from packaging_generator.generator import generate as packaging
 from haas_generator.staging import generate as haas, VERSION as HAAS_VERSION
 from haas_generator.engineering import VERSION as ENGINEERING_VERSION, POST_VERSION
 from haas_generator import VERSION as CORE_VERSION
+
+# Packaging v3 adoption is prospective. Historical approvals must never be
+# regenerated merely because an upgraded worker starts or scans. Explicit owner
+# generation remains available as a NEW immutable derived bundle.
+PACKAGING_V3_APPROVAL_CUTOFF = datetime(2026, 10, 18, 11, 45, 31, tzinfo=timezone.utc)
 
 ACTOR = "automatic-manufacturing-staging"
 
@@ -79,6 +85,20 @@ class AutomaticStager:
             )
             if dict(row) != association:
                 raise WorkflowError("current exact approved parent required")
+            historical_packaging = False
+            if family == "PACKAGING":
+                approval = repo._one(
+                    db,
+                    "SELECT approved_at FROM frozen_plate_approvals WHERE revision_id=?",
+                    (association["revision_id"],),
+                )
+                approved_at = approval["approved_at"]
+                if isinstance(approved_at, str):
+                    approved_at = datetime.fromisoformat(
+                        approved_at.replace("Z", "+00:00")
+                    )
+                historical_packaging = approved_at < PACKAGING_V3_APPROVAL_CUTOFF
+            previous_packaging = None
             for b in db.execute(
                 """SELECT id,manifest_json,manifest_sha256 FROM manufacturing_bundles
                     WHERE revision_id=? AND family=? AND created_by=? ORDER BY created_at,id""",
@@ -86,8 +106,16 @@ class AutomaticStager:
             ):
                 if digest(b["manifest_json"]) != b["manifest_sha256"]:
                     raise WorkflowError("stored staging manifest integrity failure")
+                if historical_packaging:
+                    previous_packaging = b["id"]
                 if json.loads(b["manifest_json"]).get("staging_key") == key:
                     return b["id"]
+            if historical_packaging:
+                if previous_packaging:
+                    return previous_packaging
+                raise ValueError(
+                    "historical packaging requires explicit owner generation; automatic upgrade disabled"
+                )
             r, spec, _, _ = s._parent(db, association, require_current=True)
             parent = {**association, "revision": f"R{r['number']}"}
             if family == "HAAS":

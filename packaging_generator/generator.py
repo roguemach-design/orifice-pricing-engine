@@ -5,13 +5,12 @@ from hashlib import sha256
 from io import StringIO
 import json
 from math import ceil, cos, sin, pi, acos, isfinite
-from html import escape
 import ezdxf
 from shapely.geometry import Polygon
-from shapely import affinity
 from plate_geometry import build_plate_geometry, canonical_specification
 from manufacturing_files import _DXF_LOCK
 from . import VERSION
+from .contour import nest_contour, transform, polygon, area, svg_path
 
 SAMPLE_ERROR = 0.0001
 LAYERS = ("CUT_SHELL", "CUT_FRAME", "CUT_NEST", "PERF_FOLD_LEFT", "PERF_FOLD_RIGHT")
@@ -37,6 +36,9 @@ class Configuration:
     stitch_length: float = 0.25
     stitch_web: float = 0.125
     fold_end_bridge: float = 0.25
+    finger_diameter: float = 0.75
+    finger_min_diameter: float = 0.25
+    finger_min_bridge: float = 0.125
     # Mass intentionally omitted until measured material data is validated.
 
     def __post_init__(self):
@@ -50,6 +52,9 @@ class Configuration:
             ):
                 raise ValueError("printable ASCII configuration labels required")
         bounds = {
+            "finger_diameter": (0.25, 0.75),
+            "finger_min_diameter": (0.25, 0.75),
+            "finger_min_bridge": (0.125, 0.5),
             "stitch_length": (0.05, 0.5),
             "stitch_web": (0.05, 0.5),
             "fold_end_bridge": (0.15, 0.75),
@@ -70,6 +75,8 @@ class Configuration:
                 raise ValueError(f"{name}: outside bounded prototype range")
         if type(self.max_layers) is not int or not 1 <= self.max_layers <= 20:
             raise ValueError("max_layers must be 1-20")
+        if self.finger_min_diameter > self.finger_diameter:
+            raise ValueError("minimum finger diameter exceeds target")
         if self.flute_direction != "X_PERPENDICULAR_TO_FOLD":
             raise ValueError("only qualified prototype flute orientation supported")
         if self.closure not in ("CHAIN_STITCH_REVIEW", "STAPLE_REVIEW"):
@@ -114,11 +121,7 @@ def layout(spec, config):
     ):
         raise ValueError("outside prototype packaging envelope")
     # The nesting cut is exterior-only. Neither bore nor handle hole is cut into backing.
-    plate = sampled_outline(spec)
-    cut_offset = config.clearance - config.kerf / 2 + SAMPLE_ERROR
-    nest = plate.buffer(cut_offset, quad_segs=64)
-    if nest.geom_type != "Polygon" or not nest.is_valid or len(nest.interiors):
-        raise ValueError("nest offset topology unsupported")
+    segments, geometry_report = nest_contour(spec, config)
     W = spec.finished_od + 2 * config.margin
     H = spec.centerline_to_handle_end + spec.finished_od / 2 + 2 * config.margin
     effective = config.caliper * (1 - config.compression_fraction)
@@ -131,11 +134,10 @@ def layout(spec, config):
     center_x = W + first_spine
     right_x = center_x + W + second_spine
     flat_width = right_x + W
-    # Nest rotates to align the long handle with panel height.
-    nest = affinity.rotate(nest, 90, origin=(0, 0))
-    xmin, ymin, xmax, ymax = nest.bounds
-    xoff, yoff = W / 2 - (xmin + xmax) / 2, H / 2 - (ymin + ymax) / 2
-    nest = affinity.translate(nest, xoff=xoff, yoff=yoff)
+    # Preserve the original bore-center/panel alignment; reliefs must not recenter the nest.
+    xoff, yoff = W / 2, config.margin + spec.finished_od / 2
+    segments = transform(segments, xoff, yoff)
+    nest = polygon(segments)  # validation only; never exported as the cut geometry
     minx, miny, maxx, maxy = nest.bounds
     if (
         minx <= config.closure_edge_distance + config.caliper
@@ -181,10 +183,14 @@ def layout(spec, config):
             "PERF_FOLD_LEFT": [W, center_x],
             "PERF_FOLD_RIGHT": [center_x + W, right_x],
         },
-        board_net_area_in2=flat_width * H - nest.area + (n - 1) * (W * H - nest.area),
+        board_net_area_in2=flat_width * H
+        - area(segments)
+        + (n - 1) * (W * H - area(segments)),
         board_gross_area_in2=flat_width * H + (n - 1) * W * H,
         nest_transform=dict(rotation_degrees=90, xoff=xoff, yoff=yoff),
         nest=nest,
+        nest_segments=segments,
+        geometry_report=geometry_report,
     )
 
 
@@ -235,7 +241,11 @@ def dxf_bytes(spec, config, data):
                 if (x, y) != tuple(d["center_nest_position"]):
                     rectangle(x, y, W, H, "CUT_FRAME")
                 m.add_lwpolyline(
-                    [(px + x, py + y) for px, py in d["nest"].exterior.coords[:-1]],
+                    [
+                        (s.start[0] + x, s.start[1] + y, s.bulge)
+                        for s in d["nest_segments"]
+                    ],
+                    format="xyb",
                     close=True,
                     dxfattribs={"layer": "CUT_NEST"},
                 )
@@ -253,7 +263,7 @@ def dxf_bytes(spec, config, data):
 def generate(spec, config, parent):
     d = layout(spec, config)
     W, H = d["panel_width"], d["panel_height"]
-    report = {k: v for k, v in d.items() if k != "nest"}
+    report = {k: v for k, v in d.items() if k not in ("nest", "nest_segments")}
     report.update(
         units="inch",
         generator_version=VERSION,
@@ -264,8 +274,8 @@ def generate(spec, config, parent):
         physical_validation="REQUIRED",
         estimated_mass=None,
         mass_reason="No validated board areal mass",
-        contour_sampling_error_bound=SAMPLE_ERROR,
-        nest_cut_compensation="internal cut: clearance minus half kerf plus sampling error; disable CAM kerf",
+        contour_sampling_error_bound=0.0,
+        nest_cut_compensation="internal cut: exact clearance minus half kerf; disable CAM kerf",
     )
     instructions = f"""# PROTOTYPE PACKAGE - PHYSICAL VALIDATION REQUIRED
 
@@ -287,7 +297,12 @@ Flutes run in flat-sheet X, perpendicular to the vertical perforated fold region
    Fold the LEFT panel underneath as the solid back, and the RIGHT panel over as the solid front.
    The shell center must never be used as solid backing. Minimum compressed nest depth
    {d['compressed_nest_depth']:.6f}; nominal uncompressed depth {d['nominal_nest_depth']:.6f}.
-5. Place finished plate into the nest; handle fully supported; bore lies over the solid folded LEFT protective panel.
+5. Two side finger reliefs open from the LEFT long handle edge in the layout, one near the tip
+   and one before the paddle transition. Toolpath diameter {2*d['geometry_report']['finger_reliefs'][0]['cutter_radius']:.6f} inch.
+   Use them to access alongside/beneath the handle; do not pull against a sharp steel edge.
+   Verify retention, finger clearance and cardboard strength by physical cutting. These reliefs
+   are NOT evidence of shipping qualification; all packaging remains PROTOTYPE / ENGINEERING REVIEW.
+   Place finished plate into the nest; handle fully supported; bore lies over the solid folded LEFT protective panel.
    Fit measured nonabrasive protective pads to consume excess axial cavity; target total pad
    thickness under closure load is {d["protective_pad_total_at_compressed_depth"]:.6f} inch, split across both faces.
    This is a coupon target, not a validated cushion/compression specification.
@@ -306,7 +321,7 @@ Estimated folded envelope: {d['folded_envelope_estimate']}; confirm by physical 
 Net board area {d['board_net_area_in2']:.3f} in2; gross component area {d['board_gross_area_in2']:.3f} in2.
 Fixture reference is separate from the cardboard DXF and is NOT a fixture machining drawing.
 """
-    # True-proportion overview; nest positions use exact exported polyline coordinates.
+    # True-proportion overview; SVG uses the same analytic line/arc cut contour.
     lw, lh = d["layout_size"]
     svg = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="-.2 -.2 {lw+.4} {lh+.4}">',
@@ -328,9 +343,8 @@ Fixture reference is separate from the cardboard DXF and is NOT a fixture machin
     for x, y in [d["center_nest_position"]] + d["frame_positions"]:
         if (x, y) != tuple(d["center_nest_position"]):
             rect(x, y, W, H, "#5f452a")
-        pts = " ".join(f"{px+x:.6f},{py+y:.6f}" for px, py in d["nest"].exterior.coords)
         svg.append(
-            f'<polygon points="{pts}" fill="#eee" stroke="#b34326" stroke-width=".02"/>'
+            f'<path d="{svg_path(d["nest_segments"], x, y)}" fill="#eee" stroke="#b34326" stroke-width=".02"/>'
         )
     svg.append("</svg>")
     fixture = f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="-1 -1 {W+2} {H+2}">
@@ -340,6 +354,9 @@ Fixture reference is separate from the cardboard DXF and is NOT a fixture machin
 <text x=".1" y=".8" font-size=".15">Removable stops; closure access all edges</text></svg>"""
     files = {
         "packaging.dxf": dxf_bytes(spec, config, d),
+        "geometry.json": (
+            json.dumps(d["geometry_report"], sort_keys=True, indent=2) + "\n"
+        ).encode("ascii"),
         "assembly.md": instructions.encode("ascii"),
         "schedule.json": (json.dumps(report, sort_keys=True, indent=2) + "\n").encode(
             "ascii"

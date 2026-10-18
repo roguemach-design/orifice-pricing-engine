@@ -43,6 +43,9 @@ class StagingWorker:
                         )
                 except ValueError as error:
                     known = {
+                        "historical packaging requires explicit owner generation; automatic upgrade disabled": "Historical approval retained. New packaging geometry requires explicit owner generation of a new derived bundle.",
+                        "nest clearance collapses canonical neck radius; require clearance below 0.03125 inch": "Packaging clearance must be below the canonical 0.03125 inch neck radius to preserve tangent arcs.",
+                        "handle cannot safely accommodate two side finger reliefs with corner, transition and cardboard bridges": "Handle cannot safely fit two side finger reliefs with the required corner, transition and cardboard bridges.",
                         "material has no approved profile cutting parameters": "No controlled machining profile matches this material. A compatible material/tooling profile is required.",
                         "bore/tool sweep lacks radial fixture opening clearance": "The frozen bore exceeds the controlled fixture opening. A compatible fixture profile is required.",
                         "supported exact chamfer geometry required": "The Frozen Plate lacks the supported explicit chamfer geometry/orientation.",

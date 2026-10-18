@@ -85,7 +85,24 @@ def show(
             and expected
             and b["staging"].get("profile_sha256") == expected
         ]
+        # Preserve access to immutable earlier packaging after a prospective
+        # generator upgrade. Never substitute earlier HAAS machine profiles.
+        retained_packaging = False
+        if family == "PACKAGING" and not found:
+            found = [
+                b
+                for b in bundles
+                if b["family"] == family
+                and b.get("staging", {}).get("mode") == "AUTOMATIC"
+            ]
+            retained_packaging = bool(found)
         latest = max(found, key=lambda b: (b["created_at"], b["id"])) if found else None
+        if retained_packaging:
+            st.caption(
+                "Retained packaging prototype: "
+                + str(latest.get("generator_version", "earlier version"))
+                + ". Existing bytes are unchanged; new geometry requires a new derived bundle."
+            )
         with st.container(border=True, key=f'mc_card_derived_{rev["id"]}_{family}'):
             label_col, action_col = st.columns([1.45, 1], gap="small")
             with label_col:
