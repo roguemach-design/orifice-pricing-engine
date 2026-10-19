@@ -1,3 +1,5 @@
+from journey.ui import emit as journey_event, headers as journey_headers
+
 from customer_safety import service_message
 # pages/1_Quote.py
 import os
@@ -364,6 +366,7 @@ def _render_product_image() -> None:
 # Checkout
 # -----------------------------
 def start_checkout(payload_inputs: dict, priced_configuration: dict) -> None:
+    journey_event("checkout", "attempted")
     customer_context = st.session_state.auth.get("email") if is_logged_in() else "guest"
     fingerprint = hashlib.sha256(
         json.dumps(
@@ -405,7 +408,7 @@ def start_checkout(payload_inputs: dict, priced_configuration: dict) -> None:
             current_user_id_hint(),
             API_KEY,
         )
-    headers: Dict[str, str] = {}
+    headers: Dict[str, str] = journey_headers()
 
     # Logged-in customers: use Bearer token so API saves customer_id on the order
     if is_logged_in():
@@ -425,10 +428,13 @@ def start_checkout(payload_inputs: dict, priced_configuration: dict) -> None:
             timeout=30,
         )
     except requests.RequestException:
+        journey_event("checkout", "error", "api_failure")
         st.error("Checkout is temporarily unavailable. Please try again.")
         st.stop()
 
     if r.status_code != 200:
+        journey_event("checkout", "blocked" if r.status_code in (401,403,503) else "error",
+                      "system_restriction" if r.status_code in (401,403) else "api_failure")
         st.error(service_message(r.status_code))
         st.stop()
 
@@ -459,7 +465,7 @@ def load_active_config() -> dict:
 def request_authoritative_price(
     payload_inputs: dict,
 ) -> tuple[Optional[dict], Optional[str]]:
-    headers = {"x-api-key": API_KEY} if API_KEY else {}
+    headers = {**({"x-api-key": API_KEY} if API_KEY else {}), **journey_headers()}
     try:
         response = requests.post(
             f"{API_BASE}/quote",
@@ -468,6 +474,7 @@ def request_authoritative_price(
             timeout=20,
         )
     except requests.RequestException:
+        journey_event("quote", "error", "api_failure")
         return (
             None,
             "Live pricing is temporarily unavailable. Your entries are preserved; please try again.",
@@ -476,12 +483,15 @@ def request_authoritative_price(
     if response.status_code == 200:
         return response.json(), None
 
+    journey_event("quote", "error", "unsupported" if response.status_code == 400 else
+                  "invalid_input" if response.status_code == 422 else "api_failure")
     return None, service_message(response.status_code, pricing=True)
 
 
 try:
     active_config = load_active_config()
 except requests.RequestException:
+    journey_event("configurator", "error", "api_failure")
     st.error(
         "The configurator cannot load current product availability. Please try again shortly."
     )
@@ -803,6 +813,7 @@ if drawing_access_allowed:
         if uploaded_drawing is not None and analyze_column.button(
             "Analyze drawing", key="phase1g_analyze_drawing",
         ):
+            journey_event("analyzer", "attempted")
             try:
                 limits = upload_limits_from_environment()
                 validated_upload = validate_drawing_upload(
@@ -831,6 +842,8 @@ if drawing_access_allowed:
                     candidate_count=len(processed_upload.review.candidates),
                     inspection_seconds=time.perf_counter() - inspection_started,
                 )
+                journey_event("analyzer", "success" if processed_upload.review.quote_specific else "blocked",
+                              "none" if processed_upload.review.quote_specific else "unsupported")
                 st.session_state[_DRAWING_UPLOAD_KEY] = processed_upload
                 st.session_state.pop(_DRAWING_PENDING_KEY, None)
                 st.session_state.pop("phase1g_candidate_label", None)
@@ -848,16 +861,20 @@ if drawing_access_allowed:
                         st.session_state[_DRAWING_PENDING_KEY] = recognized
                 st.rerun()
             except DrawingUploadValidationError as exc:
+                journey_event("analyzer", "error", "invalid_input")
                 _starter_notice("error", str(exc))
             except DrawingProcessingBusyError:
+                journey_event("analyzer", "blocked", "system_restriction")
                 _starter_notice("error",
                     "Another drawing is processing. Try again when it finishes; your form is unchanged."
                 )
             except DrawingProcessingTimeoutError:
+                journey_event("analyzer", "error", "technical_failure")
                 _starter_notice("error",
                     "The drawing took too long to process. Your current configuration was preserved."
                 )
             except DrawingProcessingError:
+                journey_event("analyzer", "error", "technical_failure")
                 _starter_notice("error",
                     "We couldn't process that drawing safely. You can continue with manual entry."
                 )
@@ -1495,6 +1512,15 @@ if all(
         } if handle_hole_enabled else {}),
     }
 
+if os.environ.get("APP_ENV") == "production" and is_logged_in() and owner_test_checkout_allowed:
+    from journey.ui import mark_internal
+    mark_internal()
+journey_event("configurator")
+if errors:
+    journey_event("configuration", "error", "invalid_input")
+if active_assisted_session is not None and assisted_review is not None and assisted_review.attention:
+    if any(a.kind == FieldAttentionKind.UNSUPPORTED for a in assisted_review.attention):
+        journey_event("configuration", "blocked", "unsupported")
 result = None
 pricing_error = None
 pricing_payload = None
@@ -1517,7 +1543,11 @@ if payload_inputs is not None and not errors:
             pricing_error = "The current configuration needs review and confirmation before pricing."
 
 if pricing_payload is not None:
+    journey_event("configuration", "success")
     result, pricing_error = request_authoritative_price(pricing_payload)
+    if result:
+        journey_event("quote", "success")
+
     if pricing_error:
         with right:
             st.error(pricing_error)
@@ -1668,6 +1698,8 @@ with right:
                     and not owner_test_checkout_allowed
                 )
             )
+            if checkout_disabled and result is not None:
+                journey_event("checkout", "blocked", "system_restriction")
             if st.button("Continue to secure checkout", disabled=checkout_disabled):
                 if active_assisted_session is not None:
                     try:
@@ -1715,6 +1747,7 @@ with right:
                         st.stop()
                 else:
                     cart_inputs = pricing_payload
+                journey_event("cart", "success")
                 _add_to_cart(
                     cart_inputs, result, assisted=active_assisted_session is not None
                 )

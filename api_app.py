@@ -47,8 +47,20 @@ from jwt import PyJWKClient
 # App + config
 # ----------------------------
 from final4.worker import lifespan as manufacturing_lifespan
+from contextlib import asynccontextmanager
+from journey import runtime as journey_runtime
+
+@asynccontextmanager
+async def platform_lifespan(app):
+    journey_runtime.start()
+    try:
+        async with manufacturing_lifespan(app):
+            yield
+    finally:
+        journey_runtime.stop()
+
 app = FastAPI(
-    title="Orifice Pricing API", version="1.0.0", lifespan=manufacturing_lifespan,
+    title="Orifice Pricing API", version="1.0.0", lifespan=platform_lifespan,
     docs_url=None, redoc_url=None, openapi_url=None,
 )
 logger = logging.getLogger(__name__)
@@ -57,6 +69,15 @@ logger = logging.getLogger(__name__)
 @app.exception_handler(StarletteHTTPException)
 async def safe_http_error(request: Request, exc: StarletteHTTPException):
     detail = exc.detail
+    if request.url.path in ("/quote", "/checkout/create", "/checkout/cart/create"):
+        restriction = exc.status_code in (401, 403, 429) or detail in (
+            "Only authorized sandbox checkout is available during validation.",
+            "Production checkout is awaiting activation.", "Live Checkout is disabled during validation.",
+        ) if isinstance(detail, str) else exc.status_code in (401, 403, 429)
+        category = ("system_restriction" if restriction else "invalid_input" if exc.status_code in (400, 422)
+                    else "api_failure")
+        journey_runtime.observe_error(request.headers.get("x-oplates-journey"),
+            "quote" if request.url.path == "/quote" else "checkout", category)
     if exc.status_code >= 500 and not request.url.path.startswith(("/admin/", "/internal/", "/debug/")):
         logger.error("Customer service request failed: route=%s status=%s", request.scope.get("route").path if request.scope.get("route") else "unmatched", exc.status_code)
         detail = "Service temporarily unavailable. Please try again."
@@ -1160,6 +1181,7 @@ def checkout_create(
     req: CheckoutCreateRequest,
     customer_user_id: Optional[str] = Depends(_api_key_or_customer_user_id),
     checkout_mode: Optional[str] = Header(default=None, alias="x-oplates-checkout-mode"),
+    journey_session: Optional[str] = Header(default=None, alias="x-oplates-journey"),
 ):
     principal = f"customer:{customer_user_id}" if customer_user_id else "verified-ui-key"
     _RATE_LIMITER.check(
@@ -1296,6 +1318,9 @@ def checkout_create(
         customer_user_id=customer_user_id,
     )
 
+    if isinstance(journey_session, str):
+        journey_runtime.submit("bind", journey_session, session.id,
+                               internal=owner_test or _owner_test_authorized(customer_user_id))
     return {"checkout_url": session.url, "session_id": session.id}
 
 
@@ -1304,6 +1329,7 @@ def checkout_cart_create(
     req: CartCheckoutCreateRequest,
     customer_user_id: str = Depends(_require_customer_user_id),
     checkout_mode: Optional[str] = Header(default=None, alias="x-oplates-checkout-mode"),
+    journey_session: Optional[str] = Header(default=None, alias="x-oplates-journey"),
 ):
     owner_test = _stripe_checkout_required(customer_user_id, checkout_mode)
     _db_required()
@@ -1459,6 +1485,9 @@ def checkout_cart_create(
         customer_user_id=customer_user_id,
     )
 
+    if isinstance(journey_session, str):
+        journey_runtime.submit("bind", journey_session, session.id,
+                               internal=owner_test or _owner_test_authorized(customer_user_id))
     return {"checkout_url": session.url, "session_id": session.id}
 
 
@@ -1909,6 +1938,10 @@ async def _complete_stripe_webhook(request: Request, *, owner_test):
     finally:
         db.close()
 
+    # Observe only the committed, server-verified transition. No client proof.
+    journey_runtime.submit("paid", stripe_session_id,
+                           live=APP_ENV == "production" and not owner_test)
+
     # Retry-safe environment-isolated integration after the order has committed.
     if frozen_plate_enabled(app_env=APP_ENV):
         from frozen_plate.api import repository as frozen_repository
@@ -2001,3 +2034,7 @@ if frozen_plate_enabled(app_env=APP_ENV):
         @app.get("/admin/manufacturing/staging/{revision_id}", dependencies=[Depends(_rate_limit_admin)])
         def manufacturing_staging_status(revision_id: str):
             return staging_worker().status(revision_id)
+
+
+from journey.api import install as install_journey
+install_journey(app, _rate_limit_admin)
