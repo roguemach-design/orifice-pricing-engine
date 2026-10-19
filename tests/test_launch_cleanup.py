@@ -115,24 +115,27 @@ def test_cart_quote_pdf_preserves_ui_values(quantity, lead):
     assert all(term not in text.lower() for term in ["staging", "sandbox", "debug"])
 
 
-def test_footer_runs_even_when_page_stops(monkeypatch):
-    import customer_navigation as nav
+def test_footer_runs_even_when_page_stops():
+    from streamlit.testing.v1 import AppTest
 
-    class StopPage(BaseException):
-        pass
-
-    def stop():
-        raise StopPage()
-
-    monkeypatch.setattr(nav.st, "set_page_config", lambda **k: None)
-    monkeypatch.setattr(nav.st, "Page", lambda *a, **k: None)
-    monkeypatch.setattr(
-        nav.st,
-        "navigation",
-        lambda *a, **k: SimpleNamespace(url_path="My_Orders", run=stop),
-    )
-    calls = []
-    monkeypatch.setattr(nav, "render_customer_footer", lambda: calls.append("footer"))
-    with pytest.raises(StopPage):
-        nav.run_customer_app()
-    assert calls == ["footer"]
+    app = AppTest.from_string('''
+from types import SimpleNamespace
+import streamlit as st
+import customer_navigation as nav
+def stopped_page():
+    st.write("Page before stop")
+    st.stop()
+    st.write("Unreachable")
+original_page, original_navigation = st.Page, st.navigation
+try:
+    st.Page = lambda *a, **k: None
+    st.navigation = lambda *a, **k: SimpleNamespace(url_path="My_Orders", run=stopped_page)
+    nav.run_customer_app()
+finally:
+    st.Page, st.navigation = original_page, original_navigation
+''').run()
+    assert not app.exception
+    values = [item.value for item in app.markdown]
+    assert values[0] == "Page before stop"
+    assert "<footer" in values[1] and "Privacy Policy" in values[1]
+    assert "Unreachable" not in values
