@@ -51,6 +51,10 @@ async function main(){
   assert(!host.messages.some(m=>m.target==='frame'));
   hostReceive({origin:'https://quote.o-plates.com',source:host.frameWindow,data:{type:'oplates:journey-ready',version:1,nonce:randomUUID()}});
   assert(host.messages.some(m=>m.target==='frame'&&m.origin==='https://quote.o-plates.com'));
+  const nested={};host.frameWindow.length=1;host.frameWindow[0]=nested;
+  const before=host.messages.length;
+  hostReceive({origin:'https://quote.o-plates.com',source:nested,data:{type:'oplates:journey-ready',version:1,nonce:randomUUID()}});
+  assert.equal(host.messages.length,before+1,'Only a direct child of the configured quote frame is also trusted');
   console.log('Browser protocol: consent, withdrawal, GPC, deduplication, sensitive-field rejection and origin/source/nonce checks passed.');
 }
 main().catch(e=>{console.error(e);process.exitCode=1});

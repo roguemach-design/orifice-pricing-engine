@@ -106,7 +106,11 @@
       if(previous!==token)seen.clear();last=Date.now();if(token)saveSession();else sharedCookie(null);publish();initial().then(flush).catch(()=>{});
     } else {
       const frame=app.document.getElementById('plate-configurator');
-      if(!frame||e.source!==frame.contentWindow||e.origin!==new URL(frame.src,app.location.href).origin||!QUOTES.includes(e.origin))return;
+      if(!frame||!frame.contentWindow||e.origin!==new URL(frame.src,app.location.href).origin||!QUOTES.includes(e.origin))return;
+      // Streamlit components are direct children of the configured quote iframe.
+      let trusted=e.source===frame.contentWindow;
+      for(let i=0;!trusted&&i<frame.contentWindow.length;i++)trusted=e.source===frame.contentWindow[i];
+      if(!trusted)return;
       if(data?.type!=='oplates:journey-ready'||data.version!==1||typeof data.nonce!=='string'||!/^[a-f0-9-]{36}$/.test(data.nonce))return;
       nonce=data.nonce;share();
     }
