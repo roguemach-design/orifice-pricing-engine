@@ -82,9 +82,9 @@
     if(config.source==='embed') {height(0);return;}
     const note=document.createElement('span');note.textContent=protectedBrowser()?'Journey diagnostics disabled by your browser privacy preference.':
       'Optional anonymous journey diagnostics help us find quoting problems. No field values, drawings or recordings. Timelines: 7 days; daily totals: 90 days. ';
-    root.append(note);const policy=document.createElement('a');policy.textContent='Privacy';policy.href='https://www.o-plates.com/privacy.html';policy.target='_blank';policy.rel='noopener';root.append(policy);
+    root.append(note);const policy=document.createElement('a');policy.textContent='Privacy';policy.href=config.endpoint===APIS[0]?'https://www.o-plates.com/privacy.html':'https://oplates-landing-page-staging.onrender.com/privacy.html';policy.target='_blank';policy.rel='noopener';root.append(policy);
     if(!protectedBrowser()){
-      const label=document.createElement('label'),check=document.createElement('input');check.type='checkbox';check.checked=internal;check.disabled=consent;check.onchange=()=>{internal=check.checked;};label.append(check,' Internal test session');root.append(label);
+      const label=document.createElement('label'),check=document.createElement('input');check.type='checkbox';check.checked=internal;check.disabled=consent||config.endpoint===APIS[1];check.onchange=()=>{internal=check.checked;};label.append(check,' Internal test session');root.append(label);
       for(const [label,allow] of [[consent?'Diagnostics enabled':'Allow diagnostics',true],[consent?'Turn off and delete this session':'Decline',false]]){
         const button=document.createElement('button');button.textContent=label;button.disabled=allow&&consent;button.onclick=()=>{choose(allow).catch(()=>{});};root.append(button);
       }
@@ -123,6 +123,7 @@
     const pref=readCookie('oplates_journey_choice')||read('oplates-journey-preference');consent=Boolean(pref?.version===VERSION&&pref.allow===true&&Date.now()-pref.at<2592000000&&!protectedBrowser());internal=pref?.internal===true;
     const shared=readCookie('oplates_journey_v1');if(pref?.allow!==false&&shared?.version===VERSION&&tokenOK(shared.token)&&Date.now()-shared.last<1800000&&!protectedBrowser()){consent=true;internal=shared.internal===true;}
     const saved=read('oplates-journey-session',true)||shared;if(consent&&tokenOK(saved?.token)&&Date.now()-saved.last<1800000){token=saved.token;last=saved.last;internal=saved.internal===true;}
+    if(endpoint===APIS[1])internal=true;
     app.addEventListener('message',receive);
     app.__oplatesJourneyEmit=emit;
     app.__oplatesJourneyInternal=()=>{internal=true;if(token){request('/journey/internal',{}).catch(()=>{});saveSession();sharedChoice({allow:true,internal:true,version:VERSION,at:Date.now()});share();}};
