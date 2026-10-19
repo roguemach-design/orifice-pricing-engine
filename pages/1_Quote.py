@@ -747,7 +747,7 @@ owner_test_checkout_allowed = bool(
 
 @st.dialog("Sign in")
 def _starter_sign_in():
-    st.caption("Sign in to analyze a print or save your quotes and orders.")
+    st.caption("Sign in to analyze a print, build a quote cart, or view your orders.")
     render_auth_sidebar(show_debug=False, placement="inline")
 
 
@@ -765,7 +765,7 @@ with st.container(key="configurator_starter", border=False):
         if is_logged_in():
             render_auth_sidebar(show_debug=False, placement="inline")
         else:
-            st.caption("Save your quotes and orders")
+            st.caption("Manage your orders and quote cart")
             if st.button("Sign in", key="starter_sign_in", type="secondary"):
                 _starter_sign_in()
 
