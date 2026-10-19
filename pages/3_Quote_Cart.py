@@ -1,6 +1,8 @@
 # pages/3_Quote_Cart.py
 from __future__ import annotations
 
+from customer_safety import service_message, customer_product_details
+
 import io
 import os
 import uuid
@@ -47,7 +49,7 @@ OWNER_TEST_CHECKOUT_ENABLED = feature_flag_enabled(
 )
 
 if not API_BASE:
-    st.error("The O-Plates pricing service is not configured.")
+    st.error("Pricing is temporarily unavailable. Please try again shortly.")
     st.stop()
 
 owner_checkout_allowed = not (OWNER_ACCEPTANCE_MODE or os.environ.get("APP_ENV") == "production") or verified_owner_access(
@@ -420,7 +422,7 @@ with top[1]:
 
 if not cart:
     st.warning("Your Quote Cart is empty.")
-    st.info("Go to **Quote** and click **Add to Quote** to build a multi-line quote.")
+    st.info("Go to **Configure your plate** and sign in to add plates to your cart.")
     st.stop()
 
 
@@ -492,8 +494,8 @@ for idx, item in enumerate(cart):
                 st.session_state.cart = [x for x in st.session_state.cart if x.get("line_id") != line_id]
                 st.rerun()
 
-        with st.expander("Show configuration JSON"):
-            st.json(inputs)
+        with st.expander("Configuration details"):
+            st.table(customer_product_details(inputs))
 
     cart_subtotal += line_total
     line_views.append(
@@ -560,7 +562,7 @@ with c2:
     st.caption("Prices are revalidated before Stripe checkout.")
     if OWNER_ACCEPTANCE_MODE and not owner_checkout_allowed:
         st.caption(
-            "Checkout is disabled in this controlled owner-acceptance environment."
+            "Checkout is currently closed."
         )
     if st.button(
         "💳 Checkout All Items",
@@ -616,22 +618,13 @@ with c2:
             st.stop()
 
         if r.status_code != 200:
-            try:
-                detail = r.json().get("detail")
-            except Exception:
-                detail = None
-            if isinstance(detail, dict):
-                message = detail.get("message")
-            else:
-                message = str(detail or "")
-            st.error(message or "Checkout couldn’t be started. Please try again.")
+            st.error(service_message(r.status_code))
             st.stop()
 
         resp = r.json()
         url = resp.get("checkout_url")
         if not url:
-            st.error("API did not return checkout_url.")
-            st.json(resp)
+            st.error("Checkout couldn’t be started. Please try again.")
             st.stop()
 
         # redirect

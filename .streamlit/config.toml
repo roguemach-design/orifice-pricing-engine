@@ -11,3 +11,4 @@ font="sans serif"
 # Hide legacy discovery navigation even before the root initializes st.navigation.
 [client]
 showSidebarNavigation=false
+showErrorDetails="none"

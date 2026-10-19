@@ -8,7 +8,7 @@ st.set_page_config(page_title="O-Plates Order Confirmation", layout="centered")
 render_auth_sidebar(show_debug=False)
 
 if not API_BASE:
-    st.error("The O-Plates pricing service is not configured.")
+    st.error("Order status is temporarily unavailable. Please try again shortly.")
     st.stop()
 
 
@@ -90,11 +90,11 @@ if order.get("shipping_name") or address:
 
 if order.get("email_delivery_mode") == "capture":
     st.caption(
-        "Your order is confirmed. For this staging test, the confirmation email "
-        "and approval drawing are captured internally rather than sent."
+        "Your order is confirmed, but email delivery is unavailable for this order. "
+        "Contact sales@o-plates.com to receive and review your drawing."
     )
 else:
-    st.caption("We’ll email the order confirmation and follow up with the approval drawing.")
+    st.caption("Your confirmation email includes the drawing for review. Verify and approve the attached drawing before manufacture. Contact sales@o-plates.com if it has not arrived.")
 
 if is_logged_in():
     if st.button("View My Orders"):

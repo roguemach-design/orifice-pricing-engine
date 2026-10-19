@@ -1,3 +1,4 @@
+from customer_safety import service_message
 # pages/1_Quote.py
 import os
 import copy
@@ -271,7 +272,7 @@ _FORM_KEYS = {
 }
 
 if not API_BASE:
-    st.error("The O-Plates pricing service is not configured.")
+    st.error("Pricing is temporarily unavailable. Please try again shortly.")
     st.stop()
 
 
@@ -428,22 +429,13 @@ def start_checkout(payload_inputs: dict, priced_configuration: dict) -> None:
         st.stop()
 
     if r.status_code != 200:
-        try:
-            detail = r.json().get("detail")
-        except Exception:
-            detail = None
-        if isinstance(detail, dict):
-            message = detail.get("message")
-        else:
-            message = str(detail or "")
-        st.error(message or "Checkout couldn’t be started. Please try again.")
+        st.error(service_message(r.status_code))
         st.stop()
 
     resp = r.json()
     checkout_url = resp.get("checkout_url")
     if not checkout_url:
-        st.error("Checkout API did not return checkout_url.")
-        st.json(resp)
+        st.error("Checkout couldn’t be started. Please try again.")
         st.stop()
 
     from customer_navigation import render_integrated_checkout
@@ -484,17 +476,7 @@ def request_authoritative_price(
     if response.status_code == 200:
         return response.json(), None
 
-    try:
-        detail = response.json().get("detail")
-    except Exception:
-        detail = None
-    if isinstance(detail, dict):
-        message = detail.get("message") or "This configuration could not be priced."
-    elif isinstance(detail, list):
-        message = "; ".join(str(item.get("msg") or item) for item in detail)
-    else:
-        message = str(detail or "Live pricing is temporarily unavailable.")
-    return None, message
+    return None, service_message(response.status_code, pricing=True)
 
 
 try:
@@ -765,7 +747,7 @@ owner_test_checkout_allowed = bool(
 
 @st.dialog("Sign in")
 def _starter_sign_in():
-    st.caption("Sign in to analyze a print or save your quotes and orders.")
+    st.caption("Sign in to analyze a print, build a quote cart, or view your orders.")
     render_auth_sidebar(show_debug=False, placement="inline")
 
 
@@ -776,14 +758,14 @@ with st.container(key="configurator_starter", border=False):
             '<div class="starter-upload-title"><span aria-hidden="true">↥</span>'
             '<strong>Upload a drawing</strong></div>', unsafe_allow_html=True
         )
-        st.caption("PDF, PNG, JPG · analyzed locally · not stored")
+        st.caption("PDF, PNG, JPG · processed for this session")
     with starter_analysis:
         starter_status = st.empty()
     with starter_account:
         if is_logged_in():
             render_auth_sidebar(show_debug=False, placement="inline")
         else:
-            st.caption("Save your quotes and orders")
+            st.caption("Manage your orders and quote cart")
             if st.button("Sign in", key="starter_sign_in", type="secondary"):
                 _starter_sign_in()
 
@@ -838,7 +820,7 @@ if drawing_access_allowed:
                 st.session_state[_OWNER_ACCEPTANCE_RUN_KEY] = owner_run
                 st.session_state.pop(_OWNER_ACCEPTANCE_NOTES_KEY, None)
                 inspection_started = time.perf_counter()
-                with st.spinner("Analyzing the drawing locally..."):
+                with st.spinner("Analyzing your drawing..."):
                     processed_upload = inspect_validated_upload(
                         validated_upload,
                         timeout_seconds=limits.processing_timeout_seconds,
@@ -1173,7 +1155,7 @@ with right:
         handle_label = st.text_input(
             "Handle marking (optional)",
             key=_FORM_KEYS["handle_label"],
-            placeholder="UPSTREAM x.xxx BORE x.xxx BETA",
+            placeholder="Optional text for your plate handle",
             max_chars=max_handle_label_chars,
             help=f"Maximum {max_handle_label_chars} characters. Letters, numbers, spaces, and standard shop-marking punctuation only.",
         )
@@ -1418,40 +1400,7 @@ if active_assisted_session is not None:
             else:
                 attention_prompt.empty()
 
-            owner_run = st.session_state.get(_OWNER_ACCEPTANCE_RUN_KEY)
-            if isinstance(owner_run, OwnerAcceptanceRun) and st.query_params.get("debug") == "1":
-                with st.expander("Internal test feedback"):
-                    st.caption(
-                        "This summary stays in this browser session unless you download it. "
-                        "It excludes the file name, drawing content, OCR text, dimensions, and customer data."
-                    )
-                    owner_notes = st.text_area(
-                        "Optional owner notes",
-                        key=_OWNER_ACCEPTANCE_NOTES_KEY,
-                        placeholder="Describe confusing steps or recognition behavior without copying proprietary drawing content.",
-                    )
-                    summary = summarize_owner_acceptance(
-                        owner_run,
-                        optional_owner_notes=owner_notes,
-                    )
-                    st.write(
-                        f"**Measured:** {summary.processing_wait_seconds:.1f}s processing · "
-                        f"{summary.distinct_auto_populated_fields} prefilled fields · "
-                        f"{summary.distinct_manual_field_entries} manually completed · "
-                        f"{summary.distinct_corrected_fields} corrected"
-                    )
-                    st.caption(
-                        "Click = an explicit app button or confirmation activation. "
-                        "A candidate choice and each changed field are separate customer actions, not clicks. "
-                        "Typing in one field counts as one distinct manual field entry. "
-                        "This single-page workflow records zero page transitions."
-                    )
-                    st.download_button(
-                        "Download test feedback (JSON)",
-                        data=feedback_json(summary),
-                        file_name=f"oplates-owner-feedback-{summary.run_id[:8]}.json",
-                        mime="application/json",
-                    )
+
 
 
 if not starter_notice_shown:
@@ -1698,8 +1647,7 @@ with right:
 
         if (OWNER_ACCEPTANCE_MODE or os.environ.get("APP_ENV") == "production") and not owner_test_checkout_allowed:
             st.caption(
-                "Checkout is currently closed." if os.environ.get("APP_ENV") == "production"
-                else "Checkout is disabled in this controlled owner-acceptance environment."
+                "Checkout is currently closed."
             )
         elif active_assisted_session is not None and not owner_test_checkout_allowed:
             st.caption("Checkout remains disabled for drawing-assisted configurations.")

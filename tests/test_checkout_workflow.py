@@ -70,6 +70,8 @@ def database(monkeypatch):
 
 @pytest.fixture
 def checkout_client(monkeypatch, database):
+    # Each test owns its request budget; production rate limits are unchanged.
+    api_app._RATE_LIMITER.clear()
     monkeypatch.setattr(api_app, "API_KEY", "test-ui-key")
     monkeypatch.setattr(api_app, "APP_ENV", "test")
     monkeypatch.setattr(api_app, "APP_BASE_URL", "https://quote.staging.example.test")
@@ -622,7 +624,7 @@ def test_staging_rejects_live_stripe_key(monkeypatch, checkout_client):
     )
 
     assert response.status_code == 500
-    assert response.json()["detail"] == "Staging checkout requires Stripe test mode."
+    assert response.json()["detail"] == "Service temporarily unavailable. Please try again."
 
 
 def test_checkout_fails_closed_when_app_environment_is_not_explicit(
@@ -638,7 +640,7 @@ def test_checkout_fails_closed_when_app_environment_is_not_explicit(
 
     assert response.status_code == 500
     assert response.json()["detail"] == (
-        "Checkout environment is not configured (set APP_ENV)."
+        "Service temporarily unavailable. Please try again."
     )
 
 
@@ -655,7 +657,7 @@ def test_checkout_fails_closed_when_return_url_is_not_explicit(
 
     assert response.status_code == 500
     assert response.json()["detail"] == (
-        "Checkout return URL is not configured (set APP_BASE_URL to an HTTPS URL)."
+        "Service temporarily unavailable. Please try again."
     )
 
 
@@ -683,7 +685,7 @@ def test_checkout_database_failure_returns_retryable_error(
 
     assert response.status_code == 503
     assert response.json()["detail"] == (
-        "Checkout could not be initialized. Please try again."
+        "Service temporarily unavailable. Please try again."
     )
 
 
@@ -1046,7 +1048,7 @@ def test_webhook_database_failure_returns_retryable_status(
 
     assert response.status_code == 503
     assert response.json()["detail"] == (
-        "Order completion is temporarily unavailable; Stripe will retry."
+        "Service temporarily unavailable. Please try again."
     )
 
 
@@ -1389,7 +1391,7 @@ def test_production_checkout_rejects_test_key_before_creating_session(monkeypatc
     calls = install_idempotent_stripe(monkeypatch)
     response = checkout_client.post("/checkout/create", json=checkout_body(), headers={"x-api-key": "test-ui-key"})
     assert response.status_code == 500
-    assert response.json()["detail"] == "Production checkout requires Stripe live mode."
+    assert response.json()["detail"] == "Service temporarily unavailable. Please try again."
     assert not calls
 
 

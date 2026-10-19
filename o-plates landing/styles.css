@@ -37,3 +37,15 @@ html.oplates-modal-open{overflow:hidden}
 html.oplates-modal-open .configurator-stage::before{content:"";grid-column:1/-1;grid-row:1;height:var(--modal-stage-height);pointer-events:none}
 html.oplates-modal-open .configurator-frame{position:fixed;inset:0;z-index:1000060;width:100vw;height:100dvh!important;margin:0;border:0;border-radius:0;background:transparent}
 @media(max-width:900px){html.oplates-modal-open .configurator-stage::before{display:block}}
+
+/* Shared legal pages and compact public footer. */
+.footer{flex-wrap:wrap;font-size:.85rem;line-height:1.7}
+.footer__right{display:flex;flex-wrap:wrap;gap:8px 18px}
+.footer__entity{font-size:.8rem}.legal-wrap{max-width:960px}
+.legal-heading{padding:30px 0 24px}.legal-heading h1{font-size:clamp(2rem,4vw,3rem);line-height:1.15;margin:0 0 12px}
+.legal-heading p{margin:8px 0}.legal-content{padding:clamp(20px,4vw,40px)}
+.legal-section+ .legal-section{border-top:1px solid var(--line);margin-top:26px;padding-top:26px}
+.legal-section h2{font-size:1.25rem;margin:0 0 12px}.legal-section p{margin:0 0 14px;color:var(--muted)}
+.legal-section p:last-child{margin-bottom:0}.legal-section address{font-style:normal;color:var(--muted);margin-top:14px}
+.legal-section a{overflow-wrap:anywhere;text-underline-offset:3px}
+@media(max-width:560px){.footer__right{gap:10px 16px}.legal-heading{padding-top:20px}}
