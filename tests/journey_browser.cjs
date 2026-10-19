@@ -36,6 +36,10 @@ async function main(){
   await allowed.root.children.find(n=>n.textContent==='Turn off and delete this session').onclick();await tick();
   assert.equal(allowed.calls.at(-1).opts.method,'DELETE');const count=allowed.calls.length;await allowed.app.__oplatesJourneyEmit({...e,step:'cart'});assert.equal(allowed.calls.length,count);
   assert(!allowed.cookies.has('oplates_journey_v1'));
+  const recovery=environment();await tick();const originalFetch=recovery.app.fetch;let expired=true;
+  recovery.app.fetch=async(url,opts)=>{const result=await originalFetch(url,opts);if(url.endsWith('/journey/event')&&expired){expired=false;return {ok:false,status:410};}return result;};
+  await recovery.root.children.find(n=>n.textContent==='Allow diagnostics').onclick();await tick();
+  assert.equal(recovery.calls.filter(r=>r.url.endsWith('/journey/session')).length,2,'Expired anonymous session recovers once without touching quoting');
   const privacy=environment({gpc:true});await tick();assert.equal(privacy.calls.length,0);assert(!privacy.root.children.some(n=>n.textContent==='Allow diagnostics'));
   const embedded=environment({component:true,source:'embed'});await tick();assert.equal(embedded.calls.length,0);
   const ready=embedded.messages.find(m=>m.data.type==='oplates:journey-ready');assert(ready);

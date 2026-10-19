@@ -61,10 +61,16 @@
     if(choice?.version===VERSION&&choice.allow===false){consent=false;token=null;publish();render();return;}
     if(!valid(e) || !consent || protectedBrowser())return;
     if(!token){if(pendingEvents.length<16)pendingEvents.push(e);return;}
-    if(Date.now()-last>=1800000){await begin();if(!token)return;}
+    if(Date.now()-last>=1800000||Number(token.split('.')[1])*1000<=Date.now()){await begin();if(!token)return;}
     const key=[e.step,e.outcome,e.category,e.source].join(':');if(seen.has(key))return;
     if(seen.size>=100)return;seen.add(key);last=Date.now();saveSession();
-    await request('/journey/event',e);
+    const response=await request('/journey/event',e);
+    if(response?.status===410&&consent&&!protectedBrowser()){
+      // A staging restart or token expiry cannot leave diagnostics permanently stale.
+      token=null;write('oplates-journey-session',null,true);sharedCookie(null);
+      await begin();
+      if(token)await request('/journey/event',e); // One best-effort retry; never blocks the customer.
+    }
   }
   function event(step,outcome='reached',category='none'){return {version:1,event_id:app.crypto.randomUUID(),timestamp:new Date().toISOString(),step,outcome,category,source:config.source};}
   async function flush(){const events=pendingEvents.splice(0,16);for(const e of events)await emit(e);}

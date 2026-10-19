@@ -323,7 +323,7 @@ def test_public_ingest_and_session_rate_limit(client):
             headers={**ORIGIN, "X-Journey-Session": "forged"},
             content=event().model_dump_json(),
         ).status_code
-        == 400
+        == 410
     )
 
 
@@ -437,3 +437,16 @@ def test_retention_remains_available_when_collection_disabled(monkeypatch, store
     monkeypatch.setattr(runtime, "_store", store)
     assert runtime.get_store() is store
     assert not runtime.enabled()
+
+
+def test_session_expiration_removes_late_children_without_erasing_daily_counts(store):
+    old = NOW() - timedelta(days=8)
+    token = store.start(now=old)
+    store.add(token, event(), now=old)
+    with store.engine.begin() as db:
+        db.execute(update(events).values(received=NOW()))
+    assert not store.report(24)["sessions"]
+    store.prune()
+    with store.engine.connect() as db:
+        assert db.scalar(select(func.count()).select_from(events)) == 0
+    assert store.report(2160)["funnel"]["quote"] == 1

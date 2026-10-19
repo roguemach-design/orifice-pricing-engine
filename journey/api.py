@@ -153,7 +153,7 @@ def install(app, owner_dependency):
                 budget.check("session:" + row["id"], 30)
                 store.add(token, event)
             except ValueError:
-                raise HTTPException(400, "Invalid telemetry session") from None
+                raise HTTPException(410, "Telemetry session expired") from None
 
         await isolated(save)
         return Response(status_code=204)

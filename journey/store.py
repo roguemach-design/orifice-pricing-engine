@@ -304,6 +304,9 @@ class Store:
         now = now or datetime.now(timezone.utc)
         cutoff = now - timedelta(days=7)
         with self.lock, self.engine.begin() as db:
+            expired = select(sessions.c.id).where(sessions.c.started < cutoff)
+            for table in (events, reaches, links):
+                db.execute(delete(table).where(table.c.session.in_(expired)))
             for table, column in (
                 (events, events.c.received),
                 (sessions, sessions.c.started),
@@ -331,6 +334,7 @@ class Store:
                 events.c.received >= cutoff,
                 sessions.c.internal == internal,
                 sessions.c.revoked == False,
+                sessions.c.started >= now - timedelta(days=7),
             )
             counts = db.execute(
                 select(events.c.step, func.count(func.distinct(events.c.session)))
