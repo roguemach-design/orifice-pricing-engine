@@ -6,8 +6,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.mark.parametrize("mode,expected", [
-    ("capture", "captured internally rather than sent"),
-    (None, "We’ll email the order confirmation"),
+    ("capture", "email delivery is unavailable for this order"),
+    (None, "Your confirmation email includes the drawing"),
 ])
 def test_success_notice_follows_server_delivery_mode(monkeypatch, mode, expected):
     from streamlit.testing.v1 import AppTest

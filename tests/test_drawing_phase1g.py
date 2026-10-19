@@ -775,7 +775,7 @@ def test_signed_out_user_sees_locked_drawing_section(monkeypatch, active_config)
         ).run()
         assert not app.exception
         assert any("Upload a drawing" in item.value for item in app.markdown)
-        assert any("analyzed locally" in item.value for item in app.caption)
+        assert any("processed for this session" in item.value for item in app.caption)
         assert not any("Sign in to upload" in item.value for item in app.info)
         assert len([b for b in app.button if b.key == "drawing_sign_in_cta"]) == 1
         assert not app.get("file_uploader")

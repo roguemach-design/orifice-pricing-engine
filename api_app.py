@@ -2,6 +2,7 @@ from drawing_intake.checkout_context import verify_context
 from frozen_plate.runtime import enabled as frozen_plate_enabled
 # api_app.py
 import os
+import logging
 import hashlib
 import hmac
 import uuid
@@ -17,6 +18,8 @@ from typing import Optional, List, Dict, Any, Literal
 import stripe
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from pydantic import StrictBool, model_validator, BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from pricing_engine import QuoteInputs, calculate_quote
@@ -44,7 +47,26 @@ from jwt import PyJWKClient
 # App + config
 # ----------------------------
 from final4.worker import lifespan as manufacturing_lifespan
-app = FastAPI(title="Orifice Pricing API", version="1.0.0", lifespan=manufacturing_lifespan)
+app = FastAPI(
+    title="Orifice Pricing API", version="1.0.0", lifespan=manufacturing_lifespan,
+    docs_url=None, redoc_url=None, openapi_url=None,
+)
+logger = logging.getLogger(__name__)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def safe_http_error(request: Request, exc: StarletteHTTPException):
+    detail = exc.detail
+    if exc.status_code >= 500 and not request.url.path.startswith(("/admin/", "/internal/", "/debug/")):
+        logger.error("Customer service request failed: route=%s status=%s", request.scope.get("route").path if request.scope.get("route") else "unmatched", exc.status_code)
+        detail = "Service temporarily unavailable. Please try again."
+    return JSONResponse({"detail": detail}, status_code=exc.status_code, headers=exc.headers)
+
+
+@app.exception_handler(Exception)
+async def safe_unhandled_error(request: Request, exc: Exception):
+    logger.exception("Unhandled service error", exc_info=exc)
+    return JSONResponse({"detail": "Service temporarily unavailable. Please try again."}, status_code=500)
 
 ALLOWED_ORIGINS = [
     "https://quote.o-plates.com",
@@ -972,7 +994,8 @@ async def quote(request: Request):
 
     except Exception as e:
         # unexpected
-        raise HTTPException(status_code=500, detail=f"Unhandled quote error: {type(e).__name__}: {e}")
+        logger.exception("Quote calculation failed")
+        raise HTTPException(status_code=500, detail="Pricing is temporarily unavailable.") from None
 
 
 # ----------------------------

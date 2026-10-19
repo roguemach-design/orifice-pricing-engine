@@ -306,7 +306,7 @@ def api_get(
     path: str, *, params: dict | None = None, timeout: int = 30
 ) -> requests.Response:
     if not API_BASE:
-        st.error("The O-Plates pricing service is not configured.")
+        st.error("This service is temporarily unavailable. Please try again shortly.")
         st.stop()
     return requests.get(
         f"{API_BASE}{path}", headers=auth_headers(), params=params, timeout=timeout
@@ -438,6 +438,6 @@ def render_auth_sidebar(*, show_debug: bool = False, placement: str = "default")
 def api_post(path: str, *, payload: dict, timeout: int = 60) -> requests.Response:
     """Authenticated server-side POST; tokens stay out of URLs and access logs."""
     if not API_BASE:
-        st.error("The O-Plates pricing service is not configured.")
+        st.error("This service is temporarily unavailable. Please try again shortly.")
         st.stop()
     return requests.post(f"{API_BASE}{path}", headers=auth_headers(), json=payload, timeout=timeout)
