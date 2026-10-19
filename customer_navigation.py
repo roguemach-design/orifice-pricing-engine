@@ -58,11 +58,15 @@ def run_customer_app():
         ],
         position="hidden",
     )
-    try:
+    if selected.url_path == "Internal_Sourcing":
         selected.run()
-    finally:
-        if selected.url_path != "Internal_Sourcing":
-            render_customer_footer()
+        return
+    # Enqueue the footer before a page can request st.stop(). The earlier
+    # content container keeps it visually below the page, including early exits.
+    content = st.container()
+    render_customer_footer()
+    with content:
+        selected.run()
 
 
 def render_customer_footer():
