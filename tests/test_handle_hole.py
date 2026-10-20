@@ -491,7 +491,7 @@ def test_feature_off_matches_accepted_golden_bytes():
     )
     g = build_plate_geometry(off)
     metadata = DrawingMetadata(state=DrawingState.CUSTOMER_CONFIRMATION)
-    presentation = json.loads((Path(__file__).parent / "fixtures/v6-presentation-hashes.json").read_text())
+    presentation = json.loads((Path(__file__).parent / "fixtures/v7-1-presentation-hashes.json").read_text())
     assert sha256(pdf_bytes(g, metadata)).hexdigest() == presentation["pdf_sha256"]
     assert sha256(dxf_bytes(g)).hexdigest() == expected["dxf_sha256"]
     assert sha256(preview_svg(g).encode()).hexdigest() == expected["svg_sha256"]

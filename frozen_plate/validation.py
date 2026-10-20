@@ -3,6 +3,7 @@
 from io import BytesIO, StringIO
 import json
 import math
+import re
 import ezdxf
 from pypdf import PdfReader
 from plate_geometry import GEOMETRY_VERSION, rough_bore_diameter, manufacturing_record
@@ -11,15 +12,21 @@ from plate_geometry import GEOMETRY_VERSION, rough_bore_diameter, manufacturing_
 def validate_pdf_requirements(g, metadata, reader):
     """Versioned presentation checks; frozen byte/hash checks remain separate."""
     text = reader.pages[0].extract_text() or ""
-    version = "op-drawing-v6"
     subject = reader.metadata.subject if reader.metadata else None
     try:
         provenance = json.loads(subject or "null")
     except (ValueError, TypeError):
         provenance = None
-    if version in text or (
-        isinstance(provenance, dict) and provenance.get("generator") == version
-    ):
+    # Explicit adapters only. Unknown versions must still fail closed, and a
+    # damaged subject cannot use the legacy adapter to evade identity checks.
+    supported = ("op-drawing-v6", "op-drawing-v7.1")
+    version = provenance.get("generator") if isinstance(provenance, dict) else None
+    # The trace need not be the last extracted line: use complete version tokens.
+    visible_versions = [v for v in supported if re.search(
+        r"GEN " + re.escape(v) + r"(?![\w.\-])", text
+    )]
+    if version in supported or visible_versions:
+        version = version if version in supported else visible_versions[0]
         from drawing_standards import dimension, inch
         from manufacturing_drawing import short_identifier
 
@@ -71,8 +78,8 @@ def validate_pdf_requirements(g, metadata, reader):
         return
 
     # Previously generated v3e drawings keep their original format contract.
-    # A missing/altered v6 subject cannot silently select this legacy adapter.
-    if "GEN: op-drawing-v3e" not in text:
+    # A missing/altered modern subject cannot silently select this legacy adapter.
+    if (isinstance(provenance, dict) and provenance.get("generator") not in (None, "op-drawing-v3e")) or "GEN: op-drawing-v3e" not in text:
         raise ValueError("unsupported PDF presentation version")
     if g.spec.handle_hole_enabled:
         for label in (f"HANDLE HOLE Ø{g.spec.handle_hole_diameter:.4f}",

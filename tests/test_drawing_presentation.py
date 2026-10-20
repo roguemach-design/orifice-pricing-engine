@@ -31,7 +31,7 @@ def test_presentation_is_independent_and_labels_stay_exact(monkeypatch):
     g=example()
     before=(manufacturing_record(g),dxf_bytes(g),preview_svg(g))
     labels=[]
-    for method in ('drawString','drawCentredString'):
+    for method in ('drawString','drawCentredString','drawRightString'):
         monkeypatch.setattr(Canvas,method,lambda self,x,y,t,*a,**k:labels.append(t))
     view=build_presentation(g)
     first=drawing.render_pdf(g,presentation=view)
@@ -90,7 +90,7 @@ def test_locked_golden_pdf_visual_fixture():
     g = build_plate_geometry(replace(sample_spec(), part_identifier="PROTOTYPE-001"))
     data = drawing.render_pdf(g)
     expected = (
-        (Path(__file__).parent / "fixtures/v6-manufacturing-print.sha256")
+        (Path(__file__).parent / "fixtures/v7-1-manufacturing-print.sha256")
         .read_text()
         .strip()
     )

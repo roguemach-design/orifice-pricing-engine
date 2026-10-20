@@ -72,10 +72,10 @@ def test_material_thickness_and_chamfer_update_title_block_with_customer_width()
 )
 def test_outer_profile_has_one_tangent_symmetric_contour(od,handle_width,handle_length):
     from plate_geometry import PlateSpec,build_plate_geometry
-    from drawing_presentation import build_presentation
+    from drawing_presentation import WEB, build_presentation
     from test_drawing_v6 import svg_path,sampled_path
     g=build_plate_geometry(PlateSpec(od,od/3,handle_width,handle_length,'304',.125))
-    view=build_presentation(g)
+    view=build_presentation(g, WEB)
     root=ElementTree.fromstring(render_plate_svg(paddle_dia=od,bore_dia=od/3,handle_width=handle_width,handle_length_from_bore=handle_length,thickness=.125,material='304'))
     outline=root.find(".//*[@data-feature='plate-outline']")
     assert outline is not None and outline.attrib['fill']=='none'

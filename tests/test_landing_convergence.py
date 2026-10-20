@@ -155,7 +155,7 @@ def test_choices_match_accepted_baseline(monkeypatch, index):
     exercise(app, CASES[index])
     golden = json.loads((ROOT / "tests/fixtures/convergence-baseline.json").read_text())
     actual=fingerprints(calls[-1])
-    presentation=json.loads((ROOT / "tests/fixtures/v6-convergence-hashes.json").read_text())
+    presentation=json.loads((ROOT / "tests/fixtures/v7-1-convergence-hashes.json").read_text())
     for key,value in actual.items():
         assert value == (presentation[index][key] if key in ("pdf_sha256","svg_sha256") else golden["cases"][index][key])
 
