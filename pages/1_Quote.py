@@ -150,6 +150,10 @@ st.markdown(
     /* Hide the source feedback only after the trusted landing host enables its sticky copy. */
     html.oplates-parent-preview .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {{visibility:hidden;pointer-events:none}}
 
+    /* Markdown explicitly restores visibility. Keep only the host's SVG copy visible. */
+    html.oplates-parent-preview .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child svg,
+    html.oplates-parent-preview .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child svg * {{visibility:hidden!important}}
+
     /* Streamlit captions explicitly set visibility; suppress the source copy only on the landing host. */
     html.oplates-parent-preview .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stCaptionContainer"],
     html.oplates-parent-preview .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stCaptionContainer"] * {{visibility:hidden!important}}
