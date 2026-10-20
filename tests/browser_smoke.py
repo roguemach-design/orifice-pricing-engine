@@ -16,6 +16,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.request import urlopen
+from urllib.parse import urlsplit
 
 from PIL import Image
 from playwright.sync_api import expect, sync_playwright
@@ -135,4 +136,71 @@ def test_customer_configurator_paints_svg(configurator, width, route, tmp_path):
             assert page.get_by_test_id("stException").count() == 0
         finally:
             page.screenshot(path=str(tmp_path / f"configurator-{width}.png"), full_page=True)
+            browser.close()
+
+
+@pytest.mark.parametrize("width", [1280, 390], ids=["desktop-host", "mobile-host"])
+def test_actual_landing_host_renders_one_visible_drawing(configurator, width, tmp_path):
+    """Exercise the real landing HTML/CSS/JS and its real Streamlit bridge.
+
+    Browser request interception substitutes only the loopback child origin;
+    no public server, production requests, or preview infrastructure is used.
+    """
+    landing = ROOT / "o-plates landing"
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": width, "height": 1000})
+
+        def local_only(route):
+            url = route.request.url
+            if url.startswith(configurator + "/"):
+                return route.continue_()
+            if not url.startswith("https://o-plates.com/"):
+                return route.abort()
+            path = (landing / (urlsplit(url).path.lstrip("/") or "index.html")).resolve()
+            if not path.is_relative_to(landing) or not path.is_file():
+                return route.fulfill(status=404, body="")
+            if path.suffix in {".html", ".js", ".css"}:
+                # The production origin checks still run against the isolated child.
+                body = path.read_text().replace("https://quote.o-plates.com", configurator)
+                content_type = {".html": "text/html", ".js": "application/javascript", ".css": "text/css"}[path.suffix]
+                return route.fulfill(body=body, content_type=content_type)
+            return route.fulfill(path=path)
+
+        page.route("**/*", local_only)
+        try:
+            page.goto("https://o-plates.com/")
+            page.locator("#plate-configurator").scroll_into_view_if_needed()
+            child = page.frame_locator("#plate-configurator")
+            source = child.locator('svg[aria-label="Handled orifice plate configuration drawing"]')
+            expect(source).to_be_attached(timeout=30000)
+            copy = page.locator('.sticky-feedback__drawing svg')
+            if width >= 901:
+                expect(copy).to_be_visible(timeout=15000)
+                # aria-hidden alone does not prevent painted duplicate SVGs.
+                expect(source).to_have_css("visibility", "hidden")
+                assert source.evaluate("el => [...el.querySelectorAll('*')].every(x => getComputedStyle(x).visibility === 'hidden')")
+                visible = copy
+            else:
+                expect(page.locator("#configurator-feedback")).to_be_hidden()
+                expect(source).to_be_visible(timeout=15000)
+                expect(source).to_have_css("visibility", "visible")
+                visible = source
+            visible.scroll_into_view_if_needed()
+            box = visible.bounding_box()
+            assert box and box["width"] > 200 and box["height"] > 100
+            assert visible.evaluate("el => Math.abs(el.clientWidth / el.clientHeight - el.viewBox.baseVal.width / el.viewBox.baseVal.height) < .02")
+            pixels = Image.open(io.BytesIO(visible.screenshot())).convert("RGB")
+            assert sum(max(pixel) < 100 for pixel in pixels.getdata()) > 500
+            # The copy and source must track real customer input reruns.
+            child.get_by_role("radio", name="316 SS Added corrosion resistance.", exact=True).check()
+            expect(visible.locator('[data-feature="web-material"]')).to_have_text("316 STAINLESS STEEL")
+            child.get_by_role("spinbutton", name="Plate outside diameter (in.)", exact=True).fill("4.000")
+            child.get_by_role("spinbutton", name="Plate outside diameter (in.)", exact=True).press("Tab")
+            expect(visible.locator('[data-feature="od-dimension-label"]')).to_have_text("Ø4.000")
+            if width >= 901:
+                expect(source).to_have_css("visibility", "hidden")
+            assert child.get_by_test_id("stException").count() == 0
+        finally:
+            page.screenshot(path=str(tmp_path / f"landing-{width}.png"), full_page=True)
             browser.close()
