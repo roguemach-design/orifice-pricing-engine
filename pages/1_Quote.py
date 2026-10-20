@@ -1031,7 +1031,7 @@ left, right = configurator_start.columns([1.12, 1.38], gap="medium")
 # -----------------------------
 with left:
     st.subheader("Configuration Drawing")
-    st.caption("Entered dimensions are reflected below. Drawing is not to scale (NTS).")
+    st.caption("Entered dimensions are reflected below. Configuration preview only.")
 
 # -----------------------------
 # RIGHT: inputs (narrowed) + Pay button bottom-center
