@@ -244,9 +244,16 @@ def test_actual_landing_host_renders_one_visible_drawing(configurator, width, tm
             distance = child.get_by_role("textbox", name="Handle End to Hole Center (in.)", exact=True)
             expect(diameter).to_have_value("0.375")
             expect(distance).to_have_value("0.750")
-            for widget, value in ((chamfer, "0.040"), (diameter, "0.5"), (distance, "1.25")):
+            for widget, value, drawing_text in (
+                (chamfer, "0.040", ".040 X 45°"),
+                (diameter, "0.5", "Ø.500 THRU"),
+                (distance, "1.25", "1.25"),
+            ):
                 widget.fill(value)
                 widget.press("Tab")
+                # Empty errors can predate the rerun. Wait for the server-rendered
+                # drawing to acknowledge each edit before hiding its widget.
+                expect(visible.get_by_text(drawing_text, exact=True)).to_be_visible()
                 expect(child.locator('[data-field-error]')).to_have_count(0)
             child.get_by_role("radio", name=re.compile("^NO CHAMFER")).press("Space")
             expect(chamfer).to_have_count(0)
