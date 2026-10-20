@@ -15,48 +15,18 @@ def geometry():
 
 
 def test_drawing_fields_and_holds(geometry, monkeypatch):
-    labels = []
-
-    def record(self, x, y, value, *args, **kwargs):
-        labels.append(value)
-
-    monkeypatch.setattr(Canvas, "drawString", record)
-    monkeypatch.setattr(Canvas, "drawCentredString", record)
-    pdf_bytes(geometry)
-    text = "\n".join(labels)
-    for expected in (
-        "Ø1.548",
-        "Ø5.000",
-        "2.000",
-        "10.500 C/L TO HANDLE END",
-        "4X R 0.03125",
-        "304 STAINLESS STEEL",
-        "0.125 THK.",
-        "NO. REQ'D.",
-        "BORE TOLERANCE: NOT SPECIFIED - HOLD",
-        "CHAMFER: NOT SPECIFIED - HOLD",
-        "MARKING: HOLD",
-        "BORE FINISH: HOLD",
-        "UNLESS OTHERWISE SPECIFIED:",
-        "THROUGH HANDLE / BORE",
-        "CHAMFER: NOT SPECIFIED - HOLD",
-        "P3E",
-        GEOMETRY_VERSION,
-        GENERATOR_VERSION,
-        "PROTOTYPE - NOT RELEASED FOR MANUFACTURE",
-        "DO NOT SCALE DRAWING",
-        "PROTOTYPE - NOT RELEASED FOR MANUFACTURE",
-    ):
+    from io import BytesIO
+    from pypdf import PdfReader
+    import json
+    data=pdf_bytes(geometry)
+    r=PdfReader(BytesIO(data));text=r.pages[0].extract_text()
+    for expected in ('Ø1.548','Ø5.000','2.00','10.50','R.03  4X','304 STAINLESS STEEL','.125','QTY',
+                     'UNLESS OTHERWISE SPECIFIED:','SECTION A-A','P3E',GENERATOR_VERSION,
+                     'CUSTOMER CONFIRMATION — NOT RELEASED FOR MANUFACTURE','DO NOT SCALE DRAWING'):
         assert expected in text
-    for forbidden in (
-        "1.423",
-        "ANDRITZ",
-        "706928890",
-        "ISO 2768",
-        "ISO 13920",
-        "BIG RIVER",
-    ):
-        assert forbidden not in text.upper()
+    for forbidden in ('1.423','ANDRITZ','706928890','ISO 2768','ISO 13920','BIG RIVER','HOLD','NTS','prototype','DATUM'):
+        assert forbidden.upper() not in text.upper()
+    assert json.loads(r.metadata.subject)['geometry']==GEOMETRY_VERSION
 
 
 def test_section_matches_finished_dimensions_without_invented_chamfer(geometry):
