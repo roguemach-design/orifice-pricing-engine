@@ -61,7 +61,7 @@ from drawing_intake.owner_acceptance import (
     update_run,
 )
 from plate_preview import render_plate_svg
-from customer_controls import choice_buttons, material_cards
+from customer_controls import choice_buttons, lead_time_choices, material_cards
 from bore_edge_control import bore_edge_choice
 from quote_field_validation import field_errors
 
@@ -1232,14 +1232,13 @@ with right:
 
         st.caption("DELIVERY")
         st.caption("Lead-time selection updates the verified quote total below.")
-        ships_in_days = _select_field(
+        ships_in_days = lead_time_choices(
             "Lead time",
-            "ships_in_days",
             ships_options,
-            placeholder="Select lead time",
-            format_func=lambda days: f"{days} calendar days",
+            key=_FORM_KEYS["ships_in_days"],
             help="Timing is estimated and subject to material availability and order-specific review.",
         )
+        _field_error_slot("ships_in_days")
 
 
 current_form_values = {

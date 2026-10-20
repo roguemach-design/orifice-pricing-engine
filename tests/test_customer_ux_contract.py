@@ -98,7 +98,10 @@ def test_quote_keeps_lean_owner_approved_controls():
     assert '"Chamfer Width (in.)"' in quote_source
     assert "value=None" in quote_source
     assert '"Lead time"' in quote_source
-    assert 'format_func=lambda days: f"{days} calendar days"' in quote_source
+    assert "ships_in_days = lead_time_choices(" in quote_source
+    assert 'format_func=lambda days: "7 Days" if days == 7 else f"{days} calendar days"' in (
+        ROOT / "customer_controls.py"
+    ).read_text()
     assert quote_source.count('st.metric("Estimated ship time"') == 1
     assert 'shipping_weight.metric("Estimated total weight"' in quote_source
     assert '"Estimated package"' in quote_source
