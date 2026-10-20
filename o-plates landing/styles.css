@@ -19,7 +19,7 @@
 .sticky-feedback{grid-column:1;grid-row:1;position:sticky;top:var(--preview-top,80px);align-self:start;z-index:1;background:#0e1117;color:#fafafa;padding:0 12px 12px 0;min-width:0}
 .sticky-feedback[hidden]{display:none}
 .sticky-feedback h3{font-size:1.3rem;line-height:1.2;margin:0 0 12px}
-.sticky-feedback__drawing svg{display:block;width:100%;height:auto;max-height:clamp(160px,32dvh,300px)}
+.sticky-feedback__drawing svg{display:block;width:100%;height:auto}
 .sticky-feedback__price{display:flex;gap:24px;border:1px solid #343e49;border-radius:10px;padding:14px;margin-top:12px}
 .sticky-feedback__price div{flex:1;min-width:0}.sticky-feedback__price span{display:block;font-size:.8rem;color:#b9c1cc}.sticky-feedback__price strong{display:block;font-weight:600;font-size:clamp(1.35rem,2.6vw,2rem)}
 .sticky-feedback__shipping{font-size:.8rem;color:#b9c1cc;line-height:1.4;margin:10px 0 0;overflow-wrap:anywhere}

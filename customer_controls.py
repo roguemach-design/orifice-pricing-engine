@@ -1,6 +1,7 @@
 """Visible finite choices without changing canonical configurator values."""
 
 import streamlit as st
+from material_labels import MATERIAL_COPY
 
 
 def choice_buttons(label, options, *, key, placeholder=None, **kwargs):
@@ -20,12 +21,6 @@ def choice_buttons(label, options, *, key, placeholder=None, **kwargs):
         st.caption(placeholder)
     return value
 
-
-MATERIAL_COPY = {
-    "304": ("304 SS", "General-purpose stainless."),
-    "316": ("316 SS", "Added corrosion resistance."),
-    "Carbon Steel": ("Carbon Steel", "Cost-effective steel."),
-}
 
 # Display-only finishes are keyed by the unchanged canonical material values.
 MATERIAL_FINISH = {

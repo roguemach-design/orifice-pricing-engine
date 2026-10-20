@@ -11,7 +11,7 @@ import re
 import pdfplumber
 from pypdf import PdfReader
 import pytest
-from drawing_presentation import build_presentation, build_views
+from drawing_presentation import WEB, PRINT, build_presentation, build_views
 from drawing_standards import BREAK_FROM_JUNCTION, BREAK_GAP_POINTS, dimension, inch
 from manufacturing_drawing import DrawingMetadata, render_pdf
 from plate_geometry import PlateSpec, build_plate_geometry
@@ -75,14 +75,15 @@ def svg_path(value):
 
 @pytest.mark.parametrize("case", CASES)
 @pytest.mark.parametrize("chamfer", [False, True])
-def test_serialized_geometry_and_section_parity(case, chamfer):
+@pytest.mark.parametrize("material", ["304", "316", "Carbon Steel"])
+def test_serialized_geometry_and_section_parity(case, chamfer, material):
     od, bore, width, length, hole = case
     spec = PlateSpec(
         od,
         bore,
         width,
         length,
-        "304",
+        material,
         0.125,
         bore_tolerance=0.005,
         chamfer=chamfer,
@@ -99,7 +100,9 @@ def test_serialized_geometry_and_section_parity(case, chamfer):
         ),
     )
     g = build_plate_geometry(spec)
-    view = build_presentation(g)
+    view = build_presentation(g, WEB)
+    printed = build_presentation(g, PRINT)
+    assert view.denominator == printed.denominator
     root = ET.fromstring(svg_for(spec))
     data = render_pdf(g)
     scale = 72 / int(root.attrib["data-scale"].split(":")[1])
@@ -129,7 +132,8 @@ def test_serialized_geometry_and_section_parity(case, chamfer):
         ]
 
         def circle(node):
-            x, y = float(node.attrib["cx"]), -float(node.attrib["cy"])
+            x = float(node.attrib["cx"]) - view.cx + printed.cx
+            y = -float(node.attrib["cy"]) - view.cy + printed.cy
             return next(
                 c
                 for c in circles
@@ -144,7 +148,8 @@ def test_serialized_geometry_and_section_parity(case, chamfer):
         def has_line(node):
             coords = tuple(float(node.attrib[k]) for k in ("x1", "y1", "x2", "y2"))
             x1, y1, x2, y2 = coords
-            y1, y2 = -y1, -y2
+            x1, x2 = (x - view.section_x + printed.section_x for x in (x1, x2))
+            y1, y2 = (-y - view.cy + printed.cy for y in (y1, y2))
             return any(
                 all(
                     abs(a - b) < 0.001
@@ -153,7 +158,7 @@ def test_serialized_geometry_and_section_parity(case, chamfer):
                         (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)),
                     )
                 )
-                and abs(l["linewidth"] - float(node.attrib["stroke-width"])) < 1e-9
+                and abs(l["linewidth"] - float(node.attrib["stroke-width"]) / WEB.line * PRINT.line) < 1e-9
                 for l in page.lines
             )
 
