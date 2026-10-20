@@ -1,0 +1,4 @@
+# Isolated synthetic presentation review; no database/payment/email dependencies.
+fastapi==0.141.1
+uvicorn==0.53.0
+reportlab==5.0.1

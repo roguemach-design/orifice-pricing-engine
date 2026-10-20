@@ -14,7 +14,7 @@ def geometry():
     )
 
 
-def test_drawing_fields_and_holds(geometry, monkeypatch):
+def test_drawing_fields_and_no_customer_holds(geometry, monkeypatch):
     labels = []
 
     def record(self, x, y, value, *args, **kwargs):
@@ -27,28 +27,34 @@ def test_drawing_fields_and_holds(geometry, monkeypatch):
     for expected in (
         "Ø1.548",
         "Ø5.000",
-        "2.000",
-        "10.500 C/L TO HANDLE END",
-        "4X R 0.03125",
+        "2.00",
+        "10.50",
+        "R.03  4X",
         "304 STAINLESS STEEL",
-        "0.125 THK.",
-        "NO. REQ'D.",
-        "BORE TOLERANCE: NOT SPECIFIED - HOLD",
-        "CHAMFER: NOT SPECIFIED - HOLD",
-        "MARKING: HOLD",
-        "BORE FINISH: HOLD",
+        ".125",
         "UNLESS OTHERWISE SPECIFIED:",
-        "THROUGH HANDLE / BORE",
-        "CHAMFER: NOT SPECIFIED - HOLD",
         "P3E",
-        GEOMETRY_VERSION,
         GENERATOR_VERSION,
-        "PROTOTYPE - NOT RELEASED FOR MANUFACTURE",
+        "CUSTOMER CONFIRMATION",
+        "NOT RELEASED FOR MANUFACTURE",
         "DO NOT SCALE DRAWING",
-        "PROTOTYPE - NOT RELEASED FOR MANUFACTURE",
+        "THICKNESS TOLERANCE PER MATERIAL MILL STANDARD.",
+        "BORE EDGES SHARP, NO CHAMFER, FREE OF BURRS.",
+        "MARKING: NONE.",
+        ".XX ±.01",
+        ".XXX ±.005",
+        "ANGLES ±1°",
+        "Ø.010",
     ):
         assert expected in text
     for forbidden in (
+        "HOLD",
+        "PROTOTYPE",
+        "NTS",
+        "BORE TOLERANCE:",
+        "NO. REQ'D.",
+        "SECTION A-A",
+        GEOMETRY_VERSION.upper(),
         "1.423",
         "ANDRITZ",
         "706928890",
@@ -151,4 +157,4 @@ def test_letter_layout_and_determinism_for_handle_proportions(geometry, length):
     g = build_plate_geometry(replace(geometry.spec, centerline_to_handle_end=length))
     first = pdf_bytes(g)
     assert first == pdf_bytes(g)
-    assert b"/MediaBox [ 0 0 612 792 ]" in first
+    assert b"/MediaBox [ 0 0 792 612 ]" in first
