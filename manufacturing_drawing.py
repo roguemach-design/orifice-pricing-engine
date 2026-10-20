@@ -216,6 +216,18 @@ def draw_plan(c, g, view=GOLDEN_PRESENTATION):
             c.drawPath(p)
             c.restoreState()
     c.circle(cx, cy, view.bore_radius)
+    if s.handle_hole_enabled:
+        # NTS handle is shortened on paper; locate the hole relative to the physical tip.
+        hy = view.handle_tip - s.handle_hole_center_from_handle_end * scale
+        hr = s.handle_hole_diameter * scale / 2
+        c.circle(cx, hy, hr)
+        c.line(cx + hr, hy, cx + 65, hy + 30)
+        text(c, cx + 65, hy + 33, f"HANDLE HOLE Ø{s.handle_hole_diameter:.4f}", 7, True)
+        hx = cx + g.half_handle_width * scale + 24
+        c.line(cx + hr + 3, hy, hx + 4, hy)
+        c.line(cx + g.half_handle_width * scale + 3, view.handle_tip, hx + 4, view.handle_tip)
+        dim(c, hx, hy, hx, view.handle_tip, f"{s.handle_hole_center_from_handle_end:.4f}", True)
+        text(c, cx + 65, hy + 19, f"{s.handle_hole_center_from_handle_end:.4f} HANDLE END TO HOLE C/L", 6)
     c.setLineWidth(0.35)
     c.setDash([12, 3, 2, 3])
     c.line(cx - view.paddle_radius - 15, cy, view.section_center + 30, cy)
@@ -271,8 +283,9 @@ def draw_plan(c, g, view=GOLDEN_PRESENTATION):
         fitted_text(c, 44, 637, s.marking, 138, 7)
 
     c.setLineWidth(0.4)
-    c.line(142, 640, left + 10, view.handle_tip - 14)
-    arrow(c, left + 10, view.handle_tip - 14, -0.8, 0.6)
+    marking_y = view.handle_tip - (60 if s.handle_hole_enabled else 14)
+    c.line(142, 640, left + 10, marking_y)
+    arrow(c, left + 10, marking_y, -0.8, 0.6)
     return cy, scale
 
 
@@ -318,7 +331,9 @@ def section_presentation(g, section, view=GOLDEN_PRESENTATION):
     x0 = view.section_center - g.spec.thickness * scale / 2
 
     def point(x, y):
-        if y == g.spec.centerline_to_handle_end:
+        if g.spec.handle_hole_enabled:
+            yy = view.cy + y * view.scale(g)
+        elif y == g.spec.centerline_to_handle_end:
             yy = view.handle_tip
         elif y == -g.radius:
             yy = view.cy - view.paddle_radius
@@ -583,6 +598,12 @@ def render_pdf(
     )
     if spec.part_identifier.startswith("EXAMPLE-"):
         text(c, 140, 708, "ILLUSTRATIVE CHAMFER VALUES - NOT DEFAULTS", 7)
+    if spec.handle_hole_enabled:
+        # Fit the whole true-proportion plan in the existing NTS plan area.
+        fit_scale = min(presentation.scale(g), (presentation.handle_tip - presentation.cy) / spec.centerline_to_handle_end)
+        presentation = replace(presentation, paddle_radius=g.radius * fit_scale,
+                               bore_radius=spec.finished_bore_diameter * fit_scale / 2,
+                               handle_tip=presentation.cy + spec.centerline_to_handle_end * fit_scale)
     cy, scale = draw_plan(c, g, presentation)
     draw_section(c, g, section, cy, scale, presentation)
     draw_data(c, g, metadata, section)

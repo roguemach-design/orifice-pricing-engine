@@ -45,6 +45,13 @@ def dxf_bytes(g: PlateGeometry) -> bytes:
                 rough_bore_diameter(g.spec) / 2,
                 dxfattribs={"layer": "CUT_BORE"},
             )
+            if g.spec.handle_hole_enabled:
+                doc.layers.new("CUT_HANDLE_HOLE", dxfattribs={"color": 3})
+                model.add_circle(
+                    (g.spec.centerline_to_handle_end - g.spec.handle_hole_center_from_handle_end, 0),
+                    g.spec.handle_hole_diameter / 2,
+                    dxfattribs={"layer": "CUT_HANDLE_HOLE"},
+                )
             # ezdxf discovers CLASS records from a set; sort before serialization
             # so process hash randomization cannot change file bytes.
             doc.classes.add_required_classes(doc.dxfversion)
@@ -71,11 +78,16 @@ def preview_svg(g: PlateGeometry) -> str:
                 f"A {segment.radius} {segment.radius} 0 {int(abs(segment.sweep_degrees)>180)} {int(segment.sweep_degrees<0)} {x} {-y}"
             )
     path = " ".join(commands) + " Z"
+    hole = ""
+    if s.handle_hole_enabled:
+        hole = (f'<circle id="handle-hole" cx="{s.centerline_to_handle_end-s.handle_hole_center_from_handle_end}" cy="0" '
+                f'r="{s.handle_hole_diameter/2}" fill="white" stroke="black" stroke-width="0.02"/>')
+
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{-r-0.5} {-r-0.5} {s.centerline_to_handle_end+r+1} {2*r+1}">'
         f"<title>{escape(s.part_identifier)} - canonical finished geometry, prototype</title>"
         f'<path d="{path}" fill="#edf1f5" stroke="black" stroke-width="0.02"/>'
-        f'<circle r="{s.finished_bore_diameter/2}" fill="white" stroke="black" stroke-width="0.02"/></svg>'
+        f'<circle r="{s.finished_bore_diameter/2}" fill="white" stroke="black" stroke-width="0.02"/>{hole}</svg>'
     )
 
 

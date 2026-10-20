@@ -1,0 +1,22 @@
+.git
+.github
+.env
+.env.*
+.venv
+venv
+.pytest_cache
+.mypy_cache
+.ruff_cache
+__pycache__
+*.py[cod]
+*.log
+*.pdf
+*.egg-info
+build
+dist
+drawing_corpus/private
+drawing_corpus/reports
+
+# Render secret files must never enter an image layer.
+secrets/
+*.pem

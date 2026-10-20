@@ -1,0 +1,37 @@
+{
+  "corpus_version": "1.1",
+  "entries": [
+    {
+      "corpus_id": "real-706928890-layout1-rev-b",
+      "source_group_id": "706928890",
+      "local_reference": "706928890-0000-Layout1.pdf",
+      "classification": "real_document",
+      "page_count": 1,
+      "multi_part": true,
+      "revision": "B",
+      "expected_production_behavior": "abstain_requires_part_selection",
+      "ground_truth_status": "document_level_complete",
+      "ground_truth_reference": "706928890-layout1.document_ground_truth.json",
+      "notes": [
+        "Related export/version pair; not an independent source drawing.",
+        "Per-region ground truth is intentionally pending."
+      ]
+    },
+    {
+      "corpus_id": "real-706928890-model-base",
+      "source_group_id": "706928890",
+      "local_reference": "706928890-Model.pdf",
+      "classification": "real_document",
+      "page_count": 1,
+      "multi_part": true,
+      "revision": "-",
+      "expected_production_behavior": "abstain_requires_part_selection",
+      "ground_truth_status": "document_level_complete",
+      "ground_truth_reference": "706928890-model.document_ground_truth.json",
+      "notes": [
+        "Related export/version pair; not an independent source drawing.",
+        "The visible revision marker is a hyphen; per-region ground truth is pending."
+      ]
+    }
+  ]
+}

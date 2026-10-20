@@ -19,6 +19,10 @@ class QuoteInputs(BaseModel):
     chamfer: bool
     ships_in_days: int
 
+    handle_hole_enabled: bool = Field(default=False, exclude_if=lambda v: not v)
+    handle_hole_diameter: Optional[float] = Field(default=None, exclude_if=lambda v: v is None)
+    handle_hole_center_from_handle_end: Optional[float] = Field(default=None, exclude_if=lambda v: v is None)
+
     # --- New fields ---
     handle_label: str = Field(default="No label")
     chamfer_width: Optional[float] = None

@@ -1,7 +1,31 @@
 from pathlib import Path
-
+from types import SimpleNamespace
+import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.parametrize("mode,expected", [
+    ("capture", "captured internally rather than sent"),
+    (None, "We’ll email the order confirmation"),
+])
+def test_success_notice_follows_server_delivery_mode(monkeypatch, mode, expected):
+    from streamlit.testing.v1 import AppTest
+    import auth
+    import requests
+    monkeypatch.setattr(auth, "API_BASE", "https://staging.example.test")
+    monkeypatch.setattr(auth, "render_auth_sidebar", lambda **kwargs: None)
+    monkeypatch.setattr(auth, "auth_headers", lambda: {})
+    monkeypatch.setattr(auth, "is_logged_in", lambda: False)
+    order = dict(status="completed", order_number_display="OP-0012",
+                 email_delivery_mode=mode)
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs:
+                        SimpleNamespace(status_code=200, json=lambda: order))
+    app = AppTest.from_file(str(ROOT / "pages" / "4_Success.py"))
+    app.query_params["session_id"] = "cs_test_fixture"
+    app.run()
+    assert not app.exception
+    assert expected in " ".join(item.value for item in app.caption)
 
 
 def test_marketing_start_quote_links_directly_to_configurator():
@@ -46,7 +70,7 @@ def test_quote_keeps_engineering_workflow_and_prominent_summary():
         '"Plate outside diameter (in.)"',
         '"Bore diameter (in.)"',
         '"Handle width (in.)"',
-        '"Handle length from bore center (in.)"',
+        '"Handle Length (From Bore Center) (in.)"',
         'st.caption("REQUIREMENTS")',
         'st.caption("DELIVERY")',
     ]
@@ -54,7 +78,10 @@ def test_quote_keeps_engineering_workflow_and_prominent_summary():
 
     assert positions == sorted(positions)
     assert 'st.subheader("Configuration Drawing")' in quote_source
-    assert 'with st.container(border=True):\n        st.subheader("Quote Summary")' in quote_source
+    assert (
+        'with st.container(border=True):\n        st.subheader("Quote Summary")'
+        in quote_source
+    )
     assert 'c1.metric("Unit price"' in quote_source
     assert 'c2.metric("Total price"' in quote_source
     assert "calendar days" in quote_source
@@ -66,7 +93,7 @@ def test_quote_keeps_lean_owner_approved_controls():
     assert '"Plate style"' not in quote_source
     assert 'st.checkbox("Chamfer", value=False)' in quote_source
     assert '"Chamfer Width (in.)"' in quote_source
-    assert 'value=None' in quote_source
+    assert "value=None" in quote_source
     assert '"Lead time"' in quote_source
     assert 'format_func=lambda days: f"{days} calendar days"' in quote_source
     assert quote_source.count("Estimated to ship within") == 1

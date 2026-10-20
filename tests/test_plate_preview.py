@@ -1,3 +1,5 @@
+from math import hypot
+import re
 from xml.etree import ElementTree
 
 import pytest
@@ -87,7 +89,9 @@ def test_material_thickness_and_chamfer_update_title_block_with_customer_width()
         handle_length_from_bore=10,
     )
 
-    stainless = render_plate_svg(material="304", thickness=0.125, chamfer=False, **common)
+    stainless = render_plate_svg(
+        material="304", thickness=0.125, chamfer=False, **common
+    )
     carbon = render_plate_svg(
         material="Carbon Steel",
         thickness=0.5,
@@ -103,3 +107,97 @@ def test_material_thickness_and_chamfer_update_title_block_with_customer_width()
     assert "0.500 in." in carbon
     assert "CHAMFER" in carbon
     assert "YES &#8212; 0.062 in." in carbon
+
+
+@pytest.mark.parametrize(
+    ("od", "handle_width", "handle_length"),
+    [
+        (3.0, 1.5, 9.0),
+        (5.0, 2.0, 9.0),
+        (8.5, 1.5, 14.0),
+        (16.0, 1.25, 20.0),
+        (1.0, 0.9, 2.0),  # Wide handle on a small plate.
+    ],
+)
+def test_outer_profile_has_one_tangent_symmetric_contour(
+    od, handle_width, handle_length
+):
+    svg = render_plate_svg(
+        paddle_dia=od,
+        bore_dia=od / 3,
+        handle_width=handle_width,
+        handle_length_from_bore=handle_length,
+        thickness=0.125,
+        material="304",
+    )
+    root = ElementTree.fromstring(svg)
+    namespace = {"svg": "http://www.w3.org/2000/svg"}
+    outline = root.find(".//svg:path[@id='plate-outline']", namespace)
+    assert outline is not None
+    assert outline.attrib["fill"] != "none"
+    assert len(root.findall(".//svg:circle", namespace)) == 2  # Bore and center dot.
+    assert f"OD &#8960; {od:.3f}" in svg
+    assert f"HANDLE {handle_width:.3f} in." in svg
+
+    path = outline.attrib["d"]
+    assert path.count("M ") == 1
+    assert path.count(" A ") == 3
+    assert path.count(" L ") == 2
+    assert path.endswith(" Z")
+    match = re.fullmatch(
+        r"M ([\d.]+),([\d.]+) "
+        r"A ([\d.]+),([\d.]+) 0 0 1 ([\d.]+),([\d.]+) "
+        r"A ([\d.]+),([\d.]+) 0 1 0 ([\d.]+),([\d.]+) "
+        r"A ([\d.]+),([\d.]+) 0 0 1 ([\d.]+),([\d.]+) "
+        r"L ([\d.]+),([\d.]+) L ([\d.]+),([\d.]+) Z",
+        path,
+    )
+    assert match is not None
+    (
+        upper_handle_x,
+        upper_handle_y,
+        fillet_x_radius,
+        fillet_y_radius,
+        upper_plate_x,
+        upper_plate_y,
+        outer_radius_x,
+        outer_radius_y,
+        lower_plate_x,
+        lower_plate_y,
+        lower_fillet_x_radius,
+        lower_fillet_y_radius,
+        lower_handle_x,
+        lower_handle_y,
+        end_bottom_x,
+        end_bottom_y,
+        end_top_x,
+        end_top_y,
+    ) = map(float, match.groups())
+    assert (
+        fillet_x_radius
+        == fillet_y_radius
+        == lower_fillet_x_radius
+        == lower_fillet_y_radius
+    )
+    assert outer_radius_x == outer_radius_y == 110.0
+    assert upper_handle_x == pytest.approx(lower_handle_x, abs=0.002)
+    assert upper_plate_x == pytest.approx(lower_plate_x, abs=0.002)
+    assert upper_plate_y + lower_plate_y == pytest.approx(450.0, abs=0.002)
+    assert upper_handle_y + lower_handle_y == pytest.approx(450.0, abs=0.002)
+    assert end_top_x == end_bottom_x > upper_handle_x > upper_plate_x > 220.0
+    assert end_top_y == upper_handle_y
+    assert end_bottom_y == lower_handle_y
+    assert upper_plate_y < upper_handle_y < lower_handle_y < lower_plate_y
+
+    # Circle and fillet contact at exactly one tangent point; neither shape
+    # doubles back through the handle or overlaps another filled plate shape.
+    fillet_center_y = upper_handle_y - fillet_x_radius
+    assert hypot(upper_plate_x - 220.0, upper_plate_y - 225.0) == pytest.approx(
+        110.0, abs=0.002
+    )
+    assert hypot(
+        upper_plate_x - upper_handle_x, upper_plate_y - fillet_center_y
+    ) == pytest.approx(fillet_x_radius, abs=0.002)
+    assert hypot(upper_handle_x - 220.0, fillet_center_y - 225.0) == pytest.approx(
+        110.0 + fillet_x_radius, abs=0.002
+    )

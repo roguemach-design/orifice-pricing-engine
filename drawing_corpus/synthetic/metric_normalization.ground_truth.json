@@ -1,0 +1,21 @@
+{
+  "corpus_version": "1.0",
+  "document_id": "synthetic-metric-normalization",
+  "synthetic": true,
+  "categories": ["digital_pdf", "metric", "unit_normalization"],
+  "source_document": "metric_normalization.pdf",
+  "expected_fields": {
+    "global_units": {"status": "detected", "value": "mm", "unit": "mm"},
+    "outside_diameter": {"status": "detected", "value": 203.2, "unit": "mm"},
+    "bore_diameter": {"status": "detected", "value": 50.8, "unit": "mm"},
+    "thickness": {"status": "detected", "value": 6.35, "unit": "mm"},
+    "material": {"status": "detected", "value": "316"},
+    "quantity": {"status": "detected", "value": 3, "unit": "count"},
+    "bore_tolerance_plus": {"status": "detected", "value": 0.127, "unit": "mm"},
+    "bore_tolerance_minus": {"status": "detected", "value": 0.127, "unit": "mm"},
+    "chamfer_present": {"status": "detected", "value": true},
+    "chamfer_width": {"status": "detected", "value": 0.762, "unit": "mm"},
+    "chamfer_angle": {"status": "detected", "value": 45.0, "unit": "deg"}
+  },
+  "expected_validation_codes": []
+}

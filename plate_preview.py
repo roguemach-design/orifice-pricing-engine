@@ -6,6 +6,32 @@ def _clamp(value: float, minimum: float, maximum: float) -> float:
     return max(minimum, min(maximum, value))
 
 
+def _paddle_outline_path(
+    cx: float, cy: float, radius: float, half_handle: float, handle_end: float
+) -> str:
+    """One outer contour with symmetric circular fillets tangent to the OD and handle.
+
+    Each fillet center is one fillet radius above/below the handle side.
+    Its distance from the plate center is R + f, so the two circles are
+    externally tangent. This avoids a circle stroke under a second handle fill.
+    """
+    fillet = min(radius * 0.12, half_handle * 0.35)
+    offset = half_handle + fillet
+    fillet_x = cx + sqrt((radius + fillet) ** 2 - offset**2)
+    plate_x = cx + radius * (fillet_x - cx) / (radius + fillet)
+    plate_y = radius * offset / (radius + fillet)
+    top = cy - half_handle
+    bottom = cy + half_handle
+    return (
+        f"M {fillet_x:.3f},{top:.3f} "
+        f"A {fillet:.3f},{fillet:.3f} 0 0 1 {plate_x:.3f},{cy - plate_y:.3f} "
+        f"A {radius:.3f},{radius:.3f} 0 1 0 {plate_x:.3f},{cy + plate_y:.3f} "
+        f"A {fillet:.3f},{fillet:.3f} 0 0 1 {fillet_x:.3f},{bottom:.3f} "
+        f"L {handle_end:.3f},{bottom:.3f} "
+        f"L {handle_end:.3f},{top:.3f} Z"
+    )
+
+
 def render_plate_svg(
     *,
     paddle_dia: float,
@@ -18,6 +44,9 @@ def render_plate_svg(
     handle_label: str = "No label",
     chamfer: bool = False,
     chamfer_width: float | None = None,
+    handle_hole_enabled: bool = False,
+    handle_hole_diameter: float | None = None,
+    handle_hole_center_from_handle_end: float | None = None,
     units: str = "in.",
 ) -> str:
     """Return a responsive configuration drawing for a handled orifice plate.
@@ -35,19 +64,46 @@ def render_plate_svg(
     radius_px = 110.0
     cx, cy = 220.0, 225.0
     bore_px = _clamp(radius_px * bore / od, 6.0, radius_px * 0.94)
-    handle_px = _clamp((2 * radius_px) * handle / od, 16.0, 76.0)
+    handle_px = _clamp((2 * radius_px) * handle / od, 16.0, 2 * radius_px * 0.98)
     physical_extension = max(length - (od / 2), 0.0)
     extension_px = _clamp(radius_px * physical_extension / (od / 2), 60.0, 210.0)
     handle_end = cx + radius_px + extension_px
 
-    # The transition begins inside the paddle and widens into the handle,
-    # making the neck/handle connection visible as one continuous cut profile.
-    neck_half_height = min(handle_px * 0.72, radius_px * 0.72)
-    neck_x = cx + sqrt(max(radius_px**2 - neck_half_height**2, 0.0)) - 7.0
+    outline = _paddle_outline_path(cx, cy, radius_px, handle_px / 2, handle_end)
+    hole_svg = ""
+    if handle_hole_enabled:
+        from plate_geometry import PlateSpec, build_plate_geometry
+        g = build_plate_geometry(PlateSpec(
+            finished_od=od, finished_bore_diameter=float(bore_dia),
+            handle_width=float(handle_width), centerline_to_handle_end=float(handle_length_from_bore),
+            thickness=float(thickness), material=str(material),
+            handle_hole_enabled=True, handle_hole_diameter=handle_hole_diameter,
+            handle_hole_center_from_handle_end=handle_hole_center_from_handle_end,
+        ))
+        scale = min(220 / od, 320 / length)
+        radius_px, bore_px = g.radius * scale, float(bore_dia) * scale / 2
+        handle_px, handle_end = float(handle_width) * scale, cx + length * scale
+        commands = []
+        first = g.segments[0].start
+        commands.append(f"M {cx+first[0]*scale},{cy-first[1]*scale}")
+        for seg in g.segments:
+            x, y = seg.end
+            if seg.kind == "line":
+                commands.append(f"L {cx+x*scale},{cy-y*scale}")
+            else:
+                commands.append(f"A {seg.radius*scale} {seg.radius*scale} 0 {int(abs(seg.sweep_degrees)>180)} {int(seg.sweep_degrees<0)} {cx+x*scale} {cy-y*scale}")
+        outline = " ".join(commands) + " Z"
+        hx = handle_end - handle_hole_center_from_handle_end * scale
+        hole_svg = (
+            f'<circle id="handle-hole" cx="{hx:.4f}" cy="{cy:.4f}" r="{handle_hole_diameter*scale/2:.4f}" fill="white" stroke="#172033" stroke-width="2.2"/>'
+            f'<line x1="{hx}" y1="145" x2="{handle_end}" y2="145" stroke="#1d4f7a" marker-start="url(#drawing-arrow)" marker-end="url(#drawing-arrow)"/>'
+            f'<line x1="{hx}" y1="145" x2="{hx}" y2="{cy}" stroke="#637386" stroke-dasharray="4 3"/>'
+            f'<line x1="{handle_end}" y1="145" x2="{handle_end}" y2="{cy}" stroke="#637386"/>'
+            f'<text x="340" y="122" font-family="Arial,sans-serif" font-size="11">HANDLE HOLE &#8960; {handle_hole_diameter:.4f}</text>'
+            f'<text x="340" y="136" font-family="Arial,sans-serif" font-size="11">HANDLE END TO HOLE C/L {handle_hole_center_from_handle_end:.4f}</text>'
+        )
     body_top = cy - handle_px / 2
     body_bottom = cy + handle_px / 2
-    neck_top = cy - neck_half_height
-    neck_bottom = cy + neck_half_height
 
     material_text = escape(str(material))
     unit_text = escape(str(units))
@@ -83,20 +139,11 @@ def render_plate_svg(
   <text x="22" y="34" font-family="Arial,sans-serif" font-size="17" font-weight="700" fill="#172033">HANDLED ORIFICE PLATE</text>
   <text x="658" y="34" text-anchor="end" font-family="Arial,sans-serif" font-size="12" font-weight="700" fill="#1d4f7a">CONFIGURATION DRAWING &#183; NTS</text>
 
-  <g fill="#f8fafc" stroke="#172033" stroke-width="2.2" stroke-linejoin="round">
-    <circle cx="{cx:.1f}" cy="{cy:.1f}" r="{radius_px:.1f}"/>
-    <path d="M {neck_x:.1f},{neck_top:.1f}
-             C {neck_x + 13:.1f},{neck_top:.1f} {neck_x + 19:.1f},{body_top:.1f} {neck_x + 33:.1f},{body_top:.1f}
-             L {handle_end:.1f},{body_top:.1f}
-             L {handle_end:.1f},{body_bottom:.1f}
-             L {neck_x + 33:.1f},{body_bottom:.1f}
-             C {neck_x + 19:.1f},{body_bottom:.1f} {neck_x + 13:.1f},{neck_bottom:.1f} {neck_x:.1f},{neck_bottom:.1f}
-             Z"/>
-  </g>
+  <path id="plate-outline" d="{outline}" fill="#f8fafc" stroke="#172033" stroke-width="2.2" stroke-linejoin="round"/>
 
   <circle cx="{cx:.1f}" cy="{cy:.1f}" r="{bore_px:.1f}" fill="#ffffff" stroke="#172033" stroke-width="2.2"/>
 
-  <!-- Centerlines -->
+{hole_svg}  <!-- Centerlines -->
   <g stroke="#637386" stroke-width="1" stroke-dasharray="9 4 2 4">
     <line x1="{cx-radius_px-15:.1f}" y1="{cy:.1f}" x2="{handle_end+12:.1f}" y2="{cy:.1f}"/>
     <line x1="{cx:.1f}" y1="{cy-radius_px-15:.1f}" x2="{cx:.1f}" y2="{cy+radius_px+15:.1f}"/>
