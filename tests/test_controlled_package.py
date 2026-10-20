@@ -15,7 +15,7 @@ def geometry():
 
 def labels_for(g, monkeypatch, metadata=None):
     labels = []
-    for name in ("drawString", "drawCentredString"):
+    for name in ("drawString", "drawCentredString", "drawRightString"):
         original = getattr(Canvas, name)
 
         def capture(self, x, y, value, *a, _original=original, **kw):

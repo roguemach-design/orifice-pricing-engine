@@ -1,4 +1,4 @@
-"""Deterministic v6 customer confirmation; immutable stored PDFs are never rewritten."""
+"""Deterministic v7.1 confirmation; immutable stored PDFs are never rewritten."""
 
 from dataclasses import dataclass
 from io import BytesIO
@@ -16,7 +16,7 @@ for name, file in (("PlateSans", "Vera.ttf"), ("PlateSansBold", "VeraBd.ttf")):
     pdfmetrics.registerFont(TTFont(name, str(FONT_DIR / file)))
 
 HOLD = "NOT SPECIFIED - HOLD"
-GENERATOR_VERSION = "op-drawing-v6"
+GENERATOR_VERSION = "op-drawing-v7.1"
 PAGE_SIZE = (612, 792)  # US Letter portrait; one line item per sheet.
 
 
@@ -127,11 +127,8 @@ def short_identifier(value):
 
 
 def normalized_material(value):
-    return {
-        "304": "304 STAINLESS STEEL",
-        "316": "316 STAINLESS STEEL",
-        "Carbon Steel": "CARBON STEEL",
-    }.get(value, value.upper())
+    from material_labels import drawing_material_name
+    return drawing_material_name(value)
 
 
 def traceability(metadata):
@@ -160,7 +157,7 @@ def sheet_annotations(g, metadata, view, section):
 
     def fitted(x, y, value, width, size=8, bold=False):
         value = short_identifier(str(value))
-        measured = text_width(value, size, bold)
+        measured = text_width(value, size * scene.profile.text, bold)
         if measured > width:
             size *= width / measured
         if size < 5:

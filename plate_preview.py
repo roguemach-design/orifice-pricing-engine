@@ -1,7 +1,7 @@
 """Configurator view of the same immutable drawing scene used by the PDF."""
 
 from plate_geometry import PlateSpec, build_plate_geometry
-from drawing_presentation import build_views, svg_scene
+from drawing_presentation import WEB, build_views, svg_scene, web_title_block
 
 
 def render_plate_svg(
@@ -36,6 +36,7 @@ def render_plate_svg(
         handle_hole_diameter=handle_hole_diameter,
         handle_hole_center_from_handle_end=handle_hole_center_from_handle_end,
     )
-    scene, view, _ = build_views(build_plate_geometry(spec))
-    description = f"Configuration preview, {material}, {units}; marking {handle_label}. Same drawing views as the confirmation PDF."
+    scene, view, _ = build_views(build_plate_geometry(spec), profile=WEB)
+    web_title_block(scene, view)
+    description = f"Configuration preview — Not an approved manufacturing drawing. {material}, {units}; marking {handle_label}. Same geometry as the confirmation PDF."
     return svg_scene(scene, view, description)

@@ -1538,10 +1538,8 @@ pkg = result.get("estimated_package_in") if result else None
 with left:
     preview_ready = payload_inputs is not None and not errors
     if preview_ready:
-        components.html(
-            "<style>html,body{margin:0;height:100%}"
-            "svg{width:100%!important;height:100%!important}</style>"
-            + render_plate_svg(
+        st.html(
+            render_plate_svg(
                 handle_hole_enabled=handle_hole_enabled,
                 handle_hole_diameter=handle_hole_diameter,
                 handle_hole_center_from_handle_end=handle_hole_center_from_handle_end,
@@ -1558,8 +1556,6 @@ with left:
                     float(chamfer_width) if chamfer_width is not None else None
                 ),
             ),
-            height=300,
-            scrolling=False,
         )
     else:
         st.info("Complete the required dimensions to update the plate preview.")
