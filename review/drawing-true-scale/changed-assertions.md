@@ -283,3 +283,7 @@ Only visible incomplete/no-chamfer wording changes; internal HOLD and geometry c
 - **Replaced:** `assert any(('CHAMFER: NONE' in t for t in labels))` — Only visible incomplete/no-chamfer wording changes; internal HOLD and geometry checks remain.
 - **Replacement/additional:** `assert any(('BORE EDGES SHARP, NO CHAMFER, FREE OF BURRS.' in t for t in labels))` — Only visible incomplete/no-chamfer wording changes; internal HOLD and geometry checks remain.
 
+
+## Owner-approved PDF verifier integration follow-up
+
+The owner selected option 1 on 2026-10-20, authorizing the narrow PDF-format verifier adaptation. No additional existing test assertions were changed or removed in this follow-up. New `tests/test_pdf_format_validation.py` cases cover real v3e bytes, v4 exact full identity metadata, visible dimension/revision checks, malformed or missing provenance, shortened-ID collisions, and tampered PDFs. Full approval, supersession, hash, authorization, DXF and JSON tests remain in force.

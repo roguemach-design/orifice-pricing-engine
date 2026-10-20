@@ -1,9 +1,9 @@
-# O-Plates true-scale drawing — review checkpoint
+# O-Plates true-scale drawing — review report
 
 2026-10-20. Local branch: `work/drawing-true-scale-broken-view`.
 Base: `34707eb`, `work/final-integration-production-cutover` (not main).
 
-**Status: renderer implemented and locally reviewed; integration blocked pending narrow owner authorization. No PR, CI run, staging deployment, merge, or production change has occurred.**
+**Status: renderer and owner-approved PDF verifier integration complete; full local suite green. Publication and isolated staging verification are in progress. No merge or production change.**
 
 ## What changed
 
@@ -41,11 +41,13 @@ The following are all in `drawing_standards.py`, marked `PROPOSED_PENDING_OWNER 
 | Renderer, manufacturing, section, configurator convergence and application regression group | 164 passed |
 | Isolated review service checks | 2 passed |
 | Intake-focused regression | 215 passed, 5 skipped, 19 presentation tests deselected |
-| Full final local suite | **891 passed, 52 failed, 5 skipped** |
+| Full suite before verifier authorization | 891 passed, 52 failed, 5 skipped |
+| Full suite after approved verifier adaptation | **973 passed, 5 skipped** |
+| PDF verifier and Frozen Plate focused regression | **75 passed** |
 | Exact artifact comparison | **51 SHA-256 values unchanged** |
 | Source scope | Canonical geometry, section geometry, DXF/JSON exporters, Haas and packaging generators unchanged |
 | Git diff whitespace / Python compilation | Passed |
-| CI / deployment | Not run; push blocked by automatic approval review |
+| CI / deployment | Owner-authorized; pending publication and verification |
 
 The parity matrix measures serialized SVG radii/coordinates and actual PDF cubic-path extrema, circles, lines and edge rectangles, independently of the presentation mapper. It covers small/large OD, small/large bore ratios, short and long handles, near/far handle holes, wide handles, and chamfer on/off. Ratios and true kept lengths must agree within 0.5%.
 
@@ -53,22 +55,15 @@ The parity matrix measures serialized SVG radii/coordinates and actual PDF cubic
 
 All existing tests are retained. See [changed-assertions.md](changed-assertions.md) for every changed assertion, expected-label loop, or fixture reference and its reason. The prior golden fixtures remain intact.
 
-## Integration blocker — proposed narrow extension
+## Approved PDF verifier integration
 
-`frozen_plate/validation.py` is unchanged because validation is explicitly out of scope in the handoff. Its PDF checks require legacy strings:
+The owner selected option 1 on 2026-10-20, explicitly authorizing the narrow PDF-format verifier update, the named GitHub branch/PR, and isolated free Render staging in `roguemachine`.
 
-- `HANDLE HOLE Ø0.3750` and `0.7500 HANDLE END TO HOLE C/L`;
-- the full `OP-` + canonical part identifier, including `PROTOTYPE-001` or long production IDs.
+The previous verifier required four-place handle-hole strings and full visible prototype/production IDs. Its 52 downstream failures have been resolved by a versioned PDF presentation adapter. V4 requires exact full part/order/geometry/generator/state identity in PDF provenance plus the new visible finished dimensions, drawing number, revision and traceability line. V3e retains its legacy format checks and is exercised using actual PDF bytes from the unchanged base renderer.
 
-Those requirements conflict with the requested three/two-place inch labels, THRU callout, shortened visible IDs, and removal of prototype wording. The verifier correctly refuses the new drawing under its old format contract; downstream freeze/checkout tests then remain on HOLD or have no revision to approve. No checks have been bypassed and no failed tests have been skipped.
+Thirty new tests cover accepted v4 and v3e packages, altered visible dimensions and IDs, wrong/missing/malformed provenance, shortened-ID collisions, and legacy hole tampering. No existing assertions were changed in this integration follow-up. All existing DXF, JSON, hash, revision, approval, supersession, authorization and release checks remain in place. No pricing/input validation, order schema, auth, Stripe, storage, or Frozen Plate state semantics were changed.
 
-**Proposed extension:** update only this verifier's PDF presentation adapter to recognize v4 labels and shortened visible drawing IDs while checking exact identity against PDF provenance and preserving visible dimension checks. Keep legacy-format support where needed and retain all existing DXF, JSON, hash, revision, approval, supersession, authorization and release checks. Add tampered-PDF regression cases. Do not change pricing/input validation, order schema, auth, Stripe, storage, or Frozen Plate state semantics.
-
-## Publication blocker
-
-Automatic approval review rejected the attempted push to `roguemach-design/orifice-pricing-engine`, stating that internal source would go to an unverified external destination and the trusted chat messages did not explicitly authorize that repository/disclosure. The repository and PR instructions are in the attached assignment. The push was not retried through another tool or route; read-only remote inspection found no new branch.
-
-An explicit chat authorization is needed to push the named branch to that repository, open the PR targeting `work/final-integration-production-cutover`, and deploy the isolated free staging review service in the existing `roguemachine` Render workspace. No merge or production deployment is requested.
+An earlier automatic approval review rejected the GitHub push because repository authorization was only in the attachment. It was not bypassed. The owner's subsequent explicit chat approval now covers pushing `work/drawing-true-scale-broken-view` to `roguemach-design/orifice-pricing-engine`, opening an unmerged PR against `work/final-integration-production-cutover`, and isolated staging. Production and merging remain excluded.
 
 ## Visual comparisons
 
@@ -85,9 +80,8 @@ These are **local synthetic renders**, not staging evidence. The supplied produc
 | ![Hole SVG](handle-hole-svg.png) | ![Far-from-end hole](far-hole.png) |
 | ![Short handle](short-handle.png) | ![Chamfer detail](chamfer.png) |
 
-## Next steps after owner authorization
+## Remaining publication verification
 
-1. Make the narrowly scoped verifier adaptation and prove tamper rejection and legacy compatibility.
-2. Run the full suite to green, then push focused commits and create the unmerged PR against the cutover branch.
-3. Deploy isolated staging, verify the exact deployed commit, fetch PDF/SVG bytes from staging and render comparison PNGs.
-4. Complete a synthetic Frozen Plate TEST-order generation/approval-path check and record results. Production and historical artifacts remain untouched.
+1. Push focused commits and open the unmerged PR against the cutover branch; verify CI.
+2. Deploy isolated staging, verify the deployed commit, fetch PDF/SVG bytes and render comparison PNGs.
+3. Verify the synthetic Frozen Plate generation/approval path with those exact drawing bytes and record results.
