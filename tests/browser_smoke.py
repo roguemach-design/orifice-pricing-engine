@@ -150,6 +150,13 @@ def test_actual_landing_host_renders_one_visible_drawing(configurator, width, tm
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         page = browser.new_page(viewport={"width": width, "height": 1000})
+        # This intercepted host has no network response, but Chromium still
+        # requires its local-network permission to embed the loopback fixture.
+        # The disposable test context and request allowlist remain isolated.
+        page.context.grant_permissions(["local-network-access"], origin="https://o-plates.com")
+        diagnostics = []
+        page.on("console", lambda message: diagnostics.append(f"{message.type}: {message.text}"))
+        page.on("requestfailed", lambda request: diagnostics.append(f"{request.url}: {request.failure}"))
 
         def local_only(route):
             url = route.request.url
@@ -193,7 +200,7 @@ def test_actual_landing_host_renders_one_visible_drawing(configurator, width, tm
             pixels = Image.open(io.BytesIO(visible.screenshot())).convert("RGB")
             assert sum(max(pixel) < 100 for pixel in pixels.getdata()) > 500
             # The copy and source must track real customer input reruns.
-            child.get_by_role("radio", name="316 SS Added corrosion resistance.", exact=True).check()
+            child.get_by_role("radio", name="316 SS Added corrosion resistance.", exact=True).press("Space")
             expect(visible.locator('[data-feature="web-material"]')).to_have_text("316 STAINLESS STEEL")
             child.get_by_role("spinbutton", name="Plate outside diameter (in.)", exact=True).fill("4.000")
             child.get_by_role("spinbutton", name="Plate outside diameter (in.)", exact=True).press("Tab")
@@ -202,5 +209,6 @@ def test_actual_landing_host_renders_one_visible_drawing(configurator, width, tm
                 expect(source).to_have_css("visibility", "hidden")
             assert child.get_by_test_id("stException").count() == 0
         finally:
+            (tmp_path / "browser.log").write_text("\n".join(diagnostics))
             page.screenshot(path=str(tmp_path / f"landing-{width}.png"), full_page=True)
             browser.close()
