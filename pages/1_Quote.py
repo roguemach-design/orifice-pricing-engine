@@ -3,6 +3,7 @@ from customer_safety import service_message
 import os
 import copy
 import hashlib
+import html
 import json
 import time
 from typing import Any, Dict, Optional
@@ -62,6 +63,7 @@ from drawing_intake.owner_acceptance import (
 from plate_preview import render_plate_svg
 from customer_controls import choice_buttons, material_cards
 from bore_edge_control import bore_edge_choice
+from quote_field_validation import field_errors
 
 # -----------------------------
 # Page setup (MUST be first Streamlit call)
@@ -1041,18 +1043,37 @@ with left:
 # RIGHT: inputs (narrowed) + Pay button bottom-center
 # -----------------------------
 drawing_mode = _DRAWING_SESSION_KEY in st.session_state
+field_error_slots = {}
+number_bounds = {}
+
+# Keep customer edits while conditional widgets are hidden by Streamlit.
+for field in ("chamfer_width", "handle_hole_diameter", "handle_hole_center_from_handle_end"):
+    for key in (_FORM_KEYS[field], _FORM_KEYS[field] + "_text"):
+        if key in st.session_state:
+            st.session_state[key] = st.session_state[key]
+
+
+def _field_error_slot(field):
+    field_error_slots[field] = st.empty()
 
 
 def _number_field(label: str, field: str, **kwargs):
     key = _FORM_KEYS[field]
+    # Validate on the server so invalid edits cannot silently retain an old quote.
+    number_bounds[field] = (kwargs.pop("min_value", None), kwargs.pop("max_value", None))
     if st.session_state.get(key) is not None:
-        return st.number_input(label, key=key, **kwargs)
-    return st.number_input(label, value=None, key=key, **kwargs)
+        value = st.number_input(label, key=key, **kwargs)
+    else:
+        value = st.number_input(label, value=None, key=key, **kwargs)
+    _field_error_slot(field)
+    return value
 
 
 def _select_field(label: str, field: str, options, **kwargs):
     # Keep canonical values and unresolved analyzer fields; only selection UX changes.
-    return choice_buttons(label, options, key=_FORM_KEYS[field], **kwargs)
+    value = choice_buttons(label, options, key=_FORM_KEYS[field], **kwargs)
+    _field_error_slot(field)
+    return value
 
 
 with right:
@@ -1064,6 +1085,7 @@ with right:
         st.caption("PRODUCT")
         quantity = _number_field("Quantity", "quantity", min_value=1, step=1)
         material = material_cards(material_options, key=_FORM_KEYS["material"])
+        _field_error_slot("material")
 
         thickness_options = _thickness_options(material)
         existing_thickness = st.session_state.get(_FORM_KEYS["thickness"])
@@ -1132,6 +1154,12 @@ with right:
         handle_hole_center_from_handle_end = None
         if handle_hole_enabled:
             from drawing_intake.value_normalization import parse_number
+            if not st.session_state[_FORM_SNAPSHOT_KEY].get("handle_hole_enabled"):
+                for field, default in (("handle_hole_diameter", 0.375), ("handle_hole_center_from_handle_end", 0.750)):
+                    key = _FORM_KEYS[field]
+                    if st.session_state.get(key) is None and not str(st.session_state.get(key + "_text", "")).strip():
+                        st.session_state[key] = default
+                        st.session_state[key + "_text"] = f"{default:.3f}"
             for field, label, help_text in (
                 ("handle_hole_diameter", "Handle Hole Diameter (in.)", "Finished diameter of the laser/waterjet-cut hole in the handle."),
                 ("handle_hole_center_from_handle_end", "Handle End to Hole Center (in.)", "Distance from the end edge of the handle to the centerline of the hole."),
@@ -1143,6 +1171,7 @@ with right:
                 except (ValueError, ZeroDivisionError):
                     value = None
                 st.session_state[_FORM_KEYS[field]] = value
+                _field_error_slot(field)
             handle_hole_diameter = st.session_state.get(_FORM_KEYS["handle_hole_diameter"])
             handle_hole_center_from_handle_end = st.session_state.get(_FORM_KEYS["handle_hole_center_from_handle_end"])
 
@@ -1163,11 +1192,15 @@ with right:
             max_chars=max_handle_label_chars,
             help=f"Maximum {max_handle_label_chars} characters. Letters, numbers, spaces, and standard shop-marking punctuation only.",
         )
+        _field_error_slot("handle_label")
 
         chamfer = bore_edge_choice(key=_FORM_KEYS["chamfer"])
+        _field_error_slot("chamfer")
         chamfer_width = None
         chamfer_details = {}
         if chamfer is True:
+            if not st.session_state[_FORM_SNAPSHOT_KEY].get("chamfer") and st.session_state.get(_FORM_KEYS["chamfer_width"]) is None:
+                st.session_state[_FORM_KEYS["chamfer_width"]] = 0.062
             chamfer_width = _number_field(
                 "Chamfer Width (in.)",
                 "chamfer_width",
@@ -1175,7 +1208,7 @@ with right:
                 step=0.0001,
                 format="%.4f",
                 placeholder="Enter width",
-                help="No width is assumed. Enter the required chamfer width.",
+                help="Starts at 0.062 in. when enabled with an empty field. Edit to your required chamfer width.",
             )
             if chamfer_width is None:
                 st.caption(
@@ -1440,40 +1473,31 @@ if not starter_notice_shown:
 # -----------------------------
 # Validation
 # -----------------------------
-errors = []
-if bore_dia is not None and paddle_dia is not None and bore_dia >= paddle_dia:
-    errors.append("Bore diameter must be smaller than the plate outside diameter.")
-if (
-    handle_length is not None
-    and paddle_dia is not None
-    and handle_length <= (paddle_dia / 2)
-):
-    errors.append("Handle length from bore center must extend beyond the plate radius.")
-if handle_width is not None and handle_width <= 0:
-    errors.append("Handle width must be greater than zero.")
-
-if handle_hole_enabled:
-    from plate_geometry import validate_handle_hole
-    if all(v is not None for v in (paddle_dia, handle_width, handle_length)):
-        try:
-            validate_handle_hole(paddle_dia, handle_width, handle_length, True,
-                                 handle_hole_diameter, handle_hole_center_from_handle_end)
-        except ValueError as exc:
-            errors.append("Drawing HOLD: " + str(exc))
-
+errors = field_errors(current_form_values, form_availability)
+for field, (minimum, maximum) in number_bounds.items():
+    value = current_form_values.get(field)
+    if value is not None:
+        if minimum is not None and value < minimum:
+            errors.setdefault(field, f"Enter {minimum:g} or greater.")
+        if maximum is not None and value > maximum:
+            errors.setdefault(field, f"Enter {maximum:g} or less.")
+for field, slot in field_error_slots.items():
+    if field in errors:
+        slot.markdown(
+            f'<p role="alert" data-field-error="{field}" style="color:#ff6b6b;font-size:.875rem;margin:0">'
+            + html.escape(errors[field]) + '</p>', unsafe_allow_html=True,
+        )
 if errors:
-    with right:
-        st.divider()
-        for e in errors:
-            st.error(e)
-    if active_assisted_session is None:
-        st.stop()
+    selectors = [f'.st-key-{_FORM_KEYS[field]}{("_text" if field.startswith("handle_hole_") and field != "handle_hole_enabled" else "")}' for field in errors]
+    st.markdown('<style>' + ','.join(selectors)
+                + ' {outline:2px solid #e02424;outline-offset:2px;border-radius:.5rem;background:rgba(224,36,36,.10)}'
+                + '</style>', unsafe_allow_html=True)
 
 # -----------------------------
 # Pricing (authoritative API)
 # -----------------------------
 payload_inputs = None
-if all(
+if not errors and all(
     value is not None
     for field, value in current_form_values.items()
     if field not in {"chamfer_width", "handle_hole_diameter", "handle_hole_center_from_handle_end"}
@@ -1544,8 +1568,7 @@ with left:
     if preview_ready:
         # Streamlit 1.64 st.html uses an HTML-only sanitizer that removes SVG.
         # Render only our generated, escaped SVG through the inline Markdown path.
-        st.markdown(
-            render_plate_svg(
+        preview_svg = render_plate_svg(
                 handle_hole_enabled=handle_hole_enabled,
                 handle_hole_diameter=handle_hole_diameter,
                 handle_hole_center_from_handle_end=handle_hole_center_from_handle_end,
@@ -1561,9 +1584,12 @@ with left:
                 chamfer_width=(
                     float(chamfer_width) if chamfer_width is not None else None
                 ),
-            ),
-            unsafe_allow_html=True,
         )
+        st.session_state["quote_last_valid_svg"] = preview_svg
+        st.markdown(preview_svg, unsafe_allow_html=True)
+    elif st.session_state.get("quote_last_valid_svg"):
+        st.warning("Last valid configuration shown. Correct the highlighted fields to update the drawing.")
+        st.markdown(st.session_state["quote_last_valid_svg"], unsafe_allow_html=True)
     else:
         st.info("Complete the required dimensions to update the plate preview.")
     with st.container(border=True):
@@ -1571,6 +1597,10 @@ with left:
             c1, c2 = st.columns(2)
             c1.metric("Unit price", f"${result['unit_price']:,.2f}")
             c2.metric("Total price", f"${result['total_price']:,.2f}")
+        elif errors:
+            st.info("Last valid configuration shown — pricing and purchasing are unavailable until the highlighted fields are corrected."
+                    if st.session_state.get("quote_last_valid_svg") else
+                    "Correct the highlighted fields to see a drawing and verified price.")
         elif active_assisted_session is not None and pricing_error:
             st.warning(
                 "A verified price is not currently available. Your configuration is preserved."
