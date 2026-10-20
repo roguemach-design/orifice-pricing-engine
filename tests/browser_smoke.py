@@ -8,6 +8,7 @@ Only loopback services are used; no production credentials or writes are availab
 import io
 import json
 import os
+import re
 from pathlib import Path
 import socket
 import subprocess
@@ -73,7 +74,8 @@ def configurator(tmp_path_factory):
     process = subprocess.Popen(
         [sys.executable, "-m", "streamlit", "run", "app.py",
          "--server.address=127.0.0.1", f"--server.port={port}",
-         "--server.headless=true", "--browser.gatherUsageStats=false"],
+         "--server.headless=true", "--browser.gatherUsageStats=false",
+         "--global.developmentMode=false"],
         cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT,
     )
     try:
@@ -207,6 +209,53 @@ def test_actual_landing_host_renders_one_visible_drawing(configurator, width, tm
             expect(visible.locator('[data-feature="od-dimension-label"]')).to_have_text("Ø4.000")
             if width >= 901:
                 expect(source).to_have_css("visibility", "hidden")
+            # New validation/default behavior on the actual host and mobile layout.
+            child.get_by_role("radio", name=re.compile("^CHAMFERED BORE")).press("Space")
+            chamfer = child.get_by_role("spinbutton", name="Chamfer Width (in.)", exact=True)
+            expect(chamfer).to_have_value("0.0620")
+            child.get_by_role("radio", name="HANDLE HOLE", exact=True).press("Space")
+            diameter = child.get_by_role("textbox", name="Handle Hole Diameter (in.)", exact=True)
+            distance = child.get_by_role("textbox", name="Handle End to Hole Center (in.)", exact=True)
+            expect(diameter).to_have_value("0.375")
+            expect(distance).to_have_value("0.750")
+            for widget, value in ((chamfer, "0.040"), (diameter, "0.5"), (distance, "1.25")):
+                widget.fill(value)
+                widget.press("Tab")
+                expect(child.locator('[data-field-error]')).to_have_count(0)
+            child.get_by_role("radio", name=re.compile("^NO CHAMFER")).press("Space")
+            expect(chamfer).to_have_count(0)
+            child.get_by_role("radio", name="NO HANDLE HOLE", exact=True).press("Space")
+            expect(diameter).to_have_count(0)
+            child.get_by_role("radio", name=re.compile("^CHAMFERED BORE")).press("Space")
+            expect(chamfer).to_have_value("0.0400")
+            child.get_by_role("radio", name="HANDLE HOLE", exact=True).press("Space")
+            expect(diameter).to_have_value("0.5")
+            expect(distance).to_have_value("1.25")
+            # Incomplete and conflicting dimensions keep a labeled old drawing,
+            # remove the price and disable every purchase action.
+            bore = child.get_by_role("spinbutton", name="Bore diameter (in.)", exact=True)
+            for invalid, affected in (("", ["bore_dia"]), ("5", ["bore_dia", "paddle_dia"])):
+                bore.fill(invalid)
+                bore.press("Tab")
+                for field in affected:
+                    expect(child.locator(f'[data-field-error="{field}"]')).to_be_visible()
+                    expect(child.locator(f'.st-key-quote_field_{field}')).to_have_css("outline-color", "rgb(224, 36, 36)")
+                expect(child.get_by_test_id("stMetric")).to_have_count(0)
+                expect(child.get_by_role("button", name="Continue to secure checkout", exact=True)).to_be_disabled()
+                expect(child.get_by_role("button", name="Add another plate", exact=True)).to_be_disabled()
+                expect(visible).to_be_visible()
+                expect(visible.locator('[data-feature="od-dimension-label"]')).to_have_text("Ø4.000")
+                if width >= 901:
+                    expect(page.locator("#configurator-feedback")).to_contain_text("Last valid configuration shown")
+                    expect(page.locator("#configurator-feedback")).not_to_contain_text("$100")
+                else:
+                    expect(child.get_by_text("Last valid configuration shown. Correct the highlighted fields to update the drawing.", exact=True)).to_be_visible()
+                page.screenshot(path=str(tmp_path / f"validation-{width}-{'empty' if not invalid else 'conflict'}.png"), full_page=True)
+            bore.fill("1.000")
+            bore.press("Tab")
+            expect(child.locator('[data-field-error]')).to_have_count(0)
+            expect(child.get_by_test_id("stMetric")).to_have_count(2)
+            expect(visible).to_be_visible()
             assert child.get_by_test_id("stException").count() == 0
         finally:
             (tmp_path / "browser.log").write_text("\n".join(diagnostics))
