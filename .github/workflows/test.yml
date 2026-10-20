@@ -33,3 +33,16 @@ jobs:
         run: python -m pytest -q
       - name: Compile Python sources
         run: python -m compileall -q .
+      - name: Install browser smoke test dependencies
+        run: |
+          python -m pip install playwright==1.58.0
+          python -m playwright install --with-deps chromium
+      - name: Verify visible customer configurator SVG
+        run: python -m pytest -q tests/browser_smoke.py --basetemp=browser-results
+      - name: Save browser smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: configurator-browser-${{ github.sha }}
+          path: browser-results/
+          if-no-files-found: ignore
