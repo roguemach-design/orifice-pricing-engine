@@ -1,0 +1,75 @@
+{
+  "base_url": "https://oplates-drawing-review.onrender.com",
+  "health": {
+    "commit": "bc1c88ee0792a9321fe42ae81f17cfc40e1aa1f0",
+    "generator": "op-drawing-v4-true-scale",
+    "mode": "synthetic-drawing-review",
+    "status": "ok"
+  },
+  "samples": {
+    "chamfer": {
+      "exact_local_parity": true,
+      "pdf_bytes": 45615,
+      "pdf_sha256": "fa6185ff787489460a77ffd485ab7c84ce56ccd2980830b14c0c0ce1ec6f877f",
+      "svg_bytes": 6320,
+      "svg_sha256": "3ba59777f73c7510cff6f38f3d1be60a38fb3b52be8ca2b2af6746306feaf52e"
+    },
+    "example": {
+      "exact_local_parity": true,
+      "pdf_bytes": 44775,
+      "pdf_sha256": "673d03d43c2443218fda403cedbbb7d5eb0311a30063827511d59f51967aa252",
+      "svg_bytes": 6306,
+      "svg_sha256": "7cdaf8f17b7133cd4da52257fc8bd71a5bb35aaf593625b3b1f77515fa1a931a"
+    },
+    "far-hole": {
+      "exact_local_parity": true,
+      "pdf_bytes": 45013,
+      "pdf_sha256": "78a0f96641c667b8a8d6d6fc1bf3c9a2b025cad31badce706f43e7da479fa8bf",
+      "svg_bytes": 7283,
+      "svg_sha256": "b9fd4bc62ec62c1d0e56c620e2b319c876bad9060e5815c85b5de169a636981e"
+    },
+    "handle-hole": {
+      "exact_local_parity": true,
+      "pdf_bytes": 45031,
+      "pdf_sha256": "cab44839bcc900f485ec2c187951bdc214d776937ca2d02459060e0b220977fc",
+      "svg_bytes": 7284,
+      "svg_sha256": "68ba094c91005c0d46375f09706f0dd3a4adcce642c1db1dec4b9b16c719ee90"
+    },
+    "large-48": {
+      "exact_local_parity": true,
+      "pdf_bytes": 44662,
+      "pdf_sha256": "f9a40ebb44ac32c7095990640f8b600e2607f680d3d612b61576ca25011891d0",
+      "svg_bytes": 5635,
+      "svg_sha256": "94440ac0251fd51abfd46265ae88a46caf183d358566840e3dbca177ea8ec4c5"
+    },
+    "short-handle": {
+      "exact_local_parity": true,
+      "pdf_bytes": 44651,
+      "pdf_sha256": "0297b94ec679c95e6fd104c7acac3c66569a04a08aaf6a1cffdac607d67349da",
+      "svg_bytes": 5624,
+      "svg_sha256": "874d6537e8d28affb6358618835524120c1c20d868f65cb41479c272b89f79ed"
+    }
+  },
+  "test_orders": {
+    "TEST-DRAWING-EXAMPLE": {
+      "approval_exact_and_idempotent": true,
+      "captured_email_attachment_exact": true,
+      "exact_staging_pdf_frozen": true,
+      "external_email_sent": false,
+      "pdf_sha256": "673d03d43c2443218fda403cedbbb7d5eb0311a30063827511d59f51967aa252",
+      "revision": "R1",
+      "spec_sha256": "454d7952fa0b5c7103191e1183c0036a7d401ca4cfa3e48c8e3abd314173eefe"
+    },
+    "TEST-DRAWING-HANDLE-HOLE": {
+      "approval_exact_and_idempotent": true,
+      "captured_email_attachment_exact": true,
+      "exact_staging_pdf_frozen": true,
+      "external_email_sent": false,
+      "pdf_sha256": "cab44839bcc900f485ec2c187951bdc214d776937ca2d02459060e0b220977fc",
+      "revision": "R1",
+      "spec_sha256": "5929a31f9973f221648ff8efc185e25d4a9270cc8a398c11b9f48c7f79321d75"
+    }
+  },
+  "verified_at": "2026-10-20T09:30:29.593624+00:00",
+  "workflow_environment": "Temporary local SQLite using exact staging PDF bytes; no external email/database/order writes"
+}

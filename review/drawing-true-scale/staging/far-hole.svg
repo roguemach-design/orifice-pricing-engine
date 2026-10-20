@@ -1,0 +1,59 @@
+<svg viewBox="0 0 792 612" role="img" xmlns="http://www.w3.org/2000/svg"
+ aria-label="Handled orifice plate configuration drawing" data-scale="1:2"
+ style="width:100%;height:auto;display:block;background:#ffffff">
+ <title>Handled orifice plate configuration drawing</title>
+ <desc>True-proportion preview at sheet scale 1:2. Long handles use a broken view; dimension values are actual inches.</desc>
+ <defs><marker id="drawing-arrow" markerWidth="7" markerHeight="7" refX="3.5" refY="3.5" orient="auto-start-reverse"><path d="M0,0 L7,3.5 L0,7 z" fill="#1d4f7a"/></marker></defs>
+ <rect x="18" y="18" width="756" height="576" fill="white" stroke="#172033"/>
+ <g id="geometry" transform="translate(0 612) scale(1 -1)" fill="none" stroke="#172033" stroke-width="1.15">
+ <path d="M 177.610442,441.000000 L 161.410442,441.000000 A 1.125000,1.125000 0 0 0 160.442882,441.551020 A 54.000000,54.000000 0 1 1 160.442882,386.448980 A 1.125000,1.125000 0 0 0 161.410442,387.000000 L 177.610442,387.000000 Z M 199.210442,387.000000 L 365.485442,387.000000 A 1.125000,1.125000 0 0 1 366.610442,388.125000 L 366.610442,439.875000 A 1.125000,1.125000 0 0 1 365.485442,441.000000 L 199.210442,441.000000 Z" fill="#f8fafc" stroke="none"/>
+ <path id="plate-outline" d="M 177.610442,441.000000 L 161.410442,441.000000 A 1.125000,1.125000 0 0 0 160.442882,441.551020 A 54.000000,54.000000 0 1 1 160.442882,386.448980 A 1.125000,1.125000 0 0 0 161.410442,387.000000 L 177.610442,387.000000 M 199.210442,387.000000 L 365.485442,387.000000 A 1.125000,1.125000 0 0 1 366.610442,388.125000 L 366.610442,439.875000 A 1.125000,1.125000 0 0 1 365.485442,441.000000 L 199.210442,441.000000"/>
+ <circle id="bore" cx="114.000000" cy="414.000000" r="18.000000" fill="white"/>
+ <rect id="edge-view" x="700" y="360.0" width="4.5" height="108.0" fill="#f8fafc"/>
+
+<polyline class="long-break" points="177.610442,377.000000 177.610442,403.000000 183.110442,408.500000 172.110442,419.500000 177.610442,425.000000 177.610442,451.000000" stroke-width=".35"/>
+<polyline class="long-break" points="199.210442,377.000000 199.210442,403.000000 204.710442,408.500000 193.710442,419.500000 199.210442,425.000000 199.210442,451.000000" stroke-width=".35"/>
+<line class="centerline" x1="48.000000" y1="414.000000" x2="170.610442" y2="414.000000" stroke="#637386" stroke-width=".5" stroke-dasharray="12 3 2 3"/>
+<line class="centerline" x1="206.210442" y1="414.000000" x2="378.610442" y2="414.000000" stroke="#637386" stroke-width=".5" stroke-dasharray="12 3 2 3"/>
+<line class="centerline" x1="114.000000" y1="348.000000" x2="114.000000" y2="480.000000" stroke="#637386" stroke-width=".5" stroke-dasharray="12 3 2 3"/>
+<line class="handle-length" x1="114.000000" y1="492.000000" x2="366.610442" y2="492.000000" stroke="#637386" stroke-width=".5" marker-start="url(#drawing-arrow)" marker-end="url(#drawing-arrow)"/>
+<line class="" x1="114.000000" y1="482.000000" x2="114.000000" y2="496.000000" stroke="#637386" stroke-width=".5"/>
+<line class="" x1="366.610442" y1="444.000000" x2="366.610442" y2="496.000000" stroke="#637386" stroke-width=".5"/>
+<line class="handle-width" x1="394.610442" y1="387.000000" x2="394.610442" y2="441.000000" stroke="#637386" stroke-width=".5" marker-start="url(#drawing-arrow)" marker-end="url(#drawing-arrow)"/>
+<line class="" x1="369.610442" y1="387.000000" x2="398.610442" y2="387.000000" stroke="#637386" stroke-width=".5"/>
+<line class="" x1="369.610442" y1="441.000000" x2="398.610442" y2="441.000000" stroke="#637386" stroke-width=".5"/>
+<line class="outside-diameter" x1="60.000000" y1="335.000000" x2="168.000000" y2="335.000000" stroke="#637386" stroke-width=".5" marker-start="url(#drawing-arrow)" marker-end="url(#drawing-arrow)"/>
+<line class="" x1="60.000000" y1="356.000000" x2="60.000000" y2="330.000000" stroke="#637386" stroke-width=".5"/>
+<line class="" x1="168.000000" y1="356.000000" x2="168.000000" y2="330.000000" stroke="#637386" stroke-width=".5"/>
+<line class="bore-leader" x1="126.600000" y1="401.400000" x2="162.000000" y2="315.000000" stroke="#637386" stroke-width=".5"/>
+<circle id="handle-hole" cx="240.610442" cy="414.000000" r="9.000000" fill="white"/>
+<line class="hole-centerline" x1="240.610442" y1="397.000000" x2="240.610442" y2="431.000000" stroke="#637386" stroke-width=".5" stroke-dasharray="12 3 2 3"/>
+<line class="hole-location" x1="240.610442" y1="363.000000" x2="366.610442" y2="363.000000" stroke="#637386" stroke-width=".5" marker-start="url(#drawing-arrow)" marker-end="url(#drawing-arrow)"/>
+<line class="" x1="240.610442" y1="397.000000" x2="240.610442" y2="359.000000" stroke="#637386" stroke-width=".5"/>
+<line class="" x1="366.610442" y1="384.000000" x2="366.610442" y2="359.000000" stroke="#637386" stroke-width=".5"/>
+<line class="hole-leader" x1="236.110442" y1="421.794000" x2="258.610442" y2="469.000000" stroke="#637386" stroke-width=".5"/>
+</g><g font-family="Arial,sans-serif" fill="#172033">
+<text x="240.305221" y="113.000000" font-size="9" text-anchor="middle" font-weight="700">C/L TO END 30.00 in.</text>
+<text x="404.610442" y="198.000000" font-size="8" text-anchor="start">HANDLE 1.50</text>
+<text x="114.000000" y="271.000000" font-size="9" text-anchor="middle" font-weight="700">OD Ø3.000 in.</text>
+<text x="165.000000" y="297.000000" font-size="9" text-anchor="start" font-weight="700">BORE Ø1.000 ±.005</text>
+<text x="684.000000" y="274.000000" font-size="9" text-anchor="start">t = .125 in.</text>
+<text x="262.610442" y="138.000000" font-size="8" text-anchor="start">Ø.500 THRU</text>
+<text x="303.610442" y="262.000000" font-size="8" text-anchor="middle">3.50</text>
+<rect x="34" y="440" width="724" height="130" fill="white" stroke="#172033"/>
+<text x="46.000000" y="457.000000" font-size="12" text-anchor="start" font-weight="700">HANDLED ORIFICE PLATE</text>
+<text x="744.000000" y="457.000000" font-size="10" text-anchor="end" font-weight="700">CONFIGURATION DRAWING · SCALE 1:2</text>
+<text x="46.000000" y="480.000000" font-size="9" text-anchor="start" font-weight="700">MATERIAL</text>
+<text x="150.000000" y="480.000000" font-size="10" text-anchor="start">304</text>
+<text x="46.000000" y="500.000000" font-size="9" text-anchor="start" font-weight="700">THICKNESS</text>
+<text x="150.000000" y="500.000000" font-size="10" text-anchor="start">.125 in.</text>
+<text x="46.000000" y="520.000000" font-size="9" text-anchor="start" font-weight="700">CHAMFER</text>
+<text x="150.000000" y="520.000000" font-size="10" text-anchor="start">NO</text>
+<text x="46.000000" y="540.000000" font-size="9" text-anchor="start" font-weight="700">MARKING</text>
+<text x="150.000000" y="540.000000" font-size="10" text-anchor="start">No label</text>
+<text x="420.000000" y="480.000000" font-size="10" text-anchor="start">OD Ø3.000 / BORE Ø1.000</text>
+<text x="420.000000" y="500.000000" font-size="10" text-anchor="start">BORE TOL. ±.005 in.</text>
+<text x="420.000000" y="520.000000" font-size="9" text-anchor="start">DIMENSIONS IN INCHES</text>
+<text x="420.000000" y="540.000000" font-size="9" text-anchor="start">HANDLE END TO HOLE C/L 3.50</text>
+<text x="396.000000" y="587.000000" font-size="10" text-anchor="middle" font-weight="700">Configuration preview — Not an approved manufacturing drawing.</text>
+</g></svg>

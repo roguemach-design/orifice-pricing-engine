@@ -1,9 +1,13 @@
 # O-Plates true-scale drawing — review report
 
-2026-10-20. Local branch: `work/drawing-true-scale-broken-view`.
+2026-10-20. Branch: `work/drawing-true-scale-broken-view`.
 Base: `34707eb`, `work/final-integration-production-cutover` (not main).
 
-**Status: renderer and owner-approved PDF verifier integration complete; full local suite green. Publication and isolated staging verification are in progress. No merge or production change.**
+**Status: ready for owner visual review. PR #31 is open and unmerged; isolated staging is live and verified. Full local suite and deployed-commit CI are green. No production change.**
+
+- [Open staging review](https://oplates-drawing-review.onrender.com)
+- [Open PR #31](https://github.com/roguemach-design/orifice-pricing-engine/pull/31)
+- [CI for deployed commit](https://github.com/roguemach-design/orifice-pricing-engine/actions/runs/39400952801)
 
 ## What changed
 
@@ -15,7 +19,7 @@ Base: `34707eb`, `work/final-integration-production-cutover` (not main).
 - PDF content now uses the requested datum A/B symbols, bore position frame, numbered notes, compact title block, inch decimal conventions and confirmation status. Supplied finish/inspection/marking requirements are retained; missing fields no longer create visible HOLD placeholders. Incomplete chamfer inputs remain explicitly incomplete, without inventing a bevel or changing internal HOLD rules.
 - Full IDs and geometry provenance remain in PDF metadata; visible IDs are shortened. No existing stored Frozen Plate artifacts were read, regenerated, or replaced.
 - The responsive SVG uses the identical presentation model and keeps its configuration-preview disclaimer.
-- `drawing_review_app.py` is a read-only synthetic review harness with six samples. It requires `DRAWING_REVIEW_ONLY=true`, rejects `APP_ENV=production`, has no checkout/email/database bindings, and serves the same renderer outputs. It has not been deployed.
+- `drawing_review_app.py` is a read-only synthetic review harness with six samples. It requires `DRAWING_REVIEW_ONLY=true`, rejects `APP_ENV=production`, has no checkout/email/database bindings, and serves the same renderer outputs. It is deployed only to the isolated review service described below.
 
 ## Owner decisions and named constants
 
@@ -47,7 +51,9 @@ The following are all in `drawing_standards.py`, marked `PROPOSED_PENDING_OWNER 
 | Exact artifact comparison | **51 SHA-256 values unchanged** |
 | Source scope | Canonical geometry, section geometry, DXF/JSON exporters, Haas and packaging generators unchanged |
 | Git diff whitespace / Python compilation | Passed |
-| CI / deployment | Owner-authorized; pending publication and verification |
+| CI for deployed commit | **973 passed, 5 skipped; compile passed** |
+| Staging artifacts | **6 PDF/SVG pairs byte-identical to local outputs** |
+| Synthetic Frozen Plate verification | **2 TEST orders: exact frozen PDF, captured attachment and idempotent approval** |
 
 The parity matrix measures serialized SVG radii/coordinates and actual PDF cubic-path extrema, circles, lines and edge rectangles, independently of the presentation mapper. It covers small/large OD, small/large bore ratios, short and long handles, near/far handle holes, wide handles, and chamfer on/off. Ratios and true kept lengths must agree within 0.5%.
 
@@ -65,23 +71,34 @@ Thirty new tests cover accepted v4 and v3e packages, altered visible dimensions 
 
 An earlier automatic approval review rejected the GitHub push because repository authorization was only in the attachment. It was not bypassed. The owner's subsequent explicit chat approval now covers pushing `work/drawing-true-scale-broken-view` to `roguemach-design/orifice-pricing-engine`, opening an unmerged PR against `work/final-integration-production-cutover`, and isolated staging. Production and merging remain excluded.
 
+## Staging evidence
+
+- URL: https://oplates-drawing-review.onrender.com
+- Service: `srv-dbbj8nbrjlhs73ef06og`; workspace `roguemachine`; Ohio; free plan; automatic deployment off.
+- Deploy: `dep-dbbj8nrrjlhs73ef08o0`, confirmed live on 2026-10-20.
+- Deployed runtime commit: `bc1c88ee0792a9321fe42ae81f17cfc40e1aa1f0`.
+- `/health` reports that exact commit, `op-drawing-v4-true-scale`, and synthetic review mode.
+- All six deployed PDF/SVG pairs match local outputs byte for byte. PNGs below were rendered from the **downloaded staging PDFs**.
+- Sample selection returns 200, an unknown PDF returns 404, and POST to a sample returns 405. Responses have noindex/nofollow and nosniff headers.
+- The exact example and handle-hole staging PDFs also match R1 artifacts generated through the real Frozen Plate code in a disposable **local** SQLite TEST repository. Captured MIME attachments contain those exact bytes; approvals bind their PDF/spec hashes and remain idempotent. No external email, customer database or real order was used.
+- [Machine-readable verification](staging/verification.json); reproducible check: `scripts/verify_true_scale_staging.py`.
+- Staging is pinned to the verified runtime commit. Later report/evidence commits do not change the deployed renderer.
+
 ## Visual comparisons
 
-These are **local synthetic renders**, not staging evidence. The supplied production example was reconstructed from the assignment's dimensions, with a TEST traceability line. It does not alter the real order or stored R1.
+These are synthetic TEST drawings. The supplied production example was reconstructed from the assignment's dimensions; neither the real order nor its stored R1 was changed.
 
-| Supplied target | New local PDF |
+| Supplied target | PDF fetched from staging |
 | --- | --- |
-| ![Target example](target-example.png) | ![New example](example.png) |
-| ![Target hole sample](target-handle-hole.png) | ![New hole sample](handle-hole.png) |
+| ![Target example](target-example.png) | ![Staging example](staging/example.png) |
+| ![Target hole sample](target-handle-hole.png) | ![Staging hole sample](staging/handle-hole.png) |
 
-| Matching configurator SVG | Additional review cases |
+| Matching configurator SVG | Additional staging cases |
 | --- | --- |
-| ![Example SVG](example-svg.png) | ![48-inch plate](large-48.png) |
-| ![Hole SVG](handle-hole-svg.png) | ![Far-from-end hole](far-hole.png) |
-| ![Short handle](short-handle.png) | ![Chamfer detail](chamfer.png) |
+| ![Example SVG](example-svg.png) | ![48-inch plate](staging/large-48.png) |
+| ![Hole SVG](handle-hole-svg.png) | ![Far-from-end hole](staging/far-hole.png) |
+| ![Short handle](staging/short-handle.png) | ![Chamfer detail](staging/chamfer.png) |
 
-## Remaining publication verification
+## Review boundary
 
-1. Push focused commits and open the unmerged PR against the cutover branch; verify CI.
-2. Deploy isolated staging, verify the deployed commit, fetch PDF/SVG bytes and render comparison PNGs.
-3. Verify the synthetic Frozen Plate generation/approval path with those exact drawing bytes and record results.
+The named manufacturing standards remain proposals marked `PROPOSED_PENDING_OWNER`; the approved fallback scales are recorded separately. The company title uses the repository's embedded standard font because no Spy Agency font asset is present. No pricing, input validation, checkout, auth, Stripe, Supabase or drawing-intake implementation was changed. The only validation change is the explicitly approved PDF-format adapter. Historical artifacts, shared staging services and production remain untouched. This PR is not merged.
