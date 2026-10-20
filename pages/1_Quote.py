@@ -1538,7 +1538,9 @@ pkg = result.get("estimated_package_in") if result else None
 with left:
     preview_ready = payload_inputs is not None and not errors
     if preview_ready:
-        st.html(
+        # Streamlit 1.64 st.html uses an HTML-only sanitizer that removes SVG.
+        # Render only our generated, escaped SVG through the inline Markdown path.
+        st.markdown(
             render_plate_svg(
                 handle_hole_enabled=handle_hole_enabled,
                 handle_hole_diameter=handle_hole_diameter,
@@ -1556,6 +1558,7 @@ with left:
                     float(chamfer_width) if chamfer_width is not None else None
                 ),
             ),
+            unsafe_allow_html=True,
         )
     else:
         st.info("Complete the required dimensions to update the plate preview.")
