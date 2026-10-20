@@ -120,7 +120,8 @@ def test_preview_and_landing_have_intrinsic_height_without_fixed_drawing_box():
     root = Path(__file__).parents[1]
     page = (root / 'pages/1_Quote.py').read_text()
     drawing = page.split('if preview_ready:')[1].split('else:')[0]
-    assert 'st.html(' in drawing and 'render_plate_svg(' in drawing
+    assert 'st.markdown(' in drawing and 'render_plate_svg(' in drawing
+    assert 'unsafe_allow_html=True' in drawing and 'st.html(' not in drawing
     assert 'height=300' not in drawing and 'height:100%' not in drawing
     css = (root / 'o-plates landing/styles.css').read_text()
     rule = css.split('.sticky-feedback__drawing svg{')[1].split('}')[0]
