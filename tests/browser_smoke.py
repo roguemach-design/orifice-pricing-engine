@@ -34,8 +34,10 @@ CONFIG = dict(
 
 
 @pytest.fixture(scope="module")
-def configurator(tmp_path_factory):
+def configurator(tmp_path_factory, request):
     requests_seen = []
+    quote_leads = []
+    config = {**CONFIG, "lead_times_days": [7, 14, 21] if getattr(request, "param", False) else [14, 21]}
 
     class SyntheticAPI(BaseHTTPRequestHandler):
         def reply(self, data, status=200):
@@ -46,12 +48,14 @@ def configurator(tmp_path_factory):
 
         def do_GET(self):
             requests_seen.append(("GET", self.path))
-            self.reply(CONFIG if self.path == "/config/active" else {},
+            self.reply(config if self.path == "/config/active" else {},
                        200 if self.path == "/config/active" else 405)
 
         def do_POST(self):
             requests_seen.append(("POST", self.path))
-            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            payload = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
+            if self.path == "/quote":
+                quote_leads.append(payload["ships_in_days"])
             # Rendering needs a price response, not an order or a real API.
             self.reply({"unit_price": 100, "total_price": 100,
                         "configuration_id": "SYNTHETIC-SVG-SMOKE"},
@@ -100,6 +104,25 @@ def configurator(tmp_path_factory):
         log.close()
     assert requests_seen
     assert set(requests_seen) <= {("GET", "/config/active"), ("POST", "/quote")}
+    assert quote_leads and set(quote_leads) <= set(config["lead_times_days"])
+
+
+def assert_expedited_display(page, *, seven_enabled=False):
+    soon = page.get_by_role("button", name="Today / 2-Day · Coming Soon", exact=True)
+    expect(soon).to_be_visible()
+    expect(soon).to_be_disabled()
+    expect(soon).to_have_css("opacity", "0.45")
+    if seven_enabled:
+        expect(page.get_by_role("radio", name="7 Days", exact=True)).to_be_enabled()
+        expect(page.get_by_role("button", name="7 Days · Currently Unavailable", exact=True)).to_have_count(0)
+    else:
+        seven = page.get_by_role("button", name="7 Days · Currently Unavailable", exact=True)
+        expect(seven).to_be_visible()
+        expect(seven).to_be_disabled()
+        expect(seven).to_have_css("opacity", "0.45")
+        expect(page.get_by_role("radio", name="7 Days", exact=True)).to_have_count(0)
+    for days in (14, 21):
+        expect(page.get_by_role("radio", name=f"{days} calendar days", exact=True)).to_be_enabled()
 
 
 @pytest.mark.parametrize("width", [1280, 390], ids=["desktop", "mobile"])
@@ -135,6 +158,8 @@ def test_customer_configurator_paints_svg(configurator, width, route, tmp_path):
             # A rendered screenshot must contain dark drawing ink, not a blank box.
             pixels = Image.open(io.BytesIO(svg.screenshot())).convert("RGB")
             assert sum(max(pixel) < 100 for pixel in pixels.getdata()) > 500
+            assert_expedited_display(page)
+            page.locator('.st-key-lead_time_choices').screenshot(path=str(tmp_path / f"lead-time-off-{width}.png"))
             assert page.get_by_test_id("stException").count() == 0
         finally:
             page.screenshot(path=str(tmp_path / f"configurator-{width}.png"), full_page=True)
@@ -183,6 +208,7 @@ def test_actual_landing_host_renders_one_visible_drawing(configurator, width, tm
             child = page.frame_locator("#plate-configurator")
             source = child.locator('svg[aria-label="Handled orifice plate configuration drawing"]')
             expect(source).to_be_attached(timeout=30000)
+            assert_expedited_display(child)
             copy = page.locator('.sticky-feedback__drawing svg')
             if width >= 901:
                 expect(copy).to_be_visible(timeout=15000)
@@ -260,4 +286,27 @@ def test_actual_landing_host_renders_one_visible_drawing(configurator, width, tm
         finally:
             (tmp_path / "browser.log").write_text("\n".join(diagnostics))
             page.screenshot(path=str(tmp_path / f"landing-{width}.png"), full_page=True)
+            browser.close()
+
+
+@pytest.mark.parametrize("configurator", [True], indirect=True, ids=["seven-enabled"])
+@pytest.mark.parametrize("width", [1280, 390], ids=["desktop", "mobile"])
+def test_enabled_seven_remains_selectable(configurator, width, tmp_path):
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": width, "height": 1000})
+        page.route("**/*", lambda request: request.continue_()
+                   if request.request.url.startswith(configurator + "/") else request.abort())
+        try:
+            page.goto(configurator + "/Quote")
+            expect(page.get_by_role("radio", name="7 Days", exact=True)).to_be_visible(timeout=30000)
+            assert_expedited_display(page, seven_enabled=True)
+            for label in ("7 Days", "21 calendar days", "14 calendar days"):
+                choice = page.get_by_role("radio", name=label, exact=True)
+                choice.press("Space")
+                expect(choice).to_be_checked()
+                expect(page.get_by_role("img", name="Handled orifice plate configuration drawing", exact=True)).to_be_visible()
+            page.locator('.st-key-lead_time_choices').screenshot(path=str(tmp_path / f"lead-time-on-{width}.png"))
+            assert page.get_by_test_id("stException").count() == 0
+        finally:
             browser.close()
