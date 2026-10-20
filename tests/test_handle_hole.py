@@ -389,8 +389,12 @@ def test_configurator_buttons_missing_input_fractions_and_off(monkeypatch):
         toggle = next(c for c in app.button_group if c.label == "Handle Hole")
         toggle.set_value(True).run()
         assert not app.exception
-        assert any("Drawing HOLD" in e.value for e in app.error)
+        assert app.session_state["quote_field_handle_hole_diameter"] == 0.375
+        assert app.session_state["quote_field_handle_hole_center_from_handle_end"] == 0.750
         assert not app.session_state["phase1g_customer_confirmation"]
+        next(t for t in app.text_input if t.label == "Handle Hole Diameter (in.)").set_value("").run()
+        assert any('data-field-error="handle_hole_diameter"' in e.value for e in app.markdown)
+        assert next(b for b in app.button if b.label == "Continue to secure checkout").disabled
         diameter = next(
             t for t in app.text_input if t.label == "Handle Hole Diameter (in.)"
         )
@@ -406,6 +410,7 @@ def test_configurator_buttons_missing_input_fractions_and_off(monkeypatch):
             app.session_state["quote_field_handle_hole_center_from_handle_end"] == 0.75
         )
         assert not any("Drawing HOLD" in e.value for e in app.error)
+        assert not any('data-field-error="handle_hole_diameter"' in e.value for e in app.markdown)
         next(c for c in app.button_group if c.label == "Handle Hole").set_value(False).run()
         assert not app.exception
         snapshot = app.session_state["phase1g_form_snapshot"]

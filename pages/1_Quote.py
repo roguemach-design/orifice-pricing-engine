@@ -1164,8 +1164,11 @@ with right:
                 ("handle_hole_diameter", "Handle Hole Diameter (in.)", "Finished diameter of the laser/waterjet-cut hole in the handle."),
                 ("handle_hole_center_from_handle_end", "Handle End to Hole Center (in.)", "Distance from the end edge of the handle to the centerline of the hole."),
             ):
-                raw = st.text_input(label, value=str(st.session_state.get(_FORM_KEYS[field]) or ""),
-                                    key=_FORM_KEYS[field] + "_text", help=help_text)
+                text_key = _FORM_KEYS[field] + "_text"
+                if text_key not in st.session_state:
+                    current = st.session_state.get(_FORM_KEYS[field])
+                    st.session_state[text_key] = "" if current is None else str(current)
+                raw = st.text_input(label, key=text_key, help=help_text)
                 try:
                     value = parse_number(raw) if raw.strip() else None
                 except (ValueError, ZeroDivisionError):
@@ -1474,6 +1477,10 @@ if not starter_notice_shown:
 # Validation
 # -----------------------------
 errors = field_errors(current_form_values, form_availability)
+if handle_hole_enabled:
+    for field in ("handle_hole_diameter", "handle_hole_center_from_handle_end"):
+        if current_form_values[field] is None and st.session_state.get(_FORM_KEYS[field] + "_text", "").strip():
+            errors[field] = "Enter a valid number, such as 0.375 or 3/8."
 for field, (minimum, maximum) in number_bounds.items():
     value = current_form_values.get(field)
     if value is not None:
