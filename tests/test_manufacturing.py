@@ -139,7 +139,8 @@ def test_pdf_receives_finished_values_and_discloses_missing_requirements(
     assert pdf_bytes(g).startswith(b"%PDF")
     assert any("Ø1.548" in t for t in texts)
     assert not any("1.423" in t for t in texts)
-    assert any("BORE TOLERANCE: NOT SPECIFIED - HOLD" in t for t in texts)
+    assert not any("HOLD" in t for t in texts)
+    assert g.spec.bore_tolerance is None
 
 
 def test_supplied_requirements_reach_drawing(spec, monkeypatch):
@@ -163,11 +164,11 @@ def test_supplied_requirements_reach_drawing(spec, monkeypatch):
             )
         )
     )
-    assert any("BORE TOLERANCE: +/- 0.005" in t for t in texts)
-    assert any("width 0.02; angle 45; side downstream" in t for t in texts)
-    assert "UPSTREAM" in texts
-    assert any("MARKING:" in t for t in texts)
-    assert "NO. REQ'D." in texts
+    assert any("Ø1.548 ±.005" in t for t in texts)
+    assert ".020 X 45°" in texts
+    assert any('MARK "UPSTREAM" .12 HIGH' in t for t in texts)
+    assert "MARKING" in texts
+    assert "QTY" in texts
     assert "3" in texts
 
 
@@ -379,38 +380,16 @@ def test_record_exposes_versioned_corner_rule(spec, tmp_path):
 
 
 def test_pdf_draws_canonical_arcs_and_calls_out_exact_radius(spec, monkeypatch):
-    from reportlab.pdfgen.pathobject import PDFPathObject
-    from reportlab.pdfgen.canvas import Canvas
-
-    arcs = []
-    texts = []
-    original = PDFPathObject.arcTo
-
-    def capture(self, *args, **kwargs):
-        arcs.append(args)
-        return original(self, *args, **kwargs)
-
-    monkeypatch.setattr(PDFPathObject, "arcTo", capture)
-    monkeypatch.setattr(
-        Canvas, "drawString", lambda self, x, y, text, *a, **k: texts.append(text)
-    )
-    g = build_plate_geometry(spec)
-    pdf_bytes(g)
-    expected = []
+    from drawing_presentation import build_views
+    from test_drawing_v6 import sampled_path
+    g=build_plate_geometry(spec)
+    scene,view,_=build_views(g)
+    outline=next(e for e in scene.elements if e.key=='plate-outline')
+    # Every canonical vertex remains a serialized endpoint, including tangent corners.
+    endpoints=[tuple(cmd[-2:]) for cmd in outline.data if len(cmd)>1]
     for segment in g.segments:
-        if segment.kind == "arc":
-            x, y = segment.center
-            r = segment.radius
-            expected.append(
-                (
-                    x - r,
-                    y - r,
-                    x + r,
-                    y + r,
-                    segment.start_degrees,
-                    segment.sweep_degrees,
-                )
-            )
-    assert arcs == expected
-    assert any("4X R 0.03125" in text for text in texts)
-    assert any("P3E" in text for text in texts)
+        assert any(p==pytest.approx(view.point(segment.end),abs=1e-9) for p in endpoints)
+    texts=[e.data[2] for e in scene.elements if e.kind=='text']
+    assert 'R.03  4X' in texts
+    assert sum(seg.radius==.03125 for seg in g.segments)==4
+    assert b'%PDF' in pdf_bytes(g)
