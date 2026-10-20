@@ -1,8 +1,4 @@
-"""Original O-Plates Letter drawing template; deterministic ReportLab only.
-
-Exact canonical geometry is consumed through an isolated NTS presentation map.
-Display coordinates never supply manufacturing values or dimension labels.
-"""
+"""Deterministic customer confirmation drawing from exact canonical geometry."""
 
 from dataclasses import dataclass
 from io import BytesIO
@@ -20,8 +16,21 @@ for name, file in (("PlateSans", "Vera.ttf"), ("PlateSansBold", "VeraBd.ttf")):
     pdfmetrics.registerFont(TTFont(name, str(FONT_DIR / file)))
 
 HOLD = "NOT SPECIFIED - HOLD"
-GENERATOR_VERSION = "op-drawing-v3e"
-PAGE_SIZE = (612, 792)  # US Letter portrait; one line item per sheet.
+GENERATOR_VERSION = "op-drawing-v4-true-scale"
+from drawing_presentation import PAGE_SIZE, DEFAULT_LAYOUT, build_presentation
+from drawing_standards import (
+    inch,
+    dimension,
+    UOS_XX,
+    UOS_XXX,
+    UOS_ANGLES,
+    BORE_POSITION_DIAMETER,
+    EDGE_BREAK,
+    FACE_FINISH,
+)
+from math import cos, sin, radians, hypot
+import json
+import re
 
 
 @dataclass(frozen=True)
@@ -136,6 +145,8 @@ def dim(c, x1, y1, x2, y2, label, vertical=False):
             c.line(x1, y1 - 8, x2, y2 + 8)
             arrow(c, x1, y1, 0, -1)
             arrow(c, x2, y2, 0, 1)
+            text(c, x1 + 8, (y1 + y2) / 2 - 3, label, 8)
+            return
         else:
             arrow(c, x1, y1, 0, 1)
             arrow(c, x2, y2, 0, -1)
@@ -150,143 +161,6 @@ def dim(c, x1, y1, x2, y2, label, vertical=False):
         arrow(c, x2, y2, -1, 0)
         c.setFont("PlateSans", 8)
         c.drawCentredString((x1 + x2) / 2, y1 + 7, label)
-
-
-@dataclass(frozen=True)
-class Presentation:
-    """Points on paper only. Never used by the specification, DXF or JSON."""
-
-    cx: float = 238
-    cy: float = 488
-    paddle_radius: float = 112
-    handle_tip: float = 635
-    bore_radius: float = 66
-    section_center: float = 478
-    section_thickness: float = 18
-
-    def scale(self, g):
-        return self.paddle_radius / g.radius
-
-    def tip_offset(self, g):
-        return (self.handle_tip - self.cy) / self.scale(
-            g
-        ) - g.spec.centerline_to_handle_end
-
-    def point(self, g, point):
-        x, y = point
-        # Preserve the canonical paddle/neck arcs; translate the two tip arcs.
-        # Only straight handle sides change display length.
-        if x >= g.spec.centerline_to_handle_end - g.corner_radius:
-            x += self.tip_offset(g)
-        return self.cx - y * self.scale(g), self.cy + x * self.scale(g)
-
-
-GOLDEN_PRESENTATION = Presentation()
-
-
-def normalized_material(value):
-    return {
-        "304": "304 STAINLESS STEEL",
-        "316": "316 STAINLESS STEEL",
-        "Carbon Steel": "CARBON STEEL",
-    }.get(value, value.upper())
-
-
-def draw_plan(c, g, view=GOLDEN_PRESENTATION):
-    s = g.spec
-    scale = view.scale(g)
-    cx, cy = view.cx, view.cy
-    c.setLineWidth(1.15)
-    for seg in g.segments:
-        if seg.kind == "line":
-            c.line(*view.point(g, seg.start), *view.point(g, seg.end))
-        else:
-            c.saveState()
-            c.translate(cx, cy)
-            c.rotate(90)
-            c.scale(scale, scale)
-            if seg.center[0] >= s.centerline_to_handle_end - g.corner_radius:
-                c.translate(view.tip_offset(g), 0)
-            c.setLineWidth(1.15 / scale)
-            p = c.beginPath()
-            p.moveTo(*seg.start)
-            x, y = seg.center
-            r = seg.radius
-            p.arcTo(x - r, y - r, x + r, y + r, seg.start_degrees, seg.sweep_degrees)
-            c.drawPath(p)
-            c.restoreState()
-    c.circle(cx, cy, view.bore_radius)
-    if s.handle_hole_enabled:
-        # NTS handle is shortened on paper; locate the hole relative to the physical tip.
-        hy = view.handle_tip - s.handle_hole_center_from_handle_end * scale
-        hr = s.handle_hole_diameter * scale / 2
-        c.circle(cx, hy, hr)
-        c.line(cx + hr, hy, cx + 65, hy + 30)
-        text(c, cx + 65, hy + 33, f"HANDLE HOLE Ø{s.handle_hole_diameter:.4f}", 7, True)
-        hx = cx + g.half_handle_width * scale + 24
-        c.line(cx + hr + 3, hy, hx + 4, hy)
-        c.line(cx + g.half_handle_width * scale + 3, view.handle_tip, hx + 4, view.handle_tip)
-        dim(c, hx, hy, hx, view.handle_tip, f"{s.handle_hole_center_from_handle_end:.4f}", True)
-        text(c, cx + 65, hy + 19, f"{s.handle_hole_center_from_handle_end:.4f} HANDLE END TO HOLE C/L", 6)
-    c.setLineWidth(0.35)
-    c.setDash([12, 3, 2, 3])
-    c.line(cx - view.paddle_radius - 15, cy, view.section_center + 30, cy)
-    c.line(cx, cy - view.paddle_radius - 15, cx, view.handle_tip + 15)
-    c.setDash()
-    # Section cutting-plane end arrows; A is a section identifier, not a datum.
-    for yy in (cy - view.paddle_radius - 12, view.handle_tip + 14):
-        c.setLineWidth(0.7)
-        c.line(cx - 19, yy, cx, yy)
-        arrow(c, cx, yy, -1, 0)
-        text(c, cx - 29, yy - 3, "A", 8, True)
-    left = cx - g.half_handle_width * scale
-    right = cx + g.half_handle_width * scale
-    for x in (left, right):
-        c.line(x, view.handle_tip + 3, x, view.handle_tip + 34)
-    dim(
-        c,
-        left,
-        view.handle_tip + 27,
-        right,
-        view.handle_tip + 27,
-        f"{s.handle_width:.3f}",
-    )
-    xdim = cx + view.paddle_radius + 24
-    c.line(right + 3, view.handle_tip, xdim + 5, view.handle_tip)
-    c.line(cx + 5, cy, xdim + 5, cy)
-    dim(
-        c,
-        xdim,
-        cy,
-        xdim,
-        view.handle_tip,
-        f"{s.centerline_to_handle_end:.3f} C/L TO HANDLE END",
-        True,
-    )
-    bottom = cy - view.paddle_radius
-    bx, by = cx - view.bore_radius * 0.70710678, cy - view.bore_radius * 0.70710678
-    c.line(bx, by, 124, bottom + 18)
-    c.line(124, bottom + 18, 43, bottom + 18)
-    arrow(c, bx, by, -0.70710678, -0.70710678)
-    text(c, 43, bottom + 24, f"Ø{s.finished_bore_diameter:.3f}", 9, True)
-    tol = f"+/- {s.bore_tolerance:g}" if s.bore_tolerance is not None else HOLD
-    text(c, 43, bottom + 6, f"BORE TOLERANCE: {tol}", 6.5)
-    ox, oy = cx + view.paddle_radius * 0.70710678, cy - view.paddle_radius * 0.70710678
-    c.line(ox, oy, 333, bottom + 1)
-    c.line(333, bottom + 1, 398, bottom + 1)
-    arrow(c, ox, oy, 0.70710678, -0.70710678)
-    text(c, 337, bottom + 6, f"Ø{s.finished_od:.3f}", 9)
-    text(c, 146, bottom - 24, f"4X R {g.corner_radius:.5f}", 7)
-    text(c, 226, bottom - 40, "PLAN - NTS", 6.5)
-    text(c, 44, 649, "MARKING: " + ("HOLD" if s.marking is None else ""), 9, True)
-    if s.marking is not None:
-        fitted_text(c, 44, 637, s.marking, 138, 7)
-
-    c.setLineWidth(0.4)
-    marking_y = view.handle_tip - (60 if s.handle_hole_enabled else 14)
-    c.line(142, 640, left + 10, marking_y)
-    arrow(c, left + 10, marking_y, -0.8, 0.6)
-    return cy, scale
 
 
 def polygon(c, points):
@@ -314,105 +188,17 @@ def hatched_polygon(c, points):
     c.drawPath(p)
 
 
-def section_presentation(g, section, view=GOLDEN_PRESENTATION):
-    """Map exact polygon vertices into a readable NTS longitudinal section.
-
-    Bore-adjacent bevels use the SAME local scale in x and y, preserving angle.
-    Overall radial length and handle length are schematic, aligned with plan.
-    """
-    scale = view.section_thickness / g.spec.thickness
-    if section.chamfer_drawn:
-        scale = min(
-            scale,
-            0.8
-            * (view.paddle_radius - view.bore_radius)
-            / section.chamfer_radial_width,
-        )
-    x0 = view.section_center - g.spec.thickness * scale / 2
-
-    def point(x, y):
-        if g.spec.handle_hole_enabled:
-            yy = view.cy + y * view.scale(g)
-        elif y == g.spec.centerline_to_handle_end:
-            yy = view.handle_tip
-        elif y == -g.radius:
-            yy = view.cy - view.paddle_radius
-        else:
-            sign = 1 if y > 0 else -1
-            yy = view.cy + sign * (
-                view.bore_radius + (abs(y) - section.bore_radius) * scale
-            )
-        return x0 + x * scale, yy
-
-    return tuple(tuple(point(x, y) for x, y in poly) for poly in section.polygons)
-
-
-def draw_section(c, g, section, cy, scale, view=GOLDEN_PRESENTATION):
-    s = g.spec
-    polys = section_presentation(g, section, view)
-    for points in polys:
-        hatched_polygon(c, points)
-    text(c, 435, 662, "SECTION A-A - NTS", 7)
-    text(c, 427, 649, "THROUGH HANDLE / BORE", 6)
-    if s.flow_orientation is not None:
-        reverse = s.flow_orientation == "right-to-left"
-        c.setLineWidth(0.6)
-        c.line(504, cy + 25, 558, cy + 25)
-        arrow(c, 504 if reverse else 558, cy + 25, 1 if reverse else -1, 0)
-        text(c, 510, cy + 32, "FLOW", 8, True)
-    elif s.chamfer is True:
-        text(c, 504, cy + 25, "FLOW: HOLD", 6.5)
-    bottom = cy - view.paddle_radius
-    x1 = min(x for p in polys for x, y in p)
-    x2 = max(x for p in polys for x, y in p)
-    for x in (x1, x2):
-        c.line(x, bottom - 3, x, bottom - 31)
-    c.line(x1 - 14, bottom - 23, x2 + 14, bottom - 23)
-    arrow(c, x1, bottom - 23, -1, 0)
-    arrow(c, x2, bottom - 23, 1, 0)
-    text(c, x2 + 17, bottom - 26, f"t = {s.thickness:.3f}", 8)
-    text(c, 420, bottom - 48, "CHAMFER: " + section.status, 6.5)
-    if section.chamfer_drawn:
-        # Detail locator B, kept distinct from cutting plane / section A-A.
-        edge_y = view.cy + view.bore_radius
-        c.setLineWidth(0.4)
-        c.circle(view.section_center, edge_y, 13)
-        c.line(
-            view.section_center + 10, edge_y + 9, view.section_center + 28, edge_y + 24
-        )
-        text(c, view.section_center + 30, edge_y + 24, "B", 8, True)
-        draw_chamfer_detail(c, g, section)
-    else:
-        if section.missing:
-            names = {
-                "chamfer_width": "SIZE",
-                "chamfer_angle_degrees": "ANGLE",
-                "chamfer_side": "SIDE",
-                "flow_orientation": "FLOW",
-                "chamfer_width_definition": "SIZE CONVENTION",
-            }
-            words = [names[x] for x in section.missing]
-            text(c, 380, 295, "MISSING: " + ", ".join(words[:3]), 6.5)
-            text(c, 380, 284, ", ".join(words[3:]), 6.5)
-        if s.chamfer is True:
-            fitted_text(
-                c,
-                380,
-                270,
-                f"width {s.chamfer_width}; angle {s.chamfer_angle_degrees}; side {s.chamfer_side}",
-                185,
-                6.5,
-            )
-
-
 def draw_chamfer_detail(c, g, section):
-    # Uniform local enlargement preserves the exact angle; the crop is NTS.
+    # Uniform local enlargement preserves the exact angle and crop geometry.
     s = g.spec
     t = s.thickness
     w = section.chamfer_radial_width
     d = section.chamfer_axial_depth
     height = min(g.radius - section.bore_radius, max(w * 2, t * 0.65))
     scale = min(90 / t, 68 / height)
+    c.saveState()
+    c.translate(110, 44)
+    c.scale(0.70, 0.70)
     x0 = 390
     y0 = 196
     if section.face == "right":
@@ -423,7 +209,7 @@ def draw_chamfer_detail(c, g, section):
         slope = ((0, w), (d, 0))
     points = [(x0 + x * scale, y0 + y * scale) for x, y in pts]
     hatched_polygon(c, points)
-    text(c, 380, 294, "DETAIL B - BORE EDGE - NTS", 7, True)
+    text(c, 380, 294, f"DETAIL B - BORE EDGE ({scale * .70 / 72:.2f}:1)", 7, True)
     text(c, 380, 282, s.chamfer_side.upper() + " / ANGLE FROM FACE", 6.5)
     # Broken upper radial edge denotes a crop rather than a manufactured surface.
     top = y0 + height * scale
@@ -446,126 +232,375 @@ def draw_chamfer_detail(c, g, section):
     xdim = x0 + t * scale + 20
     for yy in (y0, y0 + w * scale):
         c.line(x0 + t * scale + 3, yy, xdim + 4, yy)
-    dim(c, xdim, y0, xdim, y0 + w * scale, f"{w:.3f} RAD", True)
+    dim(c, xdim, y0, xdim, y0 + w * scale, f"{inch(w)} RAD", True)
     for xx in (x0, x0 + t * scale):
         c.line(xx, y0 - 4, xx, 174)
-    dim(c, x0, 178, x0 + t * scale, 178, f"t {t:.3f}")
-    text(c, 380, 159, f"AXIAL DEPTH {d:.4f} / LAND {section.straight_land:.4f}", 6.8)
+    dim(c, x0, 178, x0 + t * scale, 178, f"t {inch(t)}")
+    text(
+        c,
+        380,
+        159,
+        f"AXIAL DEPTH {inch(d, 4)} / LAND {inch(section.straight_land, 4)}",
+        6.8,
+    )
     sx = x0 + sum(p[0] for p in slope) * 0.5 * scale
     sy = y0 + w * 0.5 * scale
     c.line(sx, sy, 526, 270)
     c.line(526, 270, 553, 270)
     text(c, 528, 275, f"{section.angle_degrees:g}°", 8)
+    # Preserve the explicit flow indication alongside the relocated detail.
+    reverse = s.flow_orientation == "right-to-left"
+    c.line(560, 230, 600, 230)
+    arrow(c, 560 if reverse else 600, 230, 1 if reverse else -1, 0)
+    text(c, 563, 240, "FLOW", 7)
+    c.restoreState()
 
 
-def draw_data(c, g, metadata, section):
-    s = g.spec
-    if not section.chamfer_drawn:
-        fitted_text(
-            c, 380, 250, "BORE FINISH: " + (metadata.bore_finish or "HOLD"), 185, 6.5
+def normalized_material(value):
+    return {
+        "304": "304 STAINLESS STEEL",
+        "316": "316 STAINLESS STEEL",
+        "Carbon Steel": "CARBON STEEL",
+    }.get(value, value.upper())
+
+
+def leader(c, tip, knee, label, *, right=True, size=8):
+    c.setLineWidth(0.4)
+    c.line(*tip, *knee)
+    dx, dy = knee[0] - tip[0], knee[1] - tip[1]
+    length = hypot(dx, dy)
+    arrow(c, *tip, dx / length, dy / length)
+    end = knee[0] + (14 if right else -14)
+    c.line(*knee, end, knee[1])
+    width = pdfmetrics.stringWidth(label, "PlateSans", size)
+    x = end + 4 if right else end - 4 - width
+    text(c, x, knee[1] + 3, label, size)
+    return x, knee[1], width
+
+
+def datum(c, x, y, letter, *, left=False):
+    c.setLineWidth(0.7)
+    if left:
+        c.drawPath(polygon(c, [(x, y), (x - 6, y - 3), (x - 6, y + 3)]), fill=1)
+        c.line(x - 6, y, x - 20, y)
+        bx, by = x - 32, y - 6
+    else:
+        c.drawPath(polygon(c, [(x, y), (x - 3, y - 6), (x + 3, y - 6)]), fill=1)
+        c.line(x, y - 6, x, y - 16)
+        bx, by = x - 6, y - 28
+    c.rect(bx, by, 12, 12)
+    text(c, bx + 3, by + 3, letter, 8, True)
+
+
+def position_frame(c, x, y):
+    c.setLineWidth(0.6)
+    widths = (15, 38, 14, 14)
+    start = x
+    for width in widths:
+        c.rect(x, y, width, 14)
+        x += width
+    cx, cy = start + 7.5, y + 7
+    c.circle(cx, cy, 3)
+    c.line(cx - 5, cy, cx + 5, cy)
+    c.line(cx, cy - 5, cx, cy + 5)
+    text(c, start + 19, y + 4, "Ø" + BORE_POSITION_DIAMETER, 8)
+    text(c, start + 57, y + 4, "A", 8)
+    text(c, start + 71, y + 4, "B", 8)
+
+
+def draw_plan(c, g, view):
+    s, scale = g.spec, view.scale
+    cx, cy = view.cx, view.cy
+    r, h, b = (
+        g.radius * scale,
+        g.half_handle_width * scale,
+        s.finished_bore_diameter * scale / 2,
+    )
+    c.setLineWidth(1.15)
+    for seg in view.visible_segments():
+        if seg.kind == "line":
+            c.line(*seg.start, *seg.end)
+        else:
+            p = c.beginPath()
+            p.moveTo(*seg.start)
+            x, y = seg.center
+            p.arcTo(
+                x - seg.radius,
+                y - seg.radius,
+                x + seg.radius,
+                y + seg.radius,
+                seg.start_degrees,
+                seg.sweep_degrees,
+            )
+            c.drawPath(p)
+    c.circle(cx, cy, b)
+    for x in view.break_xs:
+        points = view.long_break(x)
+        p = c.beginPath()
+        p.moveTo(*points[0])
+        for pt in points[1:]:
+            p.lineTo(*pt)
+        c.setLineWidth(0.35)
+        c.drawPath(p)
+    c.setLineWidth(0.35)
+    c.setDash([12, 3, 2, 3])
+    if view.broken:
+        x1, x2 = view.break_xs
+        c.line(cx - r - 12, cy, x1 - 7, cy)
+        c.line(x2 + 7, cy, view.tip_x + 12, cy)
+    else:
+        c.line(cx - r - 12, cy, view.tip_x + 12, cy)
+    c.line(cx, cy - r - 12, cx, cy + r + 12)
+    c.setDash()
+    top = cy + r + 24
+    c.line(cx, cy + r + 14, cx, top + 4)
+    c.line(view.tip_x, cy + h + 3, view.tip_x, top + 4)
+    # Continuous across both break lines; true value above the line.
+    dim(c, cx, top, view.tip_x, top, dimension(s.centerline_to_handle_end, "length"))
+    wx = view.tip_x + 28
+    for y in (cy - h, cy + h):
+        c.line(view.tip_x + 3, y, wx + 4, y)
+    dim(c, wx, cy - h, wx, cy + h, dimension(s.handle_width, "width"), True)
+    neck = view.point((g.join_x, g.half_handle_width))
+    leader(
+        c,
+        neck,
+        (neck[0] + 24, cy + r - 3),
+        "R" + dimension(g.corner_radius, "radius") + "  4X",
+    )
+    a = radians(235)
+    tip = (cx + r * cos(a), cy + r * sin(a))
+    x, y, w = leader(
+        c,
+        tip,
+        (
+            max(
+                tip[0] - 16,
+                52
+                + pdfmetrics.stringWidth(
+                    "Ø" + dimension(s.finished_od, "od"), "PlateSans", 8
+                ),
+            ),
+            cy - r - 16,
+        ),
+        "Ø" + dimension(s.finished_od, "od"),
+        right=False,
+    )
+    datum(c, x + w / 2, y - 4, "B")
+    a = radians(300)
+    tip = (cx + b * cos(a), cy + b * sin(a))
+    label = "Ø" + dimension(s.finished_bore_diameter, "bore")
+    if s.bore_tolerance is not None:
+        label += " ±" + inch(s.bore_tolerance)
+    x, y, _ = leader(c, tip, (cx + max(b, 35) + 25, cy - r - 20), label)
+    position_frame(c, x, y - 20)
+    if s.handle_hole_enabled:
+        hx, hy = view.point(
+            (s.centerline_to_handle_end - s.handle_hole_center_from_handle_end, 0)
         )
+        hr = s.handle_hole_diameter * scale / 2
+        c.setLineWidth(1.15)
+        c.circle(hx, hy, hr)
+        c.setLineWidth(0.35)
+        c.setDash([12, 3, 2, 3])
+        c.line(hx, hy - hr - 8, hx, hy + hr + 8)
+        c.setDash()
+        yl = cy - h - 24
+        c.line(hx, hy - hr - 8, hx, yl - 4)
+        c.line(view.tip_x, cy - h - 3, view.tip_x, yl - 4)
+        dim(
+            c,
+            hx,
+            yl,
+            view.tip_x,
+            yl,
+            dimension(s.handle_hole_center_from_handle_end, "hole_location"),
+        )
+        leader(
+            c,
+            (hx - hr * 0.5, hy + hr * 0.866),
+            (hx + 18, cy + h + 28),
+            "Ø" + dimension(s.handle_hole_diameter, "hole_diameter") + " THRU",
+            right=True,
+        )
+
+
+def draw_edge(c, g, section, view):
+    s = g.spec
+    x, y = view.layout.edge_x, view.cy
+    r = g.radius * view.scale
+    t = s.thickness * view.scale
+    c.setLineWidth(1.15)
+    c.rect(x, y - r, t, 2 * r)
+    c.setLineWidth(0.35)
+    c.setDash([12, 3, 2, 3])
+    c.line(x - 10, y, x + t + 10, y)
+    c.setDash()
+    datum(c, x, y + r * 0.6, "A", left=True)
+    yd = y - r - 18
+    for xx in (x, x + t):
+        c.line(xx, y - r - 3, xx, yd - 4)
+    c.line(x - 16, yd, x, yd)
+    c.line(x + t, yd, x + t + 16, yd)
+    arrow(c, x, yd, -1, 0)
+    arrow(c, x + t, yd, 1, 0)
+    text(c, x + t + 19, yd - 3, inch(s.thickness), 8)
     if section.chamfer_drawn:
-        fitted_text(
-            c, 70, 315, "BORE FINISH: " + (metadata.bore_finish or "HOLD"), 277, 6.5
-        )
-    rows = [
-        ("NO. REQ'D.", str(s.quantity)),
-        ("ORIFICE PLATE", f"{s.thickness:.3f} THK."),
-        ("MATERIAL", normalized_material(s.material)),
-    ]
-    for label, value in [
-        ("TAG", metadata.customer_tag),
-        ("LINE / SERVICE", metadata.line_service),
-        ("ORDER", metadata.order_identifier),
-    ]:
-        if value is not None:
-            rows.append((label, value))
-    for i, (label, value) in enumerate(rows):
-        yy = 273 - i * 18
-        text(c, 70, yy, label, 9)
-        fitted_text(c, 170, yy, value, 177, 9)
-        c.setLineWidth(0.4)
-        c.line(166, yy - 3, 347, yy - 3)
-    fitted_text(c, 44, 625, "METHOD: " + (metadata.marking_method or "HOLD"), 140, 6.5)
-    fitted_text(
-        c, 44, 614, "LOCATION: " + (metadata.marking_location or "HOLD"), 140, 6.5
-    )
-    fitted_text(
-        c, 70, 163, "EDGE / FINISH: " + (metadata.edge_finish or "HOLD"), 280, 6.5
-    )
-    fitted_text(
-        c, 70, 152, "SURFACE FINISH: " + (metadata.surface_finish or "HOLD"), 280, 6.5
-    )
-    fitted_text(c, 70, 141, "INSPECTION: " + (metadata.inspection or "HOLD"), 280, 6.5)
+        # Detail location on the projected bore edge; no section arrows on plan.
+        ey = y + s.finished_bore_diameter * view.scale / 2
+        c.circle(x + t / 2, ey, 11)
+        c.line(x - 8, ey - 8, x - 24, ey - 24)
+        text(c, x - 33, ey - 28, "B", 8, True)
+        draw_chamfer_detail(c, g, section)
 
 
-def draw_title(c, g, metadata):
+def short_identifier(value):
+    value = re.sub(r"(?i)prototype", "SAMPLE", value)
+    value = re.sub(
+        r"(?i)(?<![a-z0-9])[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}",
+        lambda m: m[0][:8].upper(),
+        value,
+    )
+    return re.sub(r"(?i)[a-f0-9]{12,}", lambda m: m[0][:8].upper(), value)
+
+
+def draw_notes(c, g, metadata, section):
     s = g.spec
-    c.setLineWidth(0.5)
-    c.rect(36, 24, 540, 112)
-    c.line(36, 110, 576, 110)
-    c.line(186, 24, 186, 110)
-    for yy in (46, 66, 86):
-        c.line(186, yy, 576, yy)
-    c.line(360, 86, 360, 110)
-    text(c, 43, 121, "ROGUE MACHINE / O-PLATES", 9, True)
-    text(c, 390, 120, "ORIFICE PLATE", 12, True)
-    text(c, 43, 99, "UNLESS OTHERWISE SPECIFIED:", 6.4)
-    for yy, label, value in [
-        (86, ".X", metadata.tolerance_x),
-        (74, ".XX", metadata.tolerance_xx),
-        (62, ".XXX", metadata.tolerance_xxx),
-        (50, "ANGLES", metadata.tolerance_angles),
-    ]:
-        text(c, 43, yy, label, 7)
-        fitted_text(c, 91, yy, value or "HOLD", 87, 7)
-    text(c, 43, 34, "DO NOT SCALE DRAWING", 7, True)
-    text(c, 193, 102, "PART NO.", 5.5)
-    fitted_text(c, 193, 91, s.part_identifier, 160, 8)
-    text(c, 367, 102, "DWG NO.", 5.5)
-    fitted_text(c, 367, 91, "OP-" + s.part_identifier, 201, 8)
-    text(c, 193, 79, "MATERIAL", 5.5)
-    fitted_text(c, 193, 69, normalized_material(s.material), 230, 7)
-    text(c, 437, 79, "THICKNESS", 5.5)
-    text(c, 437, 69, f"{s.thickness:.3f}", 7)
-    text(c, 523, 79, "QUANTITY", 5.5)
-    text(c, 523, 69, str(s.quantity), 7)
-    for x, label, value in [
-        (193, "REV", metadata.revision),
-        (265, "UNITS", "INCHES"),
-        (326, "SCALE", "NTS"),
-        (385, "SHEET", "1 OF 1"),
-        (461, "DRAFTING BASIS", "ASME Y14.5-2018"),
-    ]:
-        text(c, x, 59, label, 5.3)
-        text(c, x, 49, value, 7)
-    text(c, 193, 37, "GEN: " + GENERATOR_VERSION, 5.5)
-    fitted_text(
-        c, 350, 37, "SPEC REV: " + (metadata.specification_revision or "HOLD"), 220, 5.5
+    if section.chamfer_drawn:
+        bore = "BORE CHAMFER: SEE DETAIL B. FREE OF BURRS."
+    elif s.chamfer:
+        bore = "BORE CHAMFER SPECIFIED; DETAIL INCOMPLETE."
+    else:
+        bore = "BORE EDGES SHARP, NO CHAMFER, FREE OF BURRS."
+    marking = "NONE." if not s.marking or s.marking == "No label" else s.marking
+    if s.marking and metadata.marking_method:
+        marking += " / " + metadata.marking_method
+    notes = [
+        "INTERPRET DIMENSIONS AND TOLERANCES PER ASME Y14.5-2018.",
+        "THICKNESS TOLERANCE PER MATERIAL MILL STANDARD.",
+        bore,
+        (
+            ("EDGES: " + metadata.edge_finish)
+            if metadata.edge_finish
+            else "DEBURR ALL OTHER EDGES; BREAK SHARP EDGES " + EDGE_BREAK + "."
+        ),
+        "FACES: " + (metadata.surface_finish or FACE_FINISH) + ".",
+        "MARKING: " + marking,
+    ]
+    if s.chamfer and not section.chamfer_drawn:
+        supplied = []
+        if s.chamfer_width is not None:
+            supplied.append("SIZE " + inch(s.chamfer_width))
+        if s.chamfer_angle_degrees is not None:
+            supplied.append(f"ANGLE {s.chamfer_angle_degrees:g}°")
+        if s.chamfer_side:
+            supplied.append("SIDE " + s.chamfer_side.upper())
+        if supplied:
+            notes.append("CHAMFER INPUTS: " + " / ".join(supplied))
+    for label, value in (
+        ("INSPECTION", metadata.inspection),
+        ("BORE FINISH", metadata.bore_finish),
+        ("MARKING METHOD", metadata.marking_method),
+        ("MARKING LOCATION", metadata.marking_location),
+        ("UOS .X", metadata.tolerance_x),
+    ):
+        if value:
+            notes.append(label + ": " + value)
+    if metadata.customer_tag or metadata.line_service:
+        notes.append(
+            " / ".join(v for v in (metadata.customer_tag, metadata.line_service) if v)
+        )
+    text(c, 34, 196, "NOTES:", 8, True)
+    for i, note in enumerate(notes, 1):
+        fitted_text(c, 34, 196 - 12 * i, f"{i}. {short_identifier(note)}", 365, 7.2)
+
+
+def draw_title(c, g, metadata, view):
+    s = g.spec
+    x, y, w = 404, 18, 370
+
+    def cell(xx, yy, ww, hh, label, value, size=8, bold=False):
+        c.setLineWidth(0.6)
+        c.rect(xx, yy, ww, hh)
+        text(c, xx + 3, yy + hh - 7.5, label, 5.3)
+        if value:
+            fitted_text(
+                c, xx + 3, yy + 4, short_identifier(str(value)), ww - 6, size, bold
+            )
+
+    cell(x, 120, 150, 30, "", "ROGUE MACHINE / O-PLATES", 8, True)
+    cell(x + 150, 120, 220, 30, "TITLE", "ORIFICE PLATE, HANDLED", 10, True)
+    cell(x, 72, 150, 48, "UNLESS OTHERWISE SPECIFIED:", "")
+    text(c, x + 4, 105, "DIMENSIONS IN INCHES", 6)
+    text(
+        c,
+        x + 4,
+        94,
+        ".XX ±"
+        + (metadata.tolerance_xx or UOS_XX)
+        + "   .XXX ±"
+        + (metadata.tolerance_xxx or UOS_XXX),
+        6.5,
     )
-    text(c, 193, 27, "GEOMETRY: " + GEOMETRY_VERSION, 5.5)
-    c.setFont("PlateSansBold", 7)
-    c.drawCentredString(306, 12, STATUS_LABELS[metadata.state])
-    if metadata.order_line_revision:
-        text(c, 70, 177, "ORDER/LINE REV: " + metadata.order_line_revision, 6.5)
+    text(c, x + 4, 82, "ANGLES ±" + (metadata.tolerance_angles or UOS_ANGLES), 6.5)
+    identifier = short_identifier(s.part_identifier)
+    if not identifier.upper().startswith("OP-"):
+        identifier = "OP-" + identifier
+    cell(x + 150, 94, 170, 26, "DWG NO.", identifier, 9, True)
+    cell(x + 320, 94, 50, 26, "REV", metadata.revision, 10, True)
+    cell(x + 150, 72, 170, 22, "MATERIAL", normalized_material(s.material), 7.7)
+    cell(x + 320, 72, 50, 22, "QTY", s.quantity, 9)
+    cell(x, 50, 50, 22, "", "")
+    sx, sy = x + 8, 56
+    c.drawPath(
+        polygon(c, [(sx, sy + 2), (sx + 14, sy), (sx + 14, sy + 10), (sx, sy + 8)])
+    )
+    c.circle(sx + 27, sy + 5, 5)
+    c.circle(sx + 27, sy + 5, 2.2)
+    cell(x + 50, 50, 100, 22, "", "DO NOT SCALE DRAWING", 6, True)
+    cell(x + 150, 50, 40, 22, "SIZE", "A", 9)
+    cell(x + 190, 50, 50, 22, "SCALE", view.scale_label, 9)
+    cell(x + 240, 50, 130, 22, "SHEET", "1 OF 1", 9)
+    cell(x, y, w, 32, "", "")
+    fitted_text(
+        c,
+        x + 6,
+        38,
+        "CUSTOMER CONFIRMATION — NOT RELEASED FOR MANUFACTURE",
+        w - 12,
+        7,
+        True,
+    )
+    trace = " · ".join(
+        v
+        for v in (
+            (
+                "ORDER " + short_identifier(metadata.order_identifier)
+                if metadata.order_identifier
+                else None
+            ),
+            (
+                "LINE " + metadata.order_line_revision
+                if metadata.order_line_revision
+                else None
+            ),
+            "SPEC " + (metadata.specification_revision or metadata.revision),
+            "GEN " + GENERATOR_VERSION,
+        )
+        if v
+    )
+    fitted_text(c, x + 6, 24, trace, w - 12, 5.3)
 
 
 def render_pdf(
-    g: PlateGeometry,
-    metadata: DrawingMetadata | None = None,
-    *,
-    presentation: Presentation = GOLDEN_PRESENTATION,
+    g: PlateGeometry, metadata: DrawingMetadata | None = None, *, presentation=None
 ):
     from dataclasses import replace
     from section_geometry import build_section_geometry
 
     metadata = metadata or DrawingMetadata()
     if metadata.state == DrawingState.RELEASED:
-        raise ValueError(
-            "manufacturing release is not implemented; prototype/confirmation only"
-        )
-    # Compatibility inputs are reconciled once into the spec; one section builder
-    # drives both geometry and labels. Conflicting sources fail explicitly.
+        raise ValueError("manufacturing release is not implemented; confirmation only")
     updates = {}
     for field in ("flow_orientation", "chamfer_width_definition"):
         value = getattr(metadata, field)
@@ -575,39 +610,34 @@ def render_pdf(
             updates[field] = value
     spec = replace(g.spec, **updates)
     section = build_section_geometry(spec)
-    if updates:
-        g = replace(g, spec=spec)
+    g = replace(g, spec=spec)
+    view = presentation or build_presentation(g)
+    if view.geometry != g:
+        raise ValueError("presentation does not match canonical geometry")
     out = BytesIO()
     c = canvas.Canvas(out, pagesize=PAGE_SIZE, invariant=1, pageCompression=1)
-    c.setTitle(f"{spec.part_identifier} - prototype manufacturing drawing")
-    c.setAuthor("O-Plates deterministic generator")
-    c.setFont("PlateSans", 18)
-    c.drawCentredString(306, 745, "ORIFICE PLATE")
-    c.setLineWidth(0.8)
-    c.line(76, 737, 536, 737)
-    c.setFont("PlateSans", 7)
-    c.drawCentredString(
-        306,
-        724,
-        "APPLICATION: "
-        + (
-            "RESTRICTION / GENERAL"
-            if spec.application == PlateApplication.RESTRICTION_GENERAL
-            else "METERING - VALIDATION NOT IMPLEMENTED"
-        ),
+    c.setTitle(
+        short_identifier(spec.part_identifier) + " - customer confirmation drawing"
     )
-    if spec.part_identifier.startswith("EXAMPLE-"):
-        text(c, 140, 708, "ILLUSTRATIVE CHAMFER VALUES - NOT DEFAULTS", 7)
-    if spec.handle_hole_enabled:
-        # Fit the whole true-proportion plan in the existing NTS plan area.
-        fit_scale = min(presentation.scale(g), (presentation.handle_tip - presentation.cy) / spec.centerline_to_handle_end)
-        presentation = replace(presentation, paddle_radius=g.radius * fit_scale,
-                               bore_radius=spec.finished_bore_diameter * fit_scale / 2,
-                               handle_tip=presentation.cy + spec.centerline_to_handle_end * fit_scale)
-    cy, scale = draw_plan(c, g, presentation)
-    draw_section(c, g, section, cy, scale, presentation)
-    draw_data(c, g, metadata, section)
-    draw_title(c, g, metadata)
+    c.setAuthor("O-Plates deterministic generator")
+    c.setSubject(
+        json.dumps(
+            {
+                "geometry": GEOMETRY_VERSION,
+                "generator": GENERATOR_VERSION,
+                "state": metadata.state,
+                "order": metadata.order_identifier,
+                "part": spec.part_identifier,
+            },
+            sort_keys=True,
+        )
+    )
+    c.setLineWidth(1.1)
+    c.rect(18, 18, 756, 576)
+    draw_plan(c, g, view)
+    draw_edge(c, g, section, view)
+    draw_notes(c, g, metadata, section)
+    draw_title(c, g, metadata, view)
     c.showPage()
     c.save()
     return out.getvalue()

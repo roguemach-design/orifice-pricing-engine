@@ -152,10 +152,10 @@ def test_pdf_svg_enabled_disabled_and_determinism():
     pdf = pdf_bytes(on)
     assert pdf == pdf_bytes(on)
     text = PdfReader(BytesIO(pdf)).pages[0].extract_text()
-    assert "HANDLE HOLE Ø0.3750" in text
-    assert "0.7500 HANDLE END TO HOLE C/L" in text
+    assert "Ø.375 THRU" in text
+    assert ".75" in text
     assert (
-        "HANDLE HOLE" not in PdfReader(BytesIO(pdf_bytes(off))).pages[0].extract_text()
+        "THRU" not in PdfReader(BytesIO(pdf_bytes(off))).pages[0].extract_text()
     )
     assert 'id="handle-hole"' in preview_svg(on)
     assert 'cx="9.75"' in preview_svg(on)
@@ -182,8 +182,8 @@ def test_configurator_svg(enabled):
     svg = render_plate_svg(**kwargs)
     assert ('id="handle-hole"' in svg) == enabled
     if enabled:
-        assert "HANDLE HOLE &#8960; 0.3750" in svg
-        assert "HANDLE END TO HOLE C/L 0.7500" in svg
+        assert "Ø.375 THRU" in svg
+        assert "HANDLE END TO HOLE C/L .75" in svg
 
 
 @pytest.mark.parametrize(
@@ -491,7 +491,8 @@ def test_feature_off_matches_accepted_golden_bytes():
     )
     g = build_plate_geometry(off)
     metadata = DrawingMetadata(state=DrawingState.CUSTOMER_CONFIRMATION)
-    assert sha256(pdf_bytes(g, metadata)).hexdigest() == expected["pdf_sha256"]
+    revised = json.loads((Path(__file__).parent / "fixtures/true-scale-presentation-hashes.json").read_text())
+    assert sha256(pdf_bytes(g, metadata)).hexdigest() == revised["pdf_sha256"]
     assert sha256(dxf_bytes(g)).hexdigest() == expected["dxf_sha256"]
     assert sha256(preview_svg(g).encode()).hexdigest() == expected["svg_sha256"]
     svg = render_plate_svg(
@@ -503,7 +504,7 @@ def test_feature_off_matches_accepted_golden_bytes():
         material=off.material,
         bore_tolerance=0.005,
     )
-    assert sha256(svg.encode()).hexdigest() == expected["configurator_svg_sha256"]
+    assert sha256(svg.encode()).hexdigest() == revised["configurator_svg_sha256"]
     assert (
         digest(canonical(canonical_specification(off)))
         == expected["canonical_spec_sha256"]

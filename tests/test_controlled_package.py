@@ -62,24 +62,22 @@ def test_paired_package_reopens_as_clean_rough_blank(tmp_path):
 def test_finished_print_identity_and_no_unapproved_gdt(monkeypatch):
     labels = labels_for(geometry(), monkeypatch)
     for value in (
-        "ORIFICE PLATE",
-        "PART NO.",
+        "ORIFICE PLATE, HANDLED",
         "DWG NO.",
-        "PROTOTYPE-001",
-        "OP-PROTOTYPE-001",
-        "INCHES",
-        "NTS",
+        "OP-SAMPLE-001",
+        "DIMENSIONS IN INCHES",
+        "1:2",
         "1 OF 1",
-        "ASME Y14.5-2018",
         "P3E",
         "Ø5.000",
         "Ø1.548",
-        "2.000",
-        "10.500 C/L TO HANDLE END",
-        "4X R 0.03125",
-        "0.125",
+        "2.00",
+        "10.50",
+        "R.03  4X",
+        ".125",
         "304 STAINLESS STEEL",
         "1",
+        "Ø.010",
     ):
         assert value in labels
     joined = "\n".join(labels)
@@ -98,11 +96,14 @@ def test_finished_print_identity_and_no_unapproved_gdt(monkeypatch):
         "ORIENTATION ONLY",
     ):
         assert forbidden not in joined
-    # A/B are unboxed section/detail identifiers, not datum feature symbols.
-    assert labels.count("A") == 2 and "SECTION A-A - NTS" in labels
+    # A/B now also identify the requested datum features and position frame.
+    assert labels.count("A") == 3 and labels.count("B") == 2
+    assert "SECTION A-A" not in joined
+    assert "ASME Y14.5-2018" in joined
+    assert "PROTOTYPE" not in joined and "NTS" not in joined
     assert not any(symbol in joined for symbol in ("⌖", "⏥", "⟂", "⌭"))
     assert "UNLESS OTHERWISE SPECIFIED:" in labels
-    assert all(value in labels for value in (".X", ".XX", ".XXX", "ANGLES"))
+    assert all(value in joined for value in (".XX ±.01", ".XXX ±.005", "ANGLES ±1°"))
 
 
 @pytest.mark.parametrize("stale", ["sample-plate.pdf", "old.svg", "stale.json"])
@@ -172,7 +173,11 @@ def test_none_and_incomplete_emit_no_detail_or_assumed_flow(monkeypatch, state):
     g = build_plate_geometry(replace(geometry().spec, chamfer=state))
     joined = "\n".join(labels_for(g, monkeypatch))
     assert "DETAIL B" not in joined
-    assert ("CHAMFER: INCOMPLETE - HOLD" if state else "CHAMFER: NONE") in joined
+    assert (
+        "BORE CHAMFER SPECIFIED; DETAIL INCOMPLETE."
+        if state
+        else "BORE EDGES SHARP, NO CHAMFER, FREE OF BURRS."
+    ) in joined
     assert "ORIENTATION ONLY" not in joined
     if not state:
         assert "FLOW" not in joined
@@ -192,11 +197,11 @@ def test_configured_chamfer_detail_exact_values(monkeypatch):
     )
     labels = labels_for(g, monkeypatch)
     for value in (
-        "DETAIL B - BORE EDGE - NTS",
+        "DETAIL B - BORE EDGE (7.00:1)",
         "DOWNSTREAM / ANGLE FROM FACE",
         "45°",
-        "0.040 RAD",
-        "AXIAL DEPTH 0.0400 / LAND 0.0850",
+        ".040 RAD",
+        "AXIAL DEPTH .0400 / LAND .0850",
         "FLOW",
         "B",
     ):

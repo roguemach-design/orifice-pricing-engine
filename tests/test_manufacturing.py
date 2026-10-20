@@ -139,7 +139,8 @@ def test_pdf_receives_finished_values_and_discloses_missing_requirements(
     assert pdf_bytes(g).startswith(b"%PDF")
     assert any("Ø1.548" in t for t in texts)
     assert not any("1.423" in t for t in texts)
-    assert any("BORE TOLERANCE: NOT SPECIFIED - HOLD" in t for t in texts)
+    assert any(".XXX ±.005" in t for t in texts)
+    assert not any("HOLD" in t for t in texts)
 
 
 def test_supplied_requirements_reach_drawing(spec, monkeypatch):
@@ -163,11 +164,11 @@ def test_supplied_requirements_reach_drawing(spec, monkeypatch):
             )
         )
     )
-    assert any("BORE TOLERANCE: +/- 0.005" in t for t in texts)
-    assert any("width 0.02; angle 45; side downstream" in t for t in texts)
-    assert "UPSTREAM" in texts
+    assert "Ø1.548 ±.005" in texts
+    assert any("SIZE .020 / ANGLE 45° / SIDE DOWNSTREAM" in t for t in texts)
+    assert any("MARKING: UPSTREAM" in t for t in texts)
     assert any("MARKING:" in t for t in texts)
-    assert "NO. REQ'D." in texts
+    assert "QTY" in texts
     assert "3" in texts
 
 
@@ -396,11 +397,14 @@ def test_pdf_draws_canonical_arcs_and_calls_out_exact_radius(spec, monkeypatch):
     )
     g = build_plate_geometry(spec)
     pdf_bytes(g)
+    from drawing_presentation import build_presentation
+
+    view = build_presentation(g)
     expected = []
     for segment in g.segments:
         if segment.kind == "arc":
-            x, y = segment.center
-            r = segment.radius
+            x, y = view.point(segment.center)
+            r = segment.radius * view.scale
             expected.append(
                 (
                     x - r,
@@ -412,5 +416,5 @@ def test_pdf_draws_canonical_arcs_and_calls_out_exact_radius(spec, monkeypatch):
                 )
             )
     assert arcs == expected
-    assert any("4X R 0.03125" in text for text in texts)
+    assert any("R.03  4X" in text for text in texts)
     assert any("P3E" in text for text in texts)

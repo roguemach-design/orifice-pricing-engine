@@ -154,7 +154,13 @@ def test_choices_match_accepted_baseline(monkeypatch, index):
     app = customer_page_test("pages/1_Quote.py", default_timeout=20)
     exercise(app, CASES[index])
     golden = json.loads((ROOT / "tests/fixtures/convergence-baseline.json").read_text())
-    assert fingerprints(calls[-1]) == golden["cases"][index]
+    current = fingerprints(calls[-1])
+    presentation = json.loads(
+        (ROOT / "tests/fixtures/true-scale-convergence-hashes.json").read_text()
+    )[index]
+    # Keep accepted pricing/payload/DXF/spec bytes; only display artifacts change.
+    for key, value in golden["cases"][index].items():
+        assert current[key] == (presentation[key] if key in presentation else value)
 
 
 def test_dynamic_availability_keeps_unresolved_choices(monkeypatch):
@@ -279,16 +285,26 @@ def test_cold_direct_embedded_quote_initializes_customer_shell(monkeypatch):
 
 def test_signed_in_account_is_compact_and_logout_still_clears_session(monkeypatch):
     import auth
+
     st.cache_data.clear()
     monkeypatch.setenv("API_BASE", "http://offline-fixture")
     monkeypatch.delenv("OPLATES_DRAWING_ASSISTED_ENABLED", raising=False)
     monkeypatch.setattr(requests, "get", lambda *a, **k: response(CONFIG))
-    monkeypatch.setattr(requests, "post", lambda *a, **k: response(dict(unit_price=1.0, total_price=1.0)))
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda *a, **k: response(dict(unit_price=1.0, total_price=1.0)),
+    )
     monkeypatch.setattr(auth, "_restore_auth_from_cookie_if_needed", lambda: None)
     monkeypatch.setattr(auth, "_refresh_session_if_needed", lambda: None)
     monkeypatch.setattr(auth, "_cookie_clear", lambda: None)
     app = customer_page_test("pages/1_Quote.py")
-    app.session_state["auth"] = dict(access_token="fixture", refresh_token=None, user=None, email="customer@example.test")
+    app.session_state["auth"] = dict(
+        access_token="fixture",
+        refresh_token=None,
+        user=None,
+        email="customer@example.test",
+    )
     app.run()
     assert not app.exception
     assert any(x.value == "Signed in as: customer@example.test" for x in app.caption)
@@ -305,7 +321,9 @@ def test_signed_in_account_is_compact_and_logout_still_clears_session(monkeypatc
 def test_material_cards_keep_required_unresolved_selection():
     def render():
         from customer_controls import material_cards
+
         material_cards(["304", "316", "Carbon Steel"], key="material")
+
     app = AppTest.from_function(render).run()
     assert not app.exception
     assert app.button_group(key="material").value is None

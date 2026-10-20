@@ -5,7 +5,88 @@ import json
 import math
 import ezdxf
 from pypdf import PdfReader
-from plate_geometry import rough_bore_diameter, manufacturing_record
+from plate_geometry import GEOMETRY_VERSION, rough_bore_diameter, manufacturing_record
+
+
+def validate_pdf_requirements(g, metadata, reader):
+    """Versioned presentation checks; frozen byte/hash checks remain separate."""
+    text = reader.pages[0].extract_text() or ""
+    version = "op-drawing-v4-true-scale"
+    subject = reader.metadata.subject if reader.metadata else None
+    try:
+        provenance = json.loads(subject or "null")
+    except (ValueError, TypeError):
+        provenance = None
+    if version in text or (
+        isinstance(provenance, dict) and provenance.get("generator") == version
+    ):
+        from drawing_standards import dimension, inch
+        from manufacturing_drawing import short_identifier
+
+        expected = {
+            "geometry": GEOMETRY_VERSION,
+            "generator": version,
+            "state": metadata.state,
+            "order": metadata.order_identifier,
+            "part": g.spec.part_identifier,
+        }
+        if provenance != expected:
+            raise ValueError("PDF provenance differs from frozen identity")
+        lines = {line.strip() for line in text.splitlines()}
+        s = g.spec
+        identifier = short_identifier(s.part_identifier)
+        if not identifier.upper().startswith("OP-"):
+            identifier = "OP-" + identifier
+        bore = "Ø" + dimension(s.finished_bore_diameter, "bore")
+        if s.bore_tolerance is not None:
+            bore += " ±" + inch(s.bore_tolerance)
+        required = [
+            "Ø" + dimension(s.finished_od, "od"),
+            bore,
+            dimension(s.handle_width, "width"),
+            dimension(s.centerline_to_handle_end, "length"),
+            inch(s.thickness),
+            identifier,
+            short_identifier(metadata.revision),
+            "CUSTOMER CONFIRMATION — NOT RELEASED FOR MANUFACTURE",
+        ]
+        if s.handle_hole_enabled:
+            required.extend([
+                "Ø" + dimension(s.handle_hole_diameter, "hole_diameter") + " THRU",
+                dimension(s.handle_hole_center_from_handle_end, "hole_location"),
+            ])
+        for label in required:
+            if label not in lines:
+                raise ValueError("PDF missing finished requirement or revision identity: " + label)
+        trace = [
+            "SPEC " + (metadata.specification_revision or metadata.revision),
+            "GEN " + version,
+        ]
+        if metadata.order_identifier:
+            trace.insert(0, "ORDER " + short_identifier(metadata.order_identifier))
+        if metadata.order_line_revision:
+            trace.insert(1 if metadata.order_identifier else 0, "LINE " + metadata.order_line_revision)
+        if " · ".join(trace) not in lines:
+            raise ValueError("PDF missing frozen revision traceability")
+        return
+
+    # Previously generated v3e drawings keep their original format contract.
+    # A missing/altered v4 subject cannot silently select this legacy adapter.
+    if "GEN: op-drawing-v3e" not in text:
+        raise ValueError("unsupported PDF presentation version")
+    if g.spec.handle_hole_enabled:
+        for label in (f"HANDLE HOLE Ø{g.spec.handle_hole_diameter:.4f}",
+                      f"{g.spec.handle_hole_center_from_handle_end:.4f} HANDLE END TO HOLE C/L"):
+            if label not in text:
+                raise ValueError("PDF missing finished handle hole requirement")
+    for label in (
+        f"Ø{g.spec.finished_bore_diameter:.3f}",
+        "OP-" + g.spec.part_identifier,
+        metadata.revision,
+        "CUSTOMER CONFIRMATION",
+    ):
+        if label not in text:
+            raise ValueError("PDF missing finished requirement or revision identity: " + label)
 
 
 def validate_package(g, metadata, outputs):
@@ -59,19 +140,4 @@ def validate_package(g, metadata, outputs):
     reader = PdfReader(BytesIO(outputs["pdf"]), strict=True)
     if len(reader.pages) != 1:
         raise ValueError("expected one drawing sheet")
-    text = reader.pages[0].extract_text()
-    if g.spec.handle_hole_enabled:
-        for label in (f"HANDLE HOLE Ø{g.spec.handle_hole_diameter:.4f}",
-                      f"{g.spec.handle_hole_center_from_handle_end:.4f} HANDLE END TO HOLE C/L"):
-            if label not in text:
-                raise ValueError("PDF missing finished handle hole requirement")
-    for label in (
-        f"Ø{g.spec.finished_bore_diameter:.3f}",
-        "OP-" + g.spec.part_identifier,
-        metadata.revision,
-        "CUSTOMER CONFIRMATION",
-    ):
-        if label not in text:
-            raise ValueError(
-                "PDF missing finished requirement or revision identity: " + label
-            )
+    validate_pdf_requirements(g, metadata, reader)
