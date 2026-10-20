@@ -22,7 +22,7 @@ def choice_buttons(label, options, *, key, placeholder=None, **kwargs):
     return value
 
 
-def lead_time_choices(options, *, key, help=None):
+def lead_time_choices(label, options, *, key, help=None):
     """Keep unavailable expedited choices visible without adding quote values."""
     options = list(options)
     st.markdown(
@@ -33,12 +33,12 @@ def lead_time_choices(options, *, key, help=None):
         </style>""",
         unsafe_allow_html=True,
     )
-    st.caption("Lead time")
+    st.caption(label)
     with st.container(key="lead_time_choices", horizontal=True, vertical_alignment="bottom"):
         if 7 not in options:
             st.button("7 Days · Currently Unavailable", key="lead_time_7_unavailable", disabled=True)
         value = choice_buttons(
-            "Lead time", options, key=key, placeholder="Select lead time",
+            label, options, key=key, placeholder="Select lead time",
             format_func=lambda days: "7 Days" if days == 7 else f"{days} calendar days",
             label_visibility="collapsed", help=help,
         )

@@ -1233,6 +1233,7 @@ with right:
         st.caption("DELIVERY")
         st.caption("Lead-time selection updates the verified quote total below.")
         ships_in_days = lead_time_choices(
+            "Lead time",
             ships_options,
             key=_FORM_KEYS["ships_in_days"],
             help="Timing is estimated and subject to material availability and order-specific review.",
