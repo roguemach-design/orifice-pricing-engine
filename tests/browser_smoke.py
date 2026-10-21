@@ -363,7 +363,7 @@ def test_idle_status_survives_reruns_and_resize(configurator, embedded, tmp_path
         # This runs only inside the disposable, network-isolated test browser.
         page.add_init_script("""(() => {
             let started=false, original=null;
-            window.statusEvidence={frames:0,missing:0,replaced:0,publications:0};
+            window.statusEvidence={frames:0,missing:0,replaced:0,publications:0,modalFrames:0};
             window.addEventListener('message', e => {
                 if(e.data?.type==='streamlit:setComponentValue')window.statusEvidence.publications++;
             });
@@ -374,7 +374,11 @@ def test_idle_status_survives_reruns_and_resize(configurator, embedded, tmp_path
                 if(started){
                     const m=window.statusEvidence;m.frames++;
                     const r=current?.getBoundingClientRect();
-                    if(!current || !r.width || !r.height || getComputedStyle(current).visibility==='hidden')m.missing++;
+                    // The existing embedded sign-in modal intentionally hides the
+                    // background app. Its status node must still remain mounted.
+                    const modal=document.documentElement.classList.contains('oplates-viewport-modal');
+                    if(modal)m.modalFrames++;
+                    if(!current || !r.width || !r.height || (!modal && getComputedStyle(current).visibility==='hidden'))m.missing++;
                     if(current && current!==original){m.replaced++;original=current;}
                 }
                 requestAnimationFrame(sample);
@@ -393,13 +397,13 @@ def test_idle_status_survives_reruns_and_resize(configurator, embedded, tmp_path
             expect(child.locator('iframe[title="journey.ui.oplates_journey"]')).to_be_attached()
             root.evaluate("el => new Promise(resolve => setTimeout(resolve, 1500))")
             assert root.evaluate("el => typeof el.ownerDocument.defaultView.__oplatesJourneyEmit") == "function"
-            child.get_by_role("radio", name="316 SS Added corrosion resistance.", exact=True).press("Space")
+            child.get_by_role("radio", name="316 SS Added corrosion resistance.", exact=True).click()
             expect(child.locator('[data-feature="web-material"]')).to_have_text("316 STAINLESS STEEL")
             diameter = child.get_by_role("spinbutton", name="Plate outside diameter (in.)", exact=True)
             diameter.fill("4.000")
             diameter.press("Tab")
             expect(child.locator('[data-feature="od-dimension-label"]')).to_have_text("Ø4.000")
-            child.get_by_role("radio", name="21 calendar days", exact=True).press("Space")
+            child.get_by_role("radio", name="21 calendar days", exact=True).click()
             expect(child.get_by_role("radio", name="21 calendar days", exact=True)).to_be_checked()
             child.get_by_role("button", name="Sign in", exact=True).click()
             expect(child.get_by_role("dialog")).to_be_visible()
