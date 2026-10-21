@@ -13,7 +13,7 @@
   const categories=['none','invalid_input','unsupported','api_failure','system_restriction','technical_failure'];
   const tokenOK=t=>typeof t==='string' && /^[a-f0-9]{32}\.[0-9]{10}\.[a-f0-9]{64}$/.test(t);
   let app,config,token=null,internal=false,consent=false,nonce=null,pending=false,last=0,epoch=0;
-  let seen=new Set(),pendingEvents=[], controller=null;
+  let seen=new Set(),pendingEvents=[], controller=null,publishedSession;
   const protectedBrowser=()=>app.navigator.globalPrivacyControl===true || app.navigator.doNotTrack==='1';
   function read(key,session=false){try{return JSON.parse((session?app.sessionStorage:app.localStorage).getItem(key));}catch(_){return null;}}
   function write(key,value,session=false){try{const store=session?app.sessionStorage:app.localStorage;if(value===null)store.removeItem(key);else store.setItem(key,JSON.stringify(value));}catch(_){}}
@@ -32,7 +32,13 @@
       '; Domain=o-plates.com; Path=/; Secure; SameSite=Lax; Max-Age=2592000';}catch(_){}
   }
   function saveSession(){const value={token,last,internal,version:VERSION};write('oplates-journey-session',value,true);sharedCookie(value);}
-  function publish(){if(config.component)window.parent.postMessage({isStreamlitMessage:true,type:'streamlit:setComponentValue',value:{session:token},dataType:'json'},app.location.origin);}
+  function publish(){
+    // Streamlit reruns on every component value message, including identical
+    // null values. Publish identity transitions only, never each observation.
+    if(!config.component || publishedSession===token)return;
+    publishedSession=token;
+    window.parent.postMessage({isStreamlitMessage:true,type:'streamlit:setComponentValue',value:{session:token},dataType:'json'},app.location.origin);
+  }
   async function request(path,body,method='POST',useToken=true){
     const abort=new AbortController();const timer=setTimeout(()=>abort.abort(),1500);
     try{return await app.fetch(config.endpoint+path,{method,credentials:'omit',referrerPolicy:'no-referrer',signal:abort.signal,
@@ -125,11 +131,13 @@
     if(config)return;app=isComponent?window.parent:window;
     const endpoint=args.endpoint?.replace(/\/$/,'');if(!APIS.includes(endpoint))return;
     if((endpoint===APIS[0]) !== [...PROD,QUOTES[0]].includes(app.location.origin))return;
+    publishedSession=args.session??null;
     config={endpoint,source:args.source,component:isComponent,entry:['configurator','cart'].includes(args.entry)?args.entry:null};
     const pref=readCookie('oplates_journey_choice')||read('oplates-journey-preference');consent=Boolean(pref?.version===VERSION&&pref.allow===true&&Date.now()-pref.at<2592000000&&!protectedBrowser());internal=pref?.internal===true;
     const shared=readCookie('oplates_journey_v1');if(pref?.allow!==false&&shared?.version===VERSION&&tokenOK(shared.token)&&Date.now()-shared.last<1800000&&!protectedBrowser()){consent=true;internal=shared.internal===true;}
     const saved=read('oplates-journey-session',true)||shared;if(consent&&tokenOK(saved?.token)&&Date.now()-saved.last<1800000){token=saved.token;last=saved.last;internal=saved.internal===true;}
     if(endpoint===APIS[1])internal=true;
+    publish();
     app.addEventListener('message',receive);
     app.__oplatesJourneyEmit=emit;
     app.__oplatesJourneyInternal=()=>{internal=true;if(token){request('/journey/internal',{}).catch(()=>{});saveSession();sharedChoice({allow:true,internal:true,version:VERSION,at:Date.now()});share();}};

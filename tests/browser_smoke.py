@@ -73,7 +73,9 @@ def configurator(tmp_path_factory, request):
     temp = tmp_path_factory.mktemp("configurator-browser")
     # Do not inherit application credentials or production service settings.
     env = {key: os.environ[key] for key in ("PATH", "PYTHONPATH", "LANG") if key in os.environ}
-    env.update(HOME=str(temp), API_BASE=f"http://127.0.0.1:{api.server_port}")
+    env.update(HOME=str(temp), API_BASE=f"http://127.0.0.1:{api.server_port}",
+               JOURNEY_UI_ENABLED="true",
+               JOURNEY_PUBLIC_API="https://orifice-pricing-api.onrender.com")
     log = (temp / "streamlit.log").open("w+")
     process = subprocess.Popen(
         [sys.executable, "-m", "streamlit", "run", "app.py",
@@ -316,4 +318,110 @@ def test_enabled_seven_remains_selectable(configurator, width, tmp_path):
             page.locator('.st-key-lead_time_choices').screenshot(path=str(tmp_path / f"lead-time-on-{width}.png"))
             assert page.get_by_test_id("stException").count() == 0
         finally:
+            browser.close()
+
+
+@pytest.mark.parametrize("embedded", [False, True], ids=["direct-status", "embedded-status"])
+def test_idle_status_survives_reruns_and_resize(configurator, embedded, tmp_path):
+    """Observe painted frames, not just source, with declined diagnostics enabled."""
+    from urllib.parse import quote
+
+    landing = ROOT / "o-plates landing"
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        page = browser.new_page(viewport={"width": 1280, "height": 1000})
+        page.context.grant_permissions(["local-network-access"], origin="https://o-plates.com")
+        choice = quote(json.dumps({"version": "journey-2026-10-v1", "allow": False,
+                                   "internal": True, "at": int(time.time() * 1000)}))
+        page.context.add_cookies([
+            {"name": "oplates_journey_choice", "value": choice, "url": configurator},
+            {"name": "oplates_journey_choice", "value": choice, "url": "https://o-plates.com"},
+        ])
+
+        def isolated(route):
+            url = route.request.url
+            if url.startswith(configurator + "/"):
+                if urlsplit(url).path.endswith("/journey.js"):
+                    response = route.fetch()
+                    return route.fulfill(response=response, body=response.text().replace(
+                        "https://quote.o-plates.com", configurator))
+                return route.continue_()
+            if not url.startswith("https://o-plates.com/"):
+                return route.abort()
+            if urlsplit(url).path == "/journey-config.js":
+                return route.fulfill(content_type="application/javascript", body=
+                    "window.OPLATES_JOURNEY={enabled:true,endpoint:'https://orifice-pricing-api.onrender.com'};")
+            path = (landing / (urlsplit(url).path.lstrip("/") or "index.html")).resolve()
+            if not path.is_relative_to(landing) or not path.is_file():
+                return route.fulfill(status=404, body="")
+            if path.suffix in {".html", ".js", ".css"}:
+                return route.fulfill(body=path.read_text().replace("https://quote.o-plates.com", configurator),
+                                     content_type={".html": "text/html", ".js": "application/javascript", ".css": "text/css"}[path.suffix])
+            return route.fulfill(path=path)
+
+        page.route("**/*", isolated)
+        # This runs only inside the disposable, network-isolated test browser.
+        page.add_init_script("""(() => {
+            let started=false, original=null;
+            window.statusEvidence={frames:0,missing:0,replaced:0,publications:0,modalFrames:0};
+            window.addEventListener('message', e => {
+                if(e.data?.type==='streamlit:setComponentValue')window.statusEvidence.publications++;
+            });
+            function sample(){
+                const current=[...document.querySelectorAll('strong')].find(
+                    e=>e.textContent==='Ready to read your print.');
+                if(current && !started){started=true;original=current;}
+                if(started){
+                    const m=window.statusEvidence;m.frames++;
+                    const r=current?.getBoundingClientRect();
+                    // The existing embedded sign-in modal intentionally hides the
+                    // background app. Its status node must still remain mounted.
+                    const modal=document.documentElement.classList.contains('oplates-viewport-modal');
+                    if(modal)m.modalFrames++;
+                    if(!current || !r.width || !r.height || (!modal && getComputedStyle(current).visibility==='hidden'))m.missing++;
+                    if(current && current!==original){m.replaced++;original=current;}
+                }
+                requestAnimationFrame(sample);
+            }
+            requestAnimationFrame(sample);
+        })();""")
+        try:
+            page.goto("https://o-plates.com/#configurator" if embedded else configurator + "/Quote")
+            if embedded:
+                page.locator("#plate-configurator").scroll_into_view_if_needed()
+            child = page.frame_locator("#plate-configurator") if embedded else page
+            status = child.get_by_text("Ready to read your print.", exact=True)
+            expect(status).to_be_visible(timeout=30000)
+            root = child.locator('.st-key-configurator_starter')
+            # The component really booted; a disabled diagnostics fixture cannot pass this gate.
+            expect(child.locator('iframe[title="journey.ui.oplates_journey"]')).to_be_attached()
+            root.evaluate("el => new Promise(resolve => setTimeout(resolve, 1500))")
+            assert root.evaluate("el => typeof el.ownerDocument.defaultView.__oplatesJourneyEmit") == "function"
+            expect(child.locator('[data-field-error]')).to_have_count(0)
+            child.get_by_role("radio", name="316 SS Added corrosion resistance.", exact=True).click()
+            expect(child.locator('[data-feature="web-material"]')).to_have_text("316 STAINLESS STEEL")
+            diameter = child.get_by_role("spinbutton", name="Plate outside diameter (in.)", exact=True)
+            diameter.fill("4.000")
+            diameter.press("Tab")
+            expect(child.locator('[data-feature="od-dimension-label"]')).to_have_text("Ø4.000")
+            child.get_by_role("radio", name="21 calendar days", exact=True).click()
+            expect(child.get_by_role("radio", name="21 calendar days", exact=True)).to_be_checked()
+            child.get_by_role("button", name="Sign in", exact=True).click()
+            expect(child.get_by_role("dialog")).to_be_visible()
+            child.get_by_role("button", name="Close", exact=True).click()
+            expect(child.get_by_role("dialog")).to_have_count(0)
+            for width in (390, 1280):
+                page.set_viewport_size({"width": width, "height": 1000})
+                expect(status).to_be_visible()
+                root.evaluate("el => new Promise(resolve => setTimeout(resolve, 500))")
+            evidence = root.evaluate("el => el.ownerDocument.defaultView.statusEvidence")
+            (tmp_path / "status-stability.json").write_text(json.dumps(evidence, indent=2))
+            assert evidence["frames"] > 60
+            assert evidence["missing"] == 0, evidence
+            assert evidence["replaced"] == 0, evidence
+            # Initial declined identity already matches the server; no rerun is needed.
+            assert evidence["publications"] == 0, evidence
+            expect(child.get_by_test_id("stException")).to_have_count(0)
+        finally:
+            page.screenshot(path=str(tmp_path / "status-stability.png"), full_page=True)
             browser.close()

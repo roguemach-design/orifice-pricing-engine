@@ -776,7 +776,9 @@ with st.container(key="configurator_starter", border=False):
         )
         st.caption("PDF, PNG, JPG · processed for this session")
     with starter_analysis:
-        starter_status = st.empty()
+        # A persistent block retains its children until this rerun supplies the
+        # current status. st.empty() first clears them and visibly flashes.
+        starter_status = st.container(key="starter_status")
     with starter_account:
         if is_logged_in():
             render_auth_sidebar(show_debug=False, placement="inline")
@@ -785,13 +787,12 @@ with st.container(key="configurator_starter", border=False):
             if st.button("Sign in", key="starter_sign_in", type="secondary"):
                 _starter_sign_in()
 
-starter_notice_shown = False
+starter_notice = None
 
 
 def _starter_notice(kind, message):
-    global starter_notice_shown
-    starter_notice_shown = True
-    getattr(starter_status, kind)(message)
+    global starter_notice
+    starter_notice = (kind, message)
 
 
 if not drawing_access_allowed:
@@ -1459,8 +1460,11 @@ if active_assisted_session is not None:
 
 
 
-if not starter_notice_shown:
-    with starter_status.container():
+with starter_status:
+    if starter_notice is not None:
+        kind, message = starter_notice
+        getattr(st, kind)(message)
+    else:
         if active_assisted_session is not None and assisted_review is not None:
             required = canonical_required_fields(chamfer=current_form_values.get("chamfer"))
             if current_form_values.get("handle_hole_enabled"):
