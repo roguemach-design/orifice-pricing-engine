@@ -372,8 +372,15 @@ def _render_product_image() -> None:
 # Checkout
 # -----------------------------
 def start_checkout(payload_inputs: dict, priced_configuration: dict) -> None:
+    if not is_logged_in():
+        st.session_state["pending_checkout_sign_in"] = {
+            "inputs": copy.deepcopy(payload_inputs),
+            "price_context": copy.deepcopy(priced_configuration),
+        }
+        _starter_sign_in()
+        return
     journey_event("checkout", "attempted")
-    customer_context = st.session_state.auth.get("email") if is_logged_in() else "guest"
+    customer_context = current_user_id_hint()
     fingerprint = hashlib.sha256(
         json.dumps(
             {
@@ -419,12 +426,8 @@ def start_checkout(payload_inputs: dict, priced_configuration: dict) -> None:
     # Logged-in customers: use Bearer token so API saves customer_id on the order
     if is_logged_in():
         headers.update(auth_headers())
-        if owner_test_checkout_allowed and os.environ.get("APP_ENV") == "production":
+        if purchasing_access["mode"] == "owner_test":
             headers["x-oplates-checkout-mode"] = "owner_test"
-    else:
-        # Guest flow (existing behavior)
-        if API_KEY:
-            headers["x-api-key"] = API_KEY
 
     try:
         r = requests.post(
@@ -759,6 +762,12 @@ owner_test_checkout_allowed = bool(
         access_path=("/internal/owner-test/access" if os.environ.get("APP_ENV") == "production"
                      else "/internal/drawing-intake/access"),
     )
+)
+
+from checkout_access import checkout_access
+purchasing_access = checkout_access(
+    API_BASE, auth_headers() if is_logged_in() else {},
+    owner_test_allowed=owner_test_checkout_allowed, owner_acceptance=OWNER_ACCEPTANCE_MODE,
 )
 
 @st.dialog("Sign in")
@@ -1715,10 +1724,10 @@ with right:
             st.success("You’re logged in — this order will be saved to your account.")
         else:
             st.info(
-                "Checkout as guest — open Account to save orders to your account."
+                "Sign in at checkout. Your configuration and cart will be preserved."
             )
 
-        if (OWNER_ACCEPTANCE_MODE or os.environ.get("APP_ENV") == "production") and not owner_test_checkout_allowed:
+        if not purchasing_access["available"]:
             st.caption(
                 "Checkout is currently closed."
             )
@@ -1735,7 +1744,7 @@ with right:
         with btn_cols[1]:
             checkout_disabled = (
                 result is None
-                or ((OWNER_ACCEPTANCE_MODE or os.environ.get("APP_ENV") == "production") and not owner_test_checkout_allowed)
+                or (not purchasing_access["available"])
                 or (
                     active_assisted_session is not None
                     and not owner_test_checkout_allowed
@@ -1743,7 +1752,12 @@ with right:
             )
             if checkout_disabled and result is not None:
                 journey_event("checkout", "blocked", "system_restriction")
-            if st.button("Continue to secure checkout", disabled=checkout_disabled):
+            pending_sign_in = st.session_state.get("pending_checkout_sign_in")
+            resume_checkout = bool(pending_sign_in and is_logged_in())
+            if resume_checkout:
+                st.session_state.pop("pending_checkout_sign_in", None)
+                resume_checkout = not checkout_disabled and pending_sign_in["inputs"] == pricing_payload
+            if st.button("Continue to secure checkout", disabled=checkout_disabled) or resume_checkout:
                 if active_assisted_session is not None:
                     try:
                         verified_assisted_cart_inputs(
@@ -1766,7 +1780,7 @@ with right:
             add_disabled = (
                 not is_logged_in()
                 or result is None
-                or ((OWNER_ACCEPTANCE_MODE or os.environ.get("APP_ENV") == "production") and not owner_test_checkout_allowed)
+                or (not purchasing_access["available"])
                 or (
                     active_assisted_session is not None
                     and not owner_test_checkout_allowed

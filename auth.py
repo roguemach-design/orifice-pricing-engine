@@ -420,6 +420,7 @@ def render_auth_sidebar(*, show_debug: bool = False, placement: str = "default")
                             }
                         )
                         st.success("You’re logged in.")
+                        st.rerun()
                     except Exception:
                         st.error(
                             "That sign-in code is invalid or expired. Request a new code."

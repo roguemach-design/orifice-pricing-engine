@@ -1,6 +1,7 @@
 """Customer routes; internal tools retain their own authorization and URLs."""
 
 import os
+import re
 from pathlib import Path
 import json
 from urllib.parse import urlsplit
@@ -10,12 +11,12 @@ import streamlit.components.v1 as components
 
 
 def render_integrated_checkout(checkout_url: str) -> bool:
-    """Let the trusted landing host open the existing sandbox session outside the iframe."""
+    """Let the trusted landing host open the verified Stripe session outside the iframe."""
     if not st.session_state.get("integrated_landing"):
         return False
     target = urlsplit(checkout_url)
     if (target.scheme != "https" or target.netloc != "checkout.stripe.com"
-            or not target.path.startswith("/c/pay/cs_test_")):
+            or not re.fullmatch(r"/c/pay/cs_(?:test|live)_[A-Za-z0-9_]+", target.path)):
         st.error("Checkout is currently unavailable. Please contact sales@o-plates.com.")
         return True
     payload = json.dumps({"type": "oplates:checkout", "url": checkout_url}).replace("<", "\\u003c")

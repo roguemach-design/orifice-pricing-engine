@@ -364,6 +364,13 @@ def _stripe_checkout_required(customer_id=None, checkout_mode=None) -> bool:
             or not os.environ.get("SENDGRID_API_KEY")
             or not ADMIN_API_KEY):
             raise HTTPException(503, "Production checkout is awaiting activation.")
+        if not WEBHOOK_SECRET or WEBHOOK_SECRET == STRIPE_TEST_WEBHOOK_SECRET:
+            raise HTTPException(503, "Independent live webhook configuration required.")
+        # Existing owner-acceptance mode is the supervised-purchase boundary.
+        # Missing configuration stays closed to the public.
+        if os.environ.get("OPLATES_OWNER_ACCEPTANCE_MODE", "true") != "false":
+            if not customer_id or customer_id not in _drawing_assisted_allowed_user_ids():
+                raise HTTPException(403, "Checkout is currently closed.")
         try:
             from frozen_plate.api import repository as frozen_repository
             frozen_repository()
@@ -393,6 +400,10 @@ def _create_checkout_session(checkout_args, owner_test, customer_id):
     session = stripe.checkout.Session.create(**checkout_args)
     if owner_test and (session.livemode is not False or not session.id.startswith("cs_test_")):
         raise HTTPException(502, "Sandbox Checkout session verification failed.")
+    if not owner_test:
+        live = APP_ENV == "production"
+        if session.livemode is not live or not session.id.startswith("cs_live_" if live else "cs_test_"):
+            raise HTTPException(502, "Checkout session mode verification failed.")
     return session
 
 
@@ -531,6 +542,8 @@ def _decode_supabase_user_id_from_bearer(authorization: Optional[str]) -> Option
             options={"verify_exp": True},
         )
 
+        if decoded.get("is_anonymous") is True:
+            return None
         return decoded.get("sub")
 
     except Exception:
@@ -1176,14 +1189,35 @@ def checkout_recovery(
 # ----------------------------
 # Checkout endpoints
 # ----------------------------
+@app.get("/checkout/availability")
+def checkout_availability(
+    authorization: Optional[str] = Header(default=None, alias="authorization"),
+):
+    """Presentation readiness only; creation repeats every authoritative gate."""
+    customer_id = _decode_supabase_user_id_from_bearer(authorization)
+    if authorization and not customer_id:
+        raise HTTPException(401, "Unauthorized")
+    try:
+        _stripe_checkout_required(customer_id)
+        return {"available": True, "mode": "live" if APP_ENV == "production" else "test"}
+    except HTTPException:
+        if _owner_test_authorized(customer_id):
+            try:
+                _stripe_checkout_required(customer_id, "owner_test")
+                return {"available": True, "mode": "owner_test"}
+            except HTTPException:
+                pass
+    return {"available": False, "mode": None}
+
+
 @app.post("/checkout/create")
 def checkout_create(
     req: CheckoutCreateRequest,
-    customer_user_id: Optional[str] = Depends(_api_key_or_customer_user_id),
+    customer_user_id: str = Depends(_require_customer_user_id),
     checkout_mode: Optional[str] = Header(default=None, alias="x-oplates-checkout-mode"),
     journey_session: Optional[str] = Header(default=None, alias="x-oplates-journey"),
 ):
-    principal = f"customer:{customer_user_id}" if customer_user_id else "verified-ui-key"
+    principal = f"customer:{customer_user_id}"
     _RATE_LIMITER.check(
         f"checkout:{principal}",
         CHECKOUT_RATE_LIMIT_REQUESTS,
@@ -1890,6 +1924,8 @@ async def _complete_stripe_webhook(request: Request, *, owner_test):
                 detail="Pending order is not available yet; retry this webhook.",
             )
 
+        if order.customer_id and order.customer_id != customer_id:
+            raise HTTPException(400, "Payment identity does not match the server-owned order.")
         if owner_test and (not _is_owner_test_order(order) or order.customer_id != customer_id):
             raise HTTPException(400, "Sandbox payment does not match the server-owned order.")
         if not owner_test and _is_owner_test_order(order):
