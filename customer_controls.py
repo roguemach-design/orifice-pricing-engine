@@ -1,6 +1,7 @@
 """Visible finite choices without changing canonical configurator values."""
 
 import streamlit as st
+from material_labels import MATERIAL_COPY
 
 
 def choice_buttons(label, options, *, key, placeholder=None, **kwargs):
@@ -21,11 +22,30 @@ def choice_buttons(label, options, *, key, placeholder=None, **kwargs):
     return value
 
 
-MATERIAL_COPY = {
-    "304": ("304 SS", "General-purpose stainless."),
-    "316": ("316 SS", "Added corrosion resistance."),
-    "Carbon Steel": ("Carbon Steel", "Cost-effective steel."),
-}
+def lead_time_choices(label, options, *, key, help=None):
+    """Keep unavailable expedited choices visible without adding quote values."""
+    options = list(options)
+    st.markdown(
+        """<style>
+        .st-key-lead_time_choices button:disabled {
+            opacity:.45;cursor:not-allowed;border-style:dashed;
+        }
+        </style>""",
+        unsafe_allow_html=True,
+    )
+    st.caption(label)
+    with st.container(key="lead_time_choices", horizontal=True, vertical_alignment="bottom"):
+        if 7 not in options:
+            st.button("7 Days · Currently Unavailable", key="lead_time_7_unavailable", disabled=True)
+        value = choice_buttons(
+            label, options, key=key, placeholder="Select lead time",
+            format_func=lambda days: "7 Days" if days == 7 else f"{days} calendar days",
+            label_visibility="collapsed", help=help,
+        )
+        # Display only: no callback, canonical value, or quote/checkout path.
+        st.button("Today / 2-Day · Coming Soon", key="lead_time_coming_soon", disabled=True)
+    return value
+
 
 # Display-only finishes are keyed by the unchanged canonical material values.
 MATERIAL_FINISH = {

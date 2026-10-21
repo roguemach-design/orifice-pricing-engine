@@ -1,0 +1,29 @@
+{
+  "files": {
+    "inputs.json": "6d65e7c0eae410fec04f4d3bd4108c38a6f0b93a1a0ea57fa9c418d25b4793da",
+    "inspection.md": "b0e75f135e8bfa9669c6a2c5f9beae7eddf35d94a7742ffad5f74aedc318d55a",
+    "paths.svg": "cd41bfd54e5d493ea4f5f1175d3fcaad3f1443f2ad32aa15555ab125c51ba60b",
+    "program.NC": "71296965e3689c2b9928c613a705f8b02f13cccfef6acbead77a762b250ddd96",
+    "setup.md": "5c4d7cc0bfbf728ebf30e0b0a4b6f64d5e6e108edaaeaf8fa9392b81a737fab3",
+    "simulation.json": "bdd3f0e2e31769158489bbf94f5be5252df9d40d584c840f3a636516e2e619fc"
+  },
+  "generator_version": "haas-bore-review-1",
+  "holds": [
+    "machine profile has no verifier",
+    "verify machine_identity_and_control",
+    "verify fixture_and_clamp_clearance",
+    "verify g54_fixture_z",
+    "verify travel_and_toolchange",
+    "verify tool_geometry_and_h_offsets",
+    "verify setting40_and_d_wear",
+    "verify material_feeds_and_spindle",
+    "verify wips_calibration_and_macros",
+    "verify probe_xy_only",
+    "verify probe_measurement_only",
+    "verify probe_result_variable",
+    "verify rough_bore_envelope"
+  ],
+  "profile_sha256": "bd22431761e8912fddc05c530bd53d0462dbd981f69d8fb53501326b5b1dbd3e",
+  "record_sha256": "208e7a116879e9ddacbe92b7450833bf46743b57bcc811022ddfa12293541d2b",
+  "status": "REVIEW ONLY - NOT RELEASED FOR MACHINE USE"
+}

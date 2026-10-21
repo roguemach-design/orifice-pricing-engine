@@ -53,7 +53,7 @@
             <li>PDF drawing for confirmation</li>
             <li>Rapid manufacturing</li>
             <li>Prompt shipping</li>
-            <li>Material certifications and inspection report</li>
+            <li>Contact us about material certification and inspection documentation</li>
           </ul>
         </section>
       </div>
@@ -64,7 +64,7 @@
             <div class="workflow__step"><span class="dot" aria-hidden="true"></span><span>Configure a plate and immediately see pricing, selectable lead times, and shipping options—quoted transparently.</span></div>
             <div class="workflow__fork">
               <div class="path"><strong>Single plate / ready to buy</strong><span>Proceed directly to checkout and complete your purchase.</span></div>
-              <div class="path"><strong>Project order / multiple plates</strong><span>Build a cart for larger projects. Need internal approval? Generate a PDF quote, forward it to purchasing, and return later to checkout using the quote number. Quotes remain valid for up to 30 days.</span></div>
+              <div class="path"><strong>Project order / multiple plates</strong><span>Build a cart for larger projects. Need internal approval? Generate a PDF quote and forward it to purchasing. Contact us with the quote number when you are ready to proceed. Quotes show a validity of up to 30 days; online prices are revalidated before checkout.</span></div>
             </div>
             <p class="fineprint muted">Lead time and shipping selections are reflected directly in the quote and checkout—no surprises.</p>
           </div>
@@ -85,9 +85,9 @@
       <div class="steps">
         <article class="step"><div class="step__num">1</div><div><h3 class="step__title">Configure</h3><p class="muted">Select material, enter dimensions and labeling, pick quantity, and choose lead time.</p></div></article>
         <article class="step"><div class="step__num">2</div><div><h3 class="step__title">Quote</h3><p class="muted">Instant pricing is displayed.</p></div></article>
-        <article class="step"><div class="step__num">3</div><div><h3 class="step__title">Purchase</h3><p class="muted">Buying one plate? Go straight to purchase and pay. Need multiple plates for a larger project? Build a cart before checking out. Need to pass this through purchasing? Generate a PDF and return later to checkout using your quote number. Quotes are valid for up to 30 days.</p></div></article>
-        <article class="step"><div class="step__num">4</div><div><h3 class="step__title">Confirmation</h3><p class="muted">You’ll receive an order confirmation along with a PDF print that we’ll manufacture to.</p></div></article>
-        <article class="step"><div class="step__num">5</div><div><h3 class="step__title">Shipping</h3><p class="muted">Your order will be updated with tracking and an estimated arrival date. We understand the importance of on-time delivery in a JIT world.</p></div></article>
+        <article class="step"><div class="step__num">3</div><div><h3 class="step__title">Purchase</h3><p class="muted">Buying one plate? Go straight to purchase and pay. Need multiple plates for a larger project? Build a cart before checking out. Need to pass this through purchasing? Generate a PDF quote for purchasing and contact us with its quote number when you are ready to proceed. Review the current configuration and price before online checkout.</p></div></article>
+        <article class="step"><div class="step__num">4</div><div><h3 class="step__title">Confirmation</h3><p class="muted">You’ll receive an order confirmation with the exact PDF drawing. Review and approve the attached drawing to confirm the dimensions and options for manufacture; your approval records the order-in-production state.</p></div></article>
+        <article class="step"><div class="step__num">5</div><div><h3 class="step__title">Shipping</h3><p class="muted">Fulfillment and shipping follow drawing approval. Contact us for shipping status and tracking information when available.</p></div></article>
       </div>
     </section>
 
@@ -102,8 +102,8 @@
         <details><summary>Can I buy an orifice plate online?</summary><p>Yes. Configure a supported plate, review its price, and continue to secure checkout. Multi-plate carts and PDF quotes are available for project purchasing.</p></details>
         <details><summary>What materials are currently available?</summary><p>O-Plates offers 304 stainless steel, 316 stainless steel, and carbon steel in the material and thickness combinations shown while configuring your plate.</p></details>
         <details><summary>Can O-Plates make a replacement plate?</summary><p>Yes, when you have the known dimensions and requirements needed by the configurator. Enter the existing plate or approved-print dimensions and review the generated configuration drawing.</p></details>
-        <details><summary>What documentation is available?</summary><p>You’ll receive instant pricing, a PDF print, material certification and inspection report.</p></details>
-        <details><summary>How quickly can a plate ship?</summary><p>Select from the lead-time options shown while configuring your plate. Your selection and estimated ship date are reflected in the quote and checkout.</p></details>
+        <details><summary>What documentation is available?</summary><p>You can generate a PDF quote and receive a confirmation drawing with your order. Contact us before ordering about material certification and inspection documentation requirements.</p></details>
+        <details><summary>How quickly can a plate ship?</summary><p>Select from the lead-time options shown while configuring your plate. Your selected lead time is reflected in the quote and checkout. Carrier transit is separate from manufacturing lead time.</p></details>
         <details><summary>What if I need help selecting the bore or specification?</summary><p>Contact O-Plates before ordering. The self-service configurator prices known requirements; it is not an application-engineering or flow-sizing service.</p></details>
       </div>
     </section>
@@ -112,8 +112,11 @@
       <div><h2>Start with the dimensions you already know.</h2><p class="muted">Questions or special requirements can be reviewed before you order.</p></div>
       <div class="contact-actions"><a class="btn btn--primary" href="#configurator">Configure a Plate</a><a class="btn btn--ghost" href="mailto:sales@o-plates.com">sales@o-plates.com</a></div>
     </section>
-    <footer class="footer"><div class="footer__left muted">© <span id="y"></span> O-Plates</div><div class="footer__right"><a class="navlink" href="mailto:sales@o-plates.com">sales@o-plates.com</a></div></footer>
+    <footer class="footer"><div class="footer__left muted">© <span id="y">2026</span> O-Plates <span class="footer__entity">· Operated by Rogue Machine LLC</span></div><nav class="footer__right" aria-label="Footer"><a class="navlink" href="mailto:sales@o-plates.com">sales@o-plates.com</a><a class="navlink" href="/terms.html">Terms of Sale</a><a class="navlink" href="/privacy.html">Privacy Policy</a></nav></footer>
   </main>
+  <div id="journey-consent" hidden class="footer" aria-label="Optional journey diagnostics"></div>
+  <script src="journey-config.js"></script>
+  <script src="journey.js"></script>
   <script src="configurator.js"></script>
 </body>
 </html>

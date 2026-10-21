@@ -73,7 +73,11 @@ def test_explicit_state_pdf_json_match_without_transition(state, tmp_path, monke
     record = json.loads(package["json"])
     assert record["drawing"]["state"] == state
     assert record["status"] == STATUS_LABELS[state]
-    assert STATUS_LABELS[state] in labels
+    from io import BytesIO
+    from pypdf import PdfReader
+    reader=PdfReader(BytesIO(package["pdf"]))
+    assert "CUSTOMER CONFIRMATION — NOT RELEASED FOR MANUFACTURE" in reader.pages[0].extract_text()
+    assert json.loads(reader.metadata.subject)["state"] == state
     assert "NOT RELEASED FOR MANUFACTURE" in record["status"]
     assert metadata.state == state
     assert package == generate_job_package(g, tmp_path, metadata=metadata)
@@ -108,8 +112,9 @@ def test_flow_is_not_forced_on_general_plate(enabled, monkeypatch):
         Canvas, "drawString", lambda self, x, y, s, *a, **kw: labels.append(s)
     )
     pdf_bytes(build_plate_geometry(replace(sample_spec(), chamfer=enabled)))
-    assert ("FLOW: HOLD" in labels) == (enabled is True)
-    assert "FLOW" not in labels
+    assert "FLOW" in labels
+    assert not any("HOLD" in label for label in labels)
+    assert replace(sample_spec(),chamfer=enabled).flow_orientation is None
 
 
 def test_centreline_description_and_no_invented_requirements(monkeypatch):
@@ -120,9 +125,9 @@ def test_centreline_description_and_no_invented_requirements(monkeypatch):
         )
     pdf_bytes(build_plate_geometry(sample_spec()))
     joined = "\n".join(labels)
-    assert "10.500 C/L TO HANDLE END" in labels
-    assert "ASME Y14.5-2018" in labels
-    assert "APPLICATION: RESTRICTION / GENERAL" in labels
+    assert "10.50" in labels
+    assert "INTERPRET DIMENSIONS AND TOLERANCES PER ASME Y14.5-2018." in labels
+    assert "APPLICATION: RESTRICTION / GENERAL" not in labels
     assert "Ø1.548" in labels and "Ø5.000" in labels
     for forbidden in (
         "OVERALL",

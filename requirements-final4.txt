@@ -1,0 +1,3 @@
+-r requirements-frozen-plate.txt
+# Polygon offset engine; used only by isolated derived manufacturing tooling.
+shapely==2.1.2

@@ -19,7 +19,7 @@
     if (column && !modalOpen) {
       const rect = column.getBoundingClientRect();
       const main = app.document.querySelector('[data-testid="stMain"]');
-      let svg = '';
+      let svg = column.querySelector('svg[aria-label="Handled orifice plate configuration drawing"]')?.outerHTML || '';
       for (const frame of column.querySelectorAll('iframe')) {
         if (!frames.has(frame)) { frame.addEventListener('load', schedule); frames.add(frame); }
         try { svg = frame.contentDocument?.querySelector('svg')?.outerHTML || svg; } catch (_) { /* Wait for the existing preview. */ }

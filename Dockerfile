@@ -13,7 +13,7 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY requirements*.txt ./
-RUN python -m pip install --no-cache-dir -r requirements-frozen-plate.txt
+RUN python -m pip install --no-cache-dir -r requirements-final4.txt
 
 COPY . .
 

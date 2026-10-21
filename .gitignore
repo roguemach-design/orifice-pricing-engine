@@ -8,3 +8,6 @@ __pycache__/
 # Reproducible local render exports; only curated review evidence is tracked.
 prototype_output/**
 !prototype_output/README.md
+
+# Regenerated synthetic Final 4 deliverables are distributed as a review bundle.
+examples/final4/output/

@@ -35,7 +35,7 @@ def test_owner_exact_history_authorization_and_approval_gates(tmp_path, monkeypa
             raise HTTPException(401)
 
     app = FastAPI()
-    app.include_router(api.router(lambda: "customer", admin, lambda _: None))
+    app.include_router(api.router(lambda: "customer", admin, lambda _: {"order_number_display":"OP-0014"}))
     client = TestClient(app)
     headers = {"x-api-key": "owner-test-credential"}
     root = "/admin/frozen-plates/"
@@ -142,7 +142,19 @@ def test_owner_page_is_hidden_and_anonymous_has_no_data_requests(monkeypatch):
     app = customer_page_test("pages/6_Internal_Sourcing.py").run()
     assert not app.exception
     assert not app.selectbox and not app.get("download_button")
-    assert app.text_input[0].label == "Internal admin credential"
+    assert not app.text_input
+    assert app.title[0].value == "Manufacturing Control has moved"
+    assert app.get("link_button")[0].url == "https://mfgcontrol.o-plates.com/"
+    from unittest.mock import Mock
+    access = Mock()
+    app.session_state["mc_download_access"] = access
+    app.session_state["mc_key"] = "test-only-owner-key"
+    app.query_params["return_to"] = "https://example.invalid/"
+    app.run()
+    access.revoke.assert_called_once()
+    assert "mc_key" not in app.session_state
+    assert "mc_download_access" not in app.session_state
+    assert not app.query_params
     source = Path("pages/6_Internal_Sourcing.py").read_text()
     assert "requests.post" not in source and "Create revised drawing" not in source
     navigation = Path("customer_navigation.py").read_text()
@@ -153,40 +165,19 @@ def test_owner_page_is_hidden_and_anonymous_has_no_data_requests(monkeypatch):
 
 
 def test_authorized_owner_page_shows_exact_downloads_without_writes(monkeypatch):
-    from types import SimpleNamespace
-    import requests
-    monkeypatch.setenv('APP_ENV','production')
-    monkeypatch.setenv('API_BASE','http://orifice-pricing-api:10000')
-    monkeypatch.setenv('RENDER_SERVICE_ID','srv-d530k8re5dus73ahqr0g')
-    monkeypatch.setenv('FROZEN_PLATE_ENABLED','true')
-    contents = {'pdf':b'%PDF-exact-fixture','json':b'{"spec":"fixture"}'}
-    artifacts = {k:dict(filename='R1.'+k,size=len(v),sha256=sha256(v).hexdigest()) for k,v in contents.items()}
-    artifacts['dxf'] = dict(filename='R1.dxf',size=10,sha256='d'*64)
-    rev = dict(id='r1',number=1,plate_id='p1',spec_sha256='a'*64,artifacts=artifacts)
-    plate = dict(id='p1',order_id='o1',line_id='line-1',lifecycle='READY_FOR_CUSTOMER_CONFIRMATION',current_revision='r1')
-    def get(url,headers,**kwargs):
-        if headers['x-api-key'] != 'fixture-owner':
-            return SimpleNamespace(status_code=401)
-        path=url.split(':10000')[-1]
-        data={
-            '/admin/orders':[dict(id='o1',status='completed',order_number_display='OP-TEST',created_at='fixture')],
-            '/admin/orders/o1':dict(id='o1',quote_payload={'lines':[{'configuration_id':'cfg'}]}),
-            '/admin/frozen-plates':[plate],
-            '/admin/frozen-plates/p1/revisions':[rev],
-            '/admin/frozen-plates/p1':dict(plate=plate,revision=rev,approvals=[],deliveries=[],sourcing=[]),
-            '/admin/frozen-plates/revisions/r1/email-status':dict(state='NOT_ATTEMPTED')}
-        if '/artifact/' in path:
-            return SimpleNamespace(status_code=200,content=contents[path.rsplit('/',1)[1]])
-        assert path in data, path
-        return SimpleNamespace(status_code=200,json=lambda:data[path])
-    monkeypatch.setattr(requests,'get',get)
-    monkeypatch.setattr(requests,'post',lambda *a,**kw: (_ for _ in ()).throw(AssertionError('owner page write')))
-    app=customer_page_test('pages/6_Internal_Sourcing.py').run()
-    app.text_input[0].set_value('customer-key').run()
-    assert not app.selectbox and app.error
-    app.text_input[0].set_value('fixture-owner').run()
+    from test_manufacturing_control import configure_ui
+    app, calls, rev = configure_ui(monkeypatch)
+    app.text_input[0].set_value('customer-key')
+    next(b for b in app.button if b.label == 'Unlock').click().run()
+    assert app.error and not app.get('download_button')
+    assert 'mc_key' not in app.session_state
+    assert any(b.label == 'Unlock' for b in app.button)
+    app.text_input[0].set_value('fixture-owner')
+    next(b for b in app.button if b.label == 'Unlock').click().run()
     assert not app.exception
-    assert len(app.selectbox)==2
-    assert len(app.get('download_button'))==2
-    assert any('not approved' in i.value for i in app.info)
+    next(b for b in app.button if b.label == 'OP-0014').click().run()
+    assert not app.exception
+    assert len(app.get('download_button')) == 1
+    assert not any('/artifact/' in c or c.endswith('/dxf') for c in calls)
+    assert not any('Prepare' in b.label for b in app.button)
     assert not any('Record sourcing' in b.label or 'revised' in b.label for b in app.button)
