@@ -662,7 +662,7 @@ def test_real_page_keeps_manual_pricing_and_existing_svg_when_feature_disabled(
     assert "render_plate_svg" in (ROOT / "pages" / "1_Quote.py").read_text()
 
 
-def test_manual_chamfer_waits_for_width_before_requesting_price(
+def test_manual_chamfer_defaults_only_on_enable_and_blocks_cleared_width(
     monkeypatch, active_config
 ):
     from streamlit.testing.v1 import AppTest
@@ -698,23 +698,29 @@ def test_manual_chamfer_waits_for_width_before_requesting_price(
         ).run()
         assert not app.exception
         assert not app.error
-        assert len(quote_calls) == initial_count
-        assert any("Complete the required fields" in item.value for item in app.info)
+        assert len(quote_calls) == initial_count + 1
+        assert quote_calls[-1]["chamfer_width"] == 0.062
         assert (
             next(
                 field
                 for field in app.number_input
                 if field.label == "Chamfer Width (in.)"
             ).value
-            is None
+            == 0.062
         )
+
+        next(field for field in app.number_input if field.label == "Chamfer Width (in.)").set_value(None).run()
+        assert not app.exception
+        assert len(quote_calls) == initial_count + 1
+        assert any("pricing and purchasing are unavailable" in item.value for item in app.info)
+        assert any('data-field-error="chamfer_width"' in item.value for item in app.markdown)
 
         next(
             field for field in app.number_input if field.label == "Chamfer Width (in.)"
         ).set_value(0.0625).run()
         assert not app.exception
         assert not app.error
-        assert len(quote_calls) == initial_count + 1
+        assert len(quote_calls) == initial_count + 2
         assert quote_calls[-1]["chamfer"] is True
         assert quote_calls[-1]["chamfer_width"] == 0.0625
 
@@ -1037,7 +1043,8 @@ def test_internal_real_form_upload_populate_complete_confirm_then_price(
             True
         ).run()
         assert not app.exception
-        assert any(
+        assert next(field for field in app.number_input if field.label == "Chamfer Width (in.)").value == 0.062
+        assert not any(
             ".st-key-quote_field_chamfer_width" in item.value for item in app.markdown
         )
         next(field for field in app.button_group if field.label == "Chamfer").set_value(

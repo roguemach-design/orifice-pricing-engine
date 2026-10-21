@@ -32,14 +32,22 @@ def _get_store():
     if _store is None:
         from .store import Store
 
-        url = os.environ.get("JOURNEY_DATABASE_URL") or os.environ.get("DATABASE_URL")
+        production = os.environ.get("APP_ENV") == "production"
+        # Production must bind a dedicated least-privilege analytics login.
+        # Never silently reuse the business database owner's credentials.
+        url = os.environ.get("JOURNEY_DATABASE_URL")
+        if not production:
+            url = url or os.environ.get("DATABASE_URL")
         secret = os.environ.get("JOURNEY_SIGNING_KEY") or os.environ.get(
             "ADMIN_API_KEY"
         )
         if not url or not secret:
             return None
+        if production and not url.startswith(("postgresql://", "postgresql+psycopg2://")):
+            return None
         options = {"pool_pre_ping": True}
         if url.startswith("postgres"):
+            options.update(pool_size=2, max_overflow=0, pool_timeout=1)
             options["connect_args"] = {
                 "connect_timeout": 2,
                 "options": "-c statement_timeout=2000 -c lock_timeout=1000",
@@ -48,6 +56,7 @@ def _get_store():
             create_engine(url, **options),
             hashlib.sha256(("journey-v1:" + secret).encode()).hexdigest(),
             internal=os.environ.get("APP_ENV") != "production",
+            initialize=not production,
         )
     return _store
 

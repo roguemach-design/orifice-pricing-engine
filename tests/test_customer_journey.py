@@ -439,6 +439,55 @@ def test_retention_remains_available_when_collection_disabled(monkeypatch, store
     assert not runtime.enabled()
 
 
+def test_withdrawal_still_deletes_when_collection_is_paused(client, monkeypatch, store):
+    token = start(client, internal=True)
+    store.add(token, event())
+    monkeypatch.setenv("JOURNEY_ENABLED", "false")
+    monkeypatch.setenv("JOURNEY_STORAGE_ENABLED", "true")
+    assert client.delete(
+        "/journey/session", headers={**ORIGIN, "X-Journey-Session": token}
+    ).status_code == 204
+    assert not store.report(24, True)["sessions"]
+    assert store.report(720, True)["funnel"]["quote"] == 0
+
+
+def test_production_never_falls_back_to_business_credentials(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("JOURNEY_STORAGE_ENABLED", "true")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://business-owner.invalid/business")
+    monkeypatch.setenv("JOURNEY_SIGNING_KEY", "synthetic-only")
+    monkeypatch.delenv("JOURNEY_DATABASE_URL", raising=False)
+    monkeypatch.setattr(runtime, "_store", None)
+    assert runtime.get_store() is None
+    monkeypatch.setenv("JOURNEY_DATABASE_URL", "sqlite:///temporary.db")
+    assert runtime.get_store() is None
+
+
+def test_production_pool_is_bounded_and_runtime_cannot_create_tables(monkeypatch):
+    import journey.store
+
+    options = {}
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("JOURNEY_STORAGE_ENABLED", "true")
+    monkeypatch.setenv("JOURNEY_SIGNING_KEY", "synthetic-only")
+    monkeypatch.setenv("JOURNEY_DATABASE_URL", "postgresql://journey-role.invalid/analytics")
+    monkeypatch.setattr(runtime, "_store", None)
+
+    def engine(url, **kwargs):
+        options.update(kwargs)
+        return "synthetic-engine"
+
+    def store(engine, secret, **kwargs):
+        options.update(kwargs)
+        return "synthetic-store"
+
+    monkeypatch.setattr(runtime, "create_engine", engine)
+    monkeypatch.setattr(journey.store, "Store", store)
+    assert runtime.get_store() == "synthetic-store"
+    assert options["pool_size"] == 2 and options["max_overflow"] == 0
+    assert options["initialize"] is False and options["internal"] is False
+
+
 def test_session_expiration_removes_late_children_without_erasing_daily_counts(store):
     old = NOW() - timedelta(days=8)
     token = store.start(now=old)

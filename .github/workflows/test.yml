@@ -13,6 +13,17 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      journey-postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: journey_ci
+          POSTGRES_PASSWORD: synthetic-ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d journey_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -30,6 +41,21 @@ jobs:
           tesseract --version
           tesseract --list-langs | grep -Fx eng
       - name: Run tests
+        env:
+          JOURNEY_CI_POSTGRES_URL: postgresql://postgres:synthetic-ci-only-password@localhost:5432/journey_ci
         run: python -m pytest -q
       - name: Compile Python sources
         run: python -m compileall -q .
+      - name: Install browser smoke test dependencies
+        run: |
+          python -m pip install playwright==1.58.0
+          python -m playwright install --with-deps chromium
+      - name: Verify visible customer configurator SVG
+        run: python -m pytest -q tests/browser_smoke.py --basetemp=browser-results
+      - name: Save browser smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: configurator-browser-${{ github.sha }}
+          path: browser-results/
+          if-no-files-found: ignore

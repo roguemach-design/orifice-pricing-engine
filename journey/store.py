@@ -78,10 +78,11 @@ def utc(value):
 
 
 class Store:
-    def __init__(self, engine, secret, *, internal=False):
+    def __init__(self, engine, secret, *, internal=False, initialize=True):
         self.engine, self.secret, self.internal = engine, secret.encode(), internal
         self.lock = threading.RLock()
-        metadata.create_all(engine)
+        if initialize:
+            metadata.create_all(engine)
 
     def start(self, internal=False, now=None):
         now = now or datetime.now(timezone.utc)

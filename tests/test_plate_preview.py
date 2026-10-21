@@ -8,30 +8,10 @@ from plate_preview import render_plate_svg
 
 
 def test_svg_contains_customer_dimensions_and_drawing_disclaimer():
-    svg = render_plate_svg(
-        paddle_dia=3.0,
-        bore_dia=1.0,
-        handle_width=1.5,
-        handle_length_from_bore=9.0,
-        thickness=0.125,
-        material="304",
-        bore_tolerance=0.005,
-        handle_label="UPSTREAM",
-        chamfer=True,
-    )
-
-    assert "OD &#8960; 3.000 in." in svg
-    assert "BORE &#8960; 1.000" in svg
-    assert "HANDLE 1.500 in." in svg
-    assert "C/L TO END 9.000 in." in svg
-    assert "t = 0.125 in." in svg
-    assert "&#177; 0.005 in." in svg
-    assert "UPSTREAM" in svg
-    assert "YES &#8212; WIDTH NOT ENTERED" in svg
-    assert "Configuration preview" in svg
-    assert "Not an approved manufacturing drawing" in svg
-    assert "CONFIGURATION DRAWING &#183; NTS" in svg
-    assert 'role="img"' in svg
+    svg=render_plate_svg(paddle_dia=3,bore_dia=1,handle_width=1.5,handle_length_from_bore=9,thickness=.125,material='304',bore_tolerance=.005,handle_label='UPSTREAM',chamfer=True)
+    for label in ('Ø3.000','Ø1.000 ±.005','1.50','9.00','.125','UPSTREAM','CHAMFER SIZE REQUIRED','Configuration preview','Not an approved manufacturing drawing'):
+        assert label in svg
+    assert 'NTS' not in svg and 'role="img"' in svg
     ElementTree.fromstring(svg)
 
 
@@ -59,54 +39,25 @@ def test_svg_escapes_customer_controlled_text():
         (48.0, 19.0, 1.5, 25.0),
     ],
 )
-def test_svg_is_valid_for_small_default_and_maximum_configurations(
-    paddle_dia, bore_dia, handle_width, handle_length
-):
-    svg = render_plate_svg(
-        paddle_dia=paddle_dia,
-        bore_dia=bore_dia,
-        handle_width=handle_width,
-        handle_length_from_bore=handle_length,
-        thickness=0.5,
-        material="Carbon Steel",
-    )
-
-    root = ElementTree.fromstring(svg)
-    assert root.tag.endswith("svg")
-    assert f"{paddle_dia:.3f} in." in svg
-    assert f"{bore_dia:.3f}" in svg
-    assert f"HANDLE {handle_width:.3f} in." in svg
-    assert f"{handle_length:.3f} in." in svg
-    assert "Carbon Steel" in svg
-    assert "0.500 in." in svg
+def test_svg_is_valid_for_small_default_and_maximum_configurations(paddle_dia,bore_dia,handle_width,handle_length):
+    from drawing_standards import dimension
+    svg=render_plate_svg(paddle_dia=paddle_dia,bore_dia=bore_dia,handle_width=handle_width,handle_length_from_bore=handle_length,thickness=.5,material='Carbon Steel')
+    root=ElementTree.fromstring(svg)
+    assert root.tag.endswith('svg')
+    for value,feature in ((paddle_dia,'od'),(bore_dia,'bore'),(handle_width,'width'),(handle_length,'length'),(.5,'thickness')):
+        assert dimension(value,feature) in svg
+    assert 'Carbon Steel' in svg
 
 
 def test_material_thickness_and_chamfer_update_title_block_with_customer_width():
-    common = dict(
-        paddle_dia=6,
-        bore_dia=2,
-        handle_width=1.5,
-        handle_length_from_bore=10,
-    )
-
-    stainless = render_plate_svg(
-        material="304", thickness=0.125, chamfer=False, **common
-    )
-    carbon = render_plate_svg(
-        material="Carbon Steel",
-        thickness=0.5,
-        chamfer=True,
-        chamfer_width=0.062,
-        **common,
-    )
-
-    assert stainless != carbon
-    assert "304" in stainless
-    assert "0.125 in." in stainless
-    assert "Carbon Steel" in carbon
-    assert "0.500 in." in carbon
-    assert "CHAMFER" in carbon
-    assert "YES &#8212; 0.062 in." in carbon
+    common=dict(paddle_dia=6,bore_dia=2,handle_width=1.5,handle_length_from_bore=10)
+    stainless=render_plate_svg(material='304',thickness=.125,chamfer=False,**common)
+    carbon=render_plate_svg(material='Carbon Steel',thickness=.5,chamfer=True,chamfer_width=.062,**common)
+    assert stainless!=carbon
+    assert '304' in stainless and '.125' in stainless
+    assert 'Carbon Steel' in carbon and '.500' in carbon
+    assert '.062 X 45°' in carbon
+    assert 'chamfer-circle' in carbon and 'chamfer-circle' not in stainless
 
 
 @pytest.mark.parametrize(
@@ -119,85 +70,24 @@ def test_material_thickness_and_chamfer_update_title_block_with_customer_width()
         (1.0, 0.9, 2.0),  # Wide handle on a small plate.
     ],
 )
-def test_outer_profile_has_one_tangent_symmetric_contour(
-    od, handle_width, handle_length
-):
-    svg = render_plate_svg(
-        paddle_dia=od,
-        bore_dia=od / 3,
-        handle_width=handle_width,
-        handle_length_from_bore=handle_length,
-        thickness=0.125,
-        material="304",
-    )
-    root = ElementTree.fromstring(svg)
-    namespace = {"svg": "http://www.w3.org/2000/svg"}
-    outline = root.find(".//svg:path[@id='plate-outline']", namespace)
-    assert outline is not None
-    assert outline.attrib["fill"] != "none"
-    assert len(root.findall(".//svg:circle", namespace)) == 2  # Bore and center dot.
-    assert f"OD &#8960; {od:.3f}" in svg
-    assert f"HANDLE {handle_width:.3f} in." in svg
-
-    path = outline.attrib["d"]
-    assert path.count("M ") == 1
-    assert path.count(" A ") == 3
-    assert path.count(" L ") == 2
-    assert path.endswith(" Z")
-    match = re.fullmatch(
-        r"M ([\d.]+),([\d.]+) "
-        r"A ([\d.]+),([\d.]+) 0 0 1 ([\d.]+),([\d.]+) "
-        r"A ([\d.]+),([\d.]+) 0 1 0 ([\d.]+),([\d.]+) "
-        r"A ([\d.]+),([\d.]+) 0 0 1 ([\d.]+),([\d.]+) "
-        r"L ([\d.]+),([\d.]+) L ([\d.]+),([\d.]+) Z",
-        path,
-    )
-    assert match is not None
-    (
-        upper_handle_x,
-        upper_handle_y,
-        fillet_x_radius,
-        fillet_y_radius,
-        upper_plate_x,
-        upper_plate_y,
-        outer_radius_x,
-        outer_radius_y,
-        lower_plate_x,
-        lower_plate_y,
-        lower_fillet_x_radius,
-        lower_fillet_y_radius,
-        lower_handle_x,
-        lower_handle_y,
-        end_bottom_x,
-        end_bottom_y,
-        end_top_x,
-        end_top_y,
-    ) = map(float, match.groups())
-    assert (
-        fillet_x_radius
-        == fillet_y_radius
-        == lower_fillet_x_radius
-        == lower_fillet_y_radius
-    )
-    assert outer_radius_x == outer_radius_y == 110.0
-    assert upper_handle_x == pytest.approx(lower_handle_x, abs=0.002)
-    assert upper_plate_x == pytest.approx(lower_plate_x, abs=0.002)
-    assert upper_plate_y + lower_plate_y == pytest.approx(450.0, abs=0.002)
-    assert upper_handle_y + lower_handle_y == pytest.approx(450.0, abs=0.002)
-    assert end_top_x == end_bottom_x > upper_handle_x > upper_plate_x > 220.0
-    assert end_top_y == upper_handle_y
-    assert end_bottom_y == lower_handle_y
-    assert upper_plate_y < upper_handle_y < lower_handle_y < lower_plate_y
-
-    # Circle and fillet contact at exactly one tangent point; neither shape
-    # doubles back through the handle or overlaps another filled plate shape.
-    fillet_center_y = upper_handle_y - fillet_x_radius
-    assert hypot(upper_plate_x - 220.0, upper_plate_y - 225.0) == pytest.approx(
-        110.0, abs=0.002
-    )
-    assert hypot(
-        upper_plate_x - upper_handle_x, upper_plate_y - fillet_center_y
-    ) == pytest.approx(fillet_x_radius, abs=0.002)
-    assert hypot(upper_handle_x - 220.0, fillet_center_y - 225.0) == pytest.approx(
-        110.0 + fillet_x_radius, abs=0.002
-    )
+def test_outer_profile_has_one_tangent_symmetric_contour(od,handle_width,handle_length):
+    from plate_geometry import PlateSpec,build_plate_geometry
+    from drawing_presentation import WEB, build_presentation
+    from test_drawing_v6 import svg_path,sampled_path
+    g=build_plate_geometry(PlateSpec(od,od/3,handle_width,handle_length,'304',.125))
+    view=build_presentation(g, WEB)
+    root=ElementTree.fromstring(render_plate_svg(paddle_dia=od,bore_dia=od/3,handle_width=handle_width,handle_length_from_bore=handle_length,thickness=.125,material='304'))
+    outline=root.find(".//*[@data-feature='plate-outline']")
+    assert outline is not None and outline.attrib['fill']=='none'
+    points=sampled_path(svg_path(outline.attrib['d']))
+    assert min(x for x,y in points)+max(x for x,y in points)==pytest.approx(view.cx*2,abs=.01)
+    assert max(x for x,y in points)-min(x for x,y in points)==pytest.approx(od*view.scale,rel=.005)
+    endpoints=[p[-1] for p in svg_path(outline.attrib['d']) if len(p)>1]
+    for seg in g.segments:
+        x,y=view.point(seg.end)
+        assert any(p==pytest.approx((x,-y),abs=.00001) for p in endpoints)
+    # Canonical neck circle is tangent to both OD and straight handle.
+    for seg in (g.segments[1],g.segments[-1]):
+        assert hypot(*seg.center)==pytest.approx(g.radius+g.corner_radius)
+        assert abs(seg.center[1])==pytest.approx(g.half_handle_width+g.corner_radius)
+    assert sum(seg.radius==.03125 for seg in g.segments)==4

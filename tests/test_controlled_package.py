@@ -15,7 +15,7 @@ def geometry():
 
 def labels_for(g, monkeypatch, metadata=None):
     labels = []
-    for name in ("drawString", "drawCentredString"):
+    for name in ("drawString", "drawCentredString", "drawRightString"):
         original = getattr(Canvas, name)
 
         def capture(self, x, y, value, *a, _original=original, **kw):
@@ -60,49 +60,15 @@ def test_paired_package_reopens_as_clean_rough_blank(tmp_path):
 
 
 def test_finished_print_identity_and_no_unapproved_gdt(monkeypatch):
-    labels = labels_for(geometry(), monkeypatch)
-    for value in (
-        "ORIFICE PLATE",
-        "PART NO.",
-        "DWG NO.",
-        "PROTOTYPE-001",
-        "OP-PROTOTYPE-001",
-        "INCHES",
-        "NTS",
-        "1 OF 1",
-        "ASME Y14.5-2018",
-        "P3E",
-        "Ø5.000",
-        "Ø1.548",
-        "2.000",
-        "10.500 C/L TO HANDLE END",
-        "4X R 0.03125",
-        "0.125",
-        "304 STAINLESS STEEL",
-        "1",
-    ):
+    labels=labels_for(geometry(),monkeypatch)
+    for value in ('ORIFICE PLATE, HANDLED','DWG NO.','OP-SAMPLE-001','DIMENSIONS IN INCHES','1/1','P3E','Ø5.000','Ø1.548','2.00','10.50','R.03  4X','.125','304 STAINLESS STEEL','1','SECTION A-A','UNLESS OTHERWISE SPECIFIED:'):
         assert value in labels
-    joined = "\n".join(labels)
-    for forbidden in (
-        "DATA SHEET",
-        "1.423",
-        "UNDERSIZE",
-        "KERF",
-        "DXF",
-        "DATUM",
-        "POSITION",
-        "FLATNESS",
-        "PERPENDICULARITY",
-        "RUNOUT",
-        "CONCENTRICITY",
-        "ORIENTATION ONLY",
-    ):
+    joined='\n'.join(labels)
+    for forbidden in ('DATA SHEET','1.423','UNDERSIZE','KERF','DXF','DATUM','POSITION','FLATNESS','PERPENDICULARITY','RUNOUT','CONCENTRICITY','ORIENTATION ONLY','HOLD','NTS','PROTOTYPE','PART NO.'):
         assert forbidden not in joined
-    # A/B are unboxed section/detail identifiers, not datum feature symbols.
-    assert labels.count("A") == 2 and "SECTION A-A - NTS" in labels
-    assert not any(symbol in joined for symbol in ("⌖", "⏥", "⟂", "⌭"))
-    assert "UNLESS OTHERWISE SPECIFIED:" in labels
-    assert all(value in labels for value in (".X", ".XX", ".XXX", "ANGLES"))
+    assert labels.count('A')==3  # Two cutting-plane labels plus sheet size A.
+    assert not any(symbol in joined for symbol in ('⌖','⏥','⟂','⌭'))
+    assert '.XX ±.01    .XXX ±.005' in labels and 'ANGLES ±1°' in labels
 
 
 @pytest.mark.parametrize("stale", ["sample-plate.pdf", "old.svg", "stale.json"])
@@ -168,36 +134,24 @@ def test_explicit_note_fields_and_revisions_are_consumed(monkeypatch):
 
 
 @pytest.mark.parametrize("state", [False, True])
-def test_none_and_incomplete_emit_no_detail_or_assumed_flow(monkeypatch, state):
-    g = build_plate_geometry(replace(geometry().spec, chamfer=state))
-    joined = "\n".join(labels_for(g, monkeypatch))
-    assert "DETAIL B" not in joined
-    assert ("CHAMFER: INCOMPLETE - HOLD" if state else "CHAMFER: NONE") in joined
-    assert "ORIENTATION ONLY" not in joined
-    if not state:
-        assert "FLOW" not in joined
+def test_none_and_incomplete_emit_no_detail_or_assumed_flow(monkeypatch,state):
+    g=build_plate_geometry(replace(geometry().spec,chamfer=state))
+    joined='\n'.join(labels_for(g,monkeypatch))
+    assert 'DETAIL B' not in joined and 'HOLD' not in joined
+    assert ('CHAMFER SIZE REQUIRED' if state else 'BORE EDGES SHARP, NO CHAMFER. FREE OF BURRS.') in joined
+    assert 'ORIENTATION ONLY' not in joined
+    assert 'FLOW' in joined
+    assert g.spec.flow_orientation is None
 
 
 def test_configured_chamfer_detail_exact_values(monkeypatch):
-    g = build_plate_geometry(
-        replace(
-            geometry().spec,
-            chamfer=True,
-            chamfer_width=0.04,
-            chamfer_angle_degrees=45,
-            chamfer_side="downstream",
-            flow_orientation="left-to-right",
-            chamfer_width_definition="radial-angle-from-face",
-        )
-    )
-    labels = labels_for(g, monkeypatch)
-    for value in (
-        "DETAIL B - BORE EDGE - NTS",
-        "DOWNSTREAM / ANGLE FROM FACE",
-        "45°",
-        "0.040 RAD",
-        "AXIAL DEPTH 0.0400 / LAND 0.0850",
-        "FLOW",
-        "B",
-    ):
+    from drawing_presentation import build_views
+    g=build_plate_geometry(replace(geometry().spec,chamfer=True,chamfer_width=.04,chamfer_angle_degrees=45,chamfer_side='downstream',flow_orientation='left-to-right',chamfer_width_definition='radial-angle-from-face'))
+    labels=labels_for(g,monkeypatch)
+    for value in ('.040 X 45°','FLOW','SECTION A-A','BORE CHAMFER ON DOWNSTREAM FACE. FREE OF BURRS.'):
         assert value in labels
+    scene,v,section=build_views(g)
+    assert section.chamfer_radial_width==.04
+    assert section.chamfer_axial_depth==pytest.approx(.04)
+    assert section.straight_land==pytest.approx(.085)
+    assert 'DETAIL B' not in '\n'.join(labels)

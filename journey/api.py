@@ -88,7 +88,9 @@ def install(app, owner_dependency):
         }
         if request.method == "OPTIONS":
             return Response(status_code=204, headers=headers)
-        if not runtime.enabled():
+        # Withdrawal must still delete diagnostics when collection is paused.
+        withdrawal = request.method == "DELETE" and request.url.path == "/journey/session"
+        if not runtime.enabled() and not withdrawal:
             return Response(status_code=204, headers=headers)
         try:
             budget.check("global", 300)

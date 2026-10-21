@@ -85,7 +85,9 @@ def test_each_missing_parameter_is_hold(spec, field, monkeypatch):
         Canvas, "drawString", lambda self, x, y, t, *a, **k: labels.append(t)
     )
     pdf_bytes(build_plate_geometry(s))
-    assert any("CHAMFER: INCOMPLETE - HOLD" in t for t in labels)
+    assert not any("HOLD" in t for t in labels)
+    assert (".040 X 45°" in labels) == (field != "chamfer_width")
+    assert ("CHAMFER SIZE REQUIRED" in labels) == (field == "chamfer_width")
 
 
 def test_none_is_distinct_from_incomplete(spec, monkeypatch):
@@ -104,7 +106,7 @@ def test_none_is_distinct_from_incomplete(spec, monkeypatch):
         Canvas, "drawString", lambda self, x, y, t, *a, **k: labels.append(t)
     )
     pdf_bytes(build_plate_geometry(s))
-    assert any("CHAMFER: NONE" in t for t in labels)
+    assert any("BORE EDGES SHARP, NO CHAMFER. FREE OF BURRS." in t for t in labels)
 
 
 def test_opposite_side_and_flow_mirror(spec):
