@@ -1,6 +1,8 @@
 # pages/3_Quote_Cart.py
 from __future__ import annotations
 
+from journey.ui import emit as journey_event, headers as journey_headers
+
 from customer_safety import service_message, customer_product_details
 
 import io
@@ -27,7 +29,10 @@ from drawing_intake.configurator_integration import feature_flag_enabled
 from drawing_intake.owner_access import verified_owner_access
 
 render_auth_sidebar(show_debug=False)
+if not is_logged_in():
+    journey_event("cart", "blocked", "system_restriction")
 require_login("Open Account and log in to manage quote carts.")
+journey_event("cart")
 
 st.title("Quote Cart")
 st.caption("Build a multi-line quote with multiple configured plates. PDF + checkout included.")
@@ -549,16 +554,19 @@ with c1:
     pdf_bytes = _make_pdf_quote(line_views, customer=st.session_state.quote_customer)
     meta = _ensure_quote_meta()
     filename = f"o-plates-quote-{meta['quote_id']}-{datetime.now().strftime('%Y%m%d-%H%M')}.pdf"
-    st.download_button(
+    if st.download_button(
         "📄 Generate PDF Quote",
         data=pdf_bytes,
         file_name=filename,
         mime="application/pdf",
         use_container_width=True,
-    )
+    ):
+        journey_event("pdf_quote", "success")
     st.caption("Downloads a PDF summary of the current cart.")
 
 with c2:
+    if not owner_checkout_allowed:
+        journey_event("checkout", "blocked", "system_restriction")
     st.caption("Prices are revalidated before Stripe checkout.")
     if OWNER_ACCEPTANCE_MODE and not owner_checkout_allowed:
         st.caption(
@@ -580,6 +588,7 @@ with c2:
                 separators=(",", ":"),
             ).encode("utf-8")
         ).hexdigest()
+        journey_event("checkout", "attempted")
         checkout_attempt = st.session_state.get("cart_checkout_attempt")
         if not isinstance(checkout_attempt, dict) or checkout_attempt.get("fingerprint") != fingerprint:
             checkout_attempt = {
@@ -609,15 +618,17 @@ with c2:
                     "pricing_config_version": cart_pricing_config_version,
                     "idempotency_key": checkout_attempt["idempotency_key"],
                 },
-                headers={**auth_headers(), **({"x-oplates-checkout-mode": "owner_test"}
+                headers={**auth_headers(), **journey_headers(), **({"x-oplates-checkout-mode": "owner_test"}
                          if os.environ.get("APP_ENV") == "production" and owner_checkout_allowed else {})},
                 timeout=30,
             )
         except requests.RequestException:
+            journey_event("checkout", "error", "api_failure")
             st.error("Checkout is temporarily unavailable. Please try again.")
             st.stop()
 
         if r.status_code != 200:
+            journey_event("checkout", "error", "api_failure")
             st.error(service_message(r.status_code))
             st.stop()
 

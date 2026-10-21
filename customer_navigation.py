@@ -1,5 +1,6 @@
 """Customer routes; internal tools retain their own authorization and URLs."""
 
+import os
 from pathlib import Path
 import json
 from urllib.parse import urlsplit
@@ -55,7 +56,8 @@ def run_customer_app():
                 url_path="Internal_Sourcing",
                 visibility="hidden",
             ),
-        ],
+        ] + ([st.Page("journey/stage_owner.py", title="Journey owner review", url_path="JourneyOwner", visibility="hidden")]
+             if os.environ.get("APP_ENV") != "production" and os.environ.get("JOURNEY_UI_ENABLED") == "true" else []),
         position="hidden",
     )
     if selected.url_path == "Internal_Sourcing":
@@ -108,6 +110,8 @@ def render_customer_shell():
             "<script>" + (Path(__file__).resolve().parent / "assets" / "configurator-layout-bridge.js").read_text() + "</script>",
             height=0,
         )
+    from journey.ui import mount
+    mount("embed" if st.session_state.get("integrated_landing") else "direct")
     with st.container(horizontal=True):
         st.page_link(
             Path(__file__).resolve().parent / "pages/1_Quote.py",
