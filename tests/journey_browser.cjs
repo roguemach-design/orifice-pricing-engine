@@ -50,6 +50,24 @@ async function main(){
   receive({origin:'https://www.o-plates.com',source:embedded.app.parent,data:{...context,nonce:randomUUID()}});await tick();assert.equal(embedded.calls.length,0);
   receive({origin:'https://www.o-plates.com',source:embedded.app.parent,data:{...context,credentials:'forbidden'}});await tick();assert.equal(embedded.calls.length,0);
   receive({origin:'https://www.o-plates.com',source:embedded.app.parent,data:context});await tick();assert.equal(embedded.calls.length,1);assert.equal(JSON.parse(embedded.calls[0].opts.body).source,'embed');
+  const publications=env=>env.messages.filter(m=>m.data.type==='streamlit:setComponentValue');
+  const beforeSame=publications(embedded).length;
+  receive({origin:'https://www.o-plates.com',source:embedded.app.parent,data:context});await tick();
+  assert.equal(publications(embedded).length,beforeSame,'Unchanged embedded identity must not rerun Streamlit');
+  for(const source of ['direct','embed']){
+    const declined=environment({component:true,source});await tick();
+    if(source==='direct')await declined.root.children.find(n=>n.textContent==='Decline').onclick();
+    else {
+      const ready=declined.messages.find(m=>m.data.type==='oplates:journey-ready');
+      declined.cookies.set('oplates_journey_choice',encodeURIComponent(JSON.stringify({version:'journey-2026-10-v1',allow:false})));
+      declined.appListeners.message[0]({origin:'https://www.o-plates.com',source:declined.app.parent,
+        data:{type:'oplates:journey-context',version:1,nonce:ready.data.nonce,session:null,consent:false,internal:true}});
+    }
+    await tick();const before=publications(declined).length;
+    for(let i=0;i<12;i++)await declined.app.__oplatesJourneyEmit({...e,event_id:randomUUID(),source,step:i%2?'quote':'configuration'});
+    assert.equal(publications(declined).length,before,'Declined observations must not cause a Streamlit rerun loop');
+    assert.equal(declined.calls.length,0,'Declined diagnostics still send no analytics');
+  }
   const host=environment();await tick();const hostReceive=host.appListeners.message.at(-1);
   hostReceive({origin:'https://quote.o-plates.com',source:{},data:{type:'oplates:journey-ready',version:1,nonce:randomUUID()}});
   assert(!host.messages.some(m=>m.target==='frame'));
