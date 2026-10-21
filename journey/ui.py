@@ -36,7 +36,10 @@ def mount(source):
             entry=entry,
             endpoint=os.environ.get("JOURNEY_PUBLIC_API", ""),
             key="journey_consent",
-            default=None,
+            # Match the frontend's initial identity without an unnecessary
+            # component-value event interrupting the first form render.
+            session=st.session_state.get("journey_session"),
+            default={"session": None},
         )
         if isinstance(value, dict):
             token = value.get("session")

@@ -131,11 +131,13 @@
     if(config)return;app=isComponent?window.parent:window;
     const endpoint=args.endpoint?.replace(/\/$/,'');if(!APIS.includes(endpoint))return;
     if((endpoint===APIS[0]) !== [...PROD,QUOTES[0]].includes(app.location.origin))return;
+    publishedSession=args.session??null;
     config={endpoint,source:args.source,component:isComponent,entry:['configurator','cart'].includes(args.entry)?args.entry:null};
     const pref=readCookie('oplates_journey_choice')||read('oplates-journey-preference');consent=Boolean(pref?.version===VERSION&&pref.allow===true&&Date.now()-pref.at<2592000000&&!protectedBrowser());internal=pref?.internal===true;
     const shared=readCookie('oplates_journey_v1');if(pref?.allow!==false&&shared?.version===VERSION&&tokenOK(shared.token)&&Date.now()-shared.last<1800000&&!protectedBrowser()){consent=true;internal=shared.internal===true;}
     const saved=read('oplates-journey-session',true)||shared;if(consent&&tokenOK(saved?.token)&&Date.now()-saved.last<1800000){token=saved.token;last=saved.last;internal=saved.internal===true;}
     if(endpoint===APIS[1])internal=true;
+    publish();
     app.addEventListener('message',receive);
     app.__oplatesJourneyEmit=emit;
     app.__oplatesJourneyInternal=()=>{internal=true;if(token){request('/journey/internal',{}).catch(()=>{});saveSession();sharedChoice({allow:true,internal:true,version:VERSION,at:Date.now()});share();}};

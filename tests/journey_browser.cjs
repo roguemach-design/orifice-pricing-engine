@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict');const fs=require('node:fs');const vm=require('node:vm');const {randomUUID}=require('node:crypto');
 const script=fs.readFileSync('journey/frontend/journey.js','utf8');
 const tick=()=>new Promise(r=>setTimeout(r,10));
-function environment({component=false,gpc=false,source='direct'}={}){
+function environment({component=false,gpc=false,source='direct',serverSession=null}={}){
   const calls=[],messages=[],listeners={},appListeners={},cookies=new Map();
   const storage=()=>{const values=new Map();return {getItem:k=>values.get(k)||null,setItem:(k,v)=>values.set(k,v),removeItem:k=>values.delete(k)}};
   function node(tag){return {tag,children:[],hidden:true,textContent:'',append(...v){this.children.push(...v)},replaceChildren(){this.children=[]}};}
@@ -20,7 +20,7 @@ function environment({component=false,gpc=false,source='direct'}={}){
   if(!component)window.OPLATES_JOURNEY={enabled:true,endpoint:'https://orifice-pricing-api.onrender.com'};
   const context={window,document,Date,JSON,URL,Object,Set,Number,Boolean,String,AbortController,setTimeout,clearTimeout,IntersectionObserver:class {observe(){} disconnect(){}}};
   vm.runInNewContext(script,context);
-  if(component)for(const fn of listeners.message||[])fn({source:app,data:{type:'streamlit:render',args:{endpoint:'https://orifice-pricing-api.onrender.com',source,entry:'configurator'}}});
+  if(component)for(const fn of listeners.message||[])fn({source:app,data:{type:'streamlit:render',args:{endpoint:'https://orifice-pricing-api.onrender.com',source,entry:'configurator',session:serverSession}}});
   return {calls,messages,root,app,frameWindow,appListeners,token,cookies};
 }
 async function main(){
@@ -51,6 +51,11 @@ async function main(){
   receive({origin:'https://www.o-plates.com',source:embedded.app.parent,data:{...context,credentials:'forbidden'}});await tick();assert.equal(embedded.calls.length,0);
   receive({origin:'https://www.o-plates.com',source:embedded.app.parent,data:context});await tick();assert.equal(embedded.calls.length,1);assert.equal(JSON.parse(embedded.calls[0].opts.body).source,'embed');
   const publications=env=>env.messages.filter(m=>m.data.type==='streamlit:setComponentValue');
+  const initial=environment({component:true});await tick();
+  assert.equal(publications(initial).length,0,'Matching initial identity must not interrupt first form render');
+  const stale=environment({component:true,serverSession:embedded.token});await tick();
+  assert.equal(publications(stale).length,1,'A stale server identity must still be cleared');
+  assert.equal(publications(stale)[0].data.value.session,null);
   const beforeSame=publications(embedded).length;
   receive({origin:'https://www.o-plates.com',source:embedded.app.parent,data:context});await tick();
   assert.equal(publications(embedded).length,beforeSame,'Unchanged embedded identity must not rerun Streamlit');

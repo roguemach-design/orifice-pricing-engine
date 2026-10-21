@@ -397,6 +397,7 @@ def test_idle_status_survives_reruns_and_resize(configurator, embedded, tmp_path
             expect(child.locator('iframe[title="journey.ui.oplates_journey"]')).to_be_attached()
             root.evaluate("el => new Promise(resolve => setTimeout(resolve, 1500))")
             assert root.evaluate("el => typeof el.ownerDocument.defaultView.__oplatesJourneyEmit") == "function"
+            expect(child.locator('[data-field-error]')).to_have_count(0)
             child.get_by_role("radio", name="316 SS Added corrosion resistance.", exact=True).click()
             expect(child.locator('[data-feature="web-material"]')).to_have_text("316 STAINLESS STEEL")
             diameter = child.get_by_role("spinbutton", name="Plate outside diameter (in.)", exact=True)
@@ -418,8 +419,8 @@ def test_idle_status_survives_reruns_and_resize(configurator, embedded, tmp_path
             assert evidence["frames"] > 60
             assert evidence["missing"] == 0, evidence
             assert evidence["replaced"] == 0, evidence
-            # Initial declined identity may publish once, observations must not republish it.
-            assert evidence["publications"] == 1, evidence
+            # Initial declined identity already matches the server; no rerun is needed.
+            assert evidence["publications"] == 0, evidence
             expect(child.get_by_test_id("stException")).to_have_count(0)
         finally:
             page.screenshot(path=str(tmp_path / "status-stability.png"), full_page=True)
