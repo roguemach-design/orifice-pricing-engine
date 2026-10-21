@@ -98,7 +98,7 @@ def test_feedback_projection_is_trusted_display_only_and_falls_back_on_narrow_sc
     assert result.returncode == 0, result.stderr
 
 
-def test_checkout_navigation_requires_trusted_frame_and_test_stripe_url():
+def test_checkout_navigation_requires_trusted_frame_and_stripe_session_url():
     node = shutil.which("node")
     if not node:
         pytest.skip("Node is unavailable for the embed message test")
@@ -113,7 +113,8 @@ def test_checkout_navigation_requires_trusted_frame_and_test_stripe_url():
       const event={origin:'https://quote.o-plates.com',source:child,data:{type:'oplates:checkout',url}};
       listeners.message({...event,origin:'https://untrusted.example'});
       listeners.message({...event,source:{}});
-      for(const url of ['https://checkout.stripe.com/c/pay/cs_live_no',
+      for(const url of ['https://checkout.stripe.com/c/pay/cs_live_',
+          'https://checkout.stripe.com/c/pay/cs_live_no/extra',
           'https://checkout.stripe.com.evil.test/c/pay/cs_test_no',
           'http://checkout.stripe.com/c/pay/cs_test_no',
           'https://user@checkout.stripe.com/c/pay/cs_test_no','javascript:alert(1)','/c/pay/cs_test_no']) {
@@ -121,6 +122,9 @@ def test_checkout_navigation_requires_trusted_frame_and_test_stripe_url():
       }
       assert.deepEqual(navigations,[]);
       listeners.message(event);assert.deepEqual(navigations,[url]);
+      const live=url.replace('cs_test_', 'cs_live_');
+      listeners.message({...event,data:{type:'oplates:checkout',url:live}});
+      assert.deepEqual(navigations,[url,live]);
       assert.strictEqual(frame.style.height,undefined);
     """], cwd=ROOT, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
@@ -146,4 +150,7 @@ def test_embedded_checkout_uses_existing_url_without_changing_direct_navigation(
     assert url in scripts[0]
     assert "refresh" not in scripts[0]
     assert customer_navigation.render_integrated_checkout(url.replace("cs_test_", "cs_live_")) is True
-    assert len(scripts) == 1 and len(errors) == 1
+    assert len(scripts) == 2 and not errors
+    assert links[-1] == url.replace("cs_test_", "cs_live_")
+    assert customer_navigation.render_integrated_checkout(url.replace("stripe.com", "stripe.com.evil.test")) is True
+    assert len(scripts) == 2 and len(errors) == 1

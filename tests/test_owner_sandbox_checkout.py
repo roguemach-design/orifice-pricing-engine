@@ -82,7 +82,7 @@ def test_checkout_denies_unverified_or_disabled_owner(sandbox, monkeypatch, user
     auth = headers(user) if user else {"x-api-key": "test-ui-key", "x-oplates-checkout-mode": "owner_test"}
     body = {"items": [checkout_body()["inputs"]]} if cart else checkout_body()
     result = sandbox.client.post("/checkout/cart/create" if cart else "/checkout/create", json=body, headers=auth)
-    assert result.status_code == (401 if cart and user is None else status)
+    assert result.status_code == (401 if user is None else status)
     assert not sandbox.calls
 
 
