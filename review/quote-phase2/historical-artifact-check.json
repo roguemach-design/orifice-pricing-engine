@@ -1,0 +1,216 @@
+{
+  "checked": 42,
+  "unchanged": true,
+  "files": [
+    {
+      "path": "prototype_output/README.md",
+      "unchanged": true,
+      "git_blob_sha": "4341b24961c4c6c845fbf264306fdfd35c4bfb49"
+    },
+    {
+      "path": "prototype_output/archive/phase3c/phase3c-golden-layout.pdf",
+      "unchanged": true,
+      "git_blob_sha": "99d6bbaba3868d752fa6192982f7b34e5c8cc247"
+    },
+    {
+      "path": "prototype_output/archive/phase3c/phase3c-golden-layout.sha256",
+      "unchanged": true,
+      "git_blob_sha": "1153b7b9c608c9b5b04f6a0d7df82848ebab7ade"
+    },
+    {
+      "path": "prototype_output/chamfer-review/OP-EXAMPLE-CHAMFER-NOT-DEFAULT.dxf",
+      "unchanged": true,
+      "git_blob_sha": "1c0543acf32844488b94b236469478f00140f92c"
+    },
+    {
+      "path": "prototype_output/chamfer-review/OP-EXAMPLE-CHAMFER-NOT-DEFAULT.json",
+      "unchanged": true,
+      "git_blob_sha": "52818091fc396f73a39251ef856c4811ee0be87b"
+    },
+    {
+      "path": "prototype_output/chamfer-review/OP-EXAMPLE-CHAMFER-NOT-DEFAULT.pdf",
+      "unchanged": true,
+      "git_blob_sha": "03c144a5e66e9867ccc8b30a38e967d2b640794c"
+    },
+    {
+      "path": "prototype_output/current/OP-PROTOTYPE-001.dxf",
+      "unchanged": true,
+      "git_blob_sha": "1c0543acf32844488b94b236469478f00140f92c"
+    },
+    {
+      "path": "prototype_output/current/OP-PROTOTYPE-001.json",
+      "unchanged": true,
+      "git_blob_sha": "4c25f26a0e7f1701a4a51cecfbe1249eda7f9191"
+    },
+    {
+      "path": "prototype_output/current/OP-PROTOTYPE-001.pdf",
+      "unchanged": true,
+      "git_blob_sha": "c420e664f95144c1b3294a3a5e23dd6bc473302b"
+    },
+    {
+      "path": "prototype_output/phase4/OP-PROTOTYPE-001-L1-R1.dxf",
+      "unchanged": true,
+      "git_blob_sha": "1c0543acf32844488b94b236469478f00140f92c"
+    },
+    {
+      "path": "prototype_output/phase4/OP-PROTOTYPE-001-L1-R1.json",
+      "unchanged": true,
+      "git_blob_sha": "e15fa22518862607d3128e6fbded7ba41b1a7677"
+    },
+    {
+      "path": "prototype_output/phase4/OP-PROTOTYPE-001-L1-R1.pdf",
+      "unchanged": true,
+      "git_blob_sha": "62834f28478502aae810ba1ccf8b1195208d378d"
+    },
+    {
+      "path": "prototype_output/phase4/OP-PROTOTYPE-001-L1-R2.dxf",
+      "unchanged": true,
+      "git_blob_sha": "1c0543acf32844488b94b236469478f00140f92c"
+    },
+    {
+      "path": "prototype_output/phase4/OP-PROTOTYPE-001-L1-R2.json",
+      "unchanged": true,
+      "git_blob_sha": "4122e80e421b5a52f182bafaaa4b8b46b435888c"
+    },
+    {
+      "path": "prototype_output/phase4/OP-PROTOTYPE-001-L1-R2.pdf",
+      "unchanged": true,
+      "git_blob_sha": "7055cd02814311941ab9abd22fadcf169abfae24"
+    },
+    {
+      "path": "prototype_output/phase4/acceptance-manifest.json",
+      "unchanged": true,
+      "git_blob_sha": "cc6c2c2bffd4f5b949946560178e2711c37dfa28"
+    },
+    {
+      "path": "prototype_output/phase4/customer-email-preview.html",
+      "unchanged": true,
+      "git_blob_sha": "ad505654e5a0ddf4f22f64427ade68bdf8cfa179"
+    },
+    {
+      "path": "prototype_output/phase4/customer-email-preview.png",
+      "unchanged": true,
+      "git_blob_sha": "ba0b516a539a254fff5f42b746dfd772cb064eaa"
+    },
+    {
+      "path": "prototype_output/phase4/customer-success.html",
+      "unchanged": true,
+      "git_blob_sha": "653dff3ecad110f369a9fe6223bfa4af6a5e2533"
+    },
+    {
+      "path": "prototype_output/phase4/customer-success.png",
+      "unchanged": true,
+      "git_blob_sha": "582677dc2f72867429ee5a167c93fac4d4e606c7"
+    },
+    {
+      "path": "review/drawing-v6/exact-output-baseline.json",
+      "unchanged": true,
+      "git_blob_sha": "75d5d708645be7f20759a49e989253ebbd0c4d1a"
+    },
+    {
+      "path": "review/handle-hole/evidence.json",
+      "unchanged": true,
+      "git_blob_sha": "af9ffb0dab675a625178d01d00b2a54cc3c2eac1"
+    },
+    {
+      "path": "review/handle-hole/handle-hole-off-configurator.png",
+      "unchanged": true,
+      "git_blob_sha": "6141ecd1e12972c85bf42a44e20ee759df4134ff"
+    },
+    {
+      "path": "review/handle-hole/handle-hole-off-configurator.svg",
+      "unchanged": true,
+      "git_blob_sha": "597c383723fab7737ab6fb04ce455df3fff58d2f"
+    },
+    {
+      "path": "review/handle-hole/handle-hole-off.dxf",
+      "unchanged": true,
+      "git_blob_sha": "14100642cf1eec5a2ddeed3e219664e27fb2219f"
+    },
+    {
+      "path": "review/handle-hole/handle-hole-off.json",
+      "unchanged": true,
+      "git_blob_sha": "440344b1e7b46c9036eddbefbce97ec73cb82808"
+    },
+    {
+      "path": "review/handle-hole/handle-hole-off.pdf",
+      "unchanged": true,
+      "git_blob_sha": "94687d7708a75f34ca4f62b4e173755616e2df8b"
+    },
+    {
+      "path": "review/handle-hole/handle-hole-off.png",
+      "unchanged": true,
+      "git_blob_sha": "551fd723350848cf7c598efd435b1ad4339da7c7"
+    },
+    {
+      "path": "review/handle-hole/handle-hole-off.svg",
+      "unchanged": true,
+      "git_blob_sha": "666347b860f9806189ed608af96f34c213fb14bf"
+    },
+    {
+      "path": "review/handle-hole/handle-hole-on-configurator.png",
+      "unchanged": true,
+      "git_blob_sha": "1b899a873249d857ad5eb33e68420f85a1c53fc4"
+    },
+    {
+      "path": "review/handle-hole/handle-hole-on-configurator.svg",
+      "unchanged": true,
+      "git_blob_sha": "820b7a889b5414b5786221254532a060db0a6820"
+    },
+    {
+      "path": "review/handle-hole/handle-hole-on.dxf",
+      "unchanged": true,
+      "git_blob_sha": "2a5ff4975f19dd88c06c959739a7335f5151d949"
+    },
+    {
+      "path": "review/handle-hole/handle-hole-on.json",
+      "unchanged": true,
+      "git_blob_sha": "175cb124219ae8679bc48f58f69de4ae43883b1d"
+    },
+    {
+      "path": "review/handle-hole/handle-hole-on.pdf",
+      "unchanged": true,
+      "git_blob_sha": "3cd9dc17064f8b72e67f19be38615b21ad198051"
+    },
+    {
+      "path": "review/handle-hole/handle-hole-on.png",
+      "unchanged": true,
+      "git_blob_sha": "13161876776a49ec05df5c2169e8cb640f8392d7"
+    },
+    {
+      "path": "review/handle-hole/handle-hole-on.svg",
+      "unchanged": true,
+      "git_blob_sha": "8b3fd5d3d11b44ed5846179f04286b34d99564f5"
+    },
+    {
+      "path": "review/handle-hole/no-hole-compatibility-hashes.json",
+      "unchanged": true,
+      "git_blob_sha": "3302d7122e61e2965080a19a59bf09f804b6a87c"
+    },
+    {
+      "path": "tests/fixtures/legacy-v3e-drawing-provenance.md",
+      "unchanged": true,
+      "git_blob_sha": "43f5dd59c2af32785d4b62e13b5d78fbe1c00d3f"
+    },
+    {
+      "path": "tests/fixtures/legacy-v3e-hole.pdf",
+      "unchanged": true,
+      "git_blob_sha": "0e90668fb06632d717017851528a4fff0e6b7b9a"
+    },
+    {
+      "path": "tests/fixtures/legacy-v3e.pdf",
+      "unchanged": true,
+      "git_blob_sha": "f31b26c3b35e917ac354366ceab08004ff1a204d"
+    },
+    {
+      "path": "tests/fixtures/legacy-v6-hole.pdf",
+      "unchanged": true,
+      "git_blob_sha": "4e1e3d58d30f88d028f90378c4ee1165d3eae193"
+    },
+    {
+      "path": "tests/fixtures/legacy-v6.pdf",
+      "unchanged": true,
+      "git_blob_sha": "32eb1a5b8a3397904033b341e2e0686415e7c28d"
+    }
+  ]
+}

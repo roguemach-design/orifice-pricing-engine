@@ -20,6 +20,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from uuid import uuid4
 from decimal import Decimal
+from urllib.parse import urlsplit
 from customer_safety import PRODUCT_FIELDS
 from material_labels import MATERIAL_COPY
 
@@ -97,7 +98,7 @@ MATERIAL = {k: v.replace(" SS", " Stainless Steel") for k, v in MATERIAL_SHORT.i
 
 def spec_rows(i):
     """Labels follow customer_safety.PRODUCT_FIELDS (units moved into the values).
-    Rows are built only from QuoteRequest fields present on the line; nothing is defaulted."""
+    Required geometry is never invented. Unselected optional features say None."""
     rows = []
     for key in ("material", "thickness", "paddle_dia", "bore_dia", "bore_tolerance", "handle_width", "handle_length_from_bore"):
         if key not in i or i[key] is None:
@@ -106,24 +107,25 @@ def spec_rows(i):
         value = MATERIAL.get(i[key], i[key]) if key == "material" else inch(i[key])
         if key == "bore_tolerance": value = "± " + value
         rows.append((label, str(value)))
-    if "handle_hole_enabled" in i:
-        if i["handle_hole_enabled"]:
-            parts = []
-            if i.get("handle_hole_diameter") is not None: parts.append("Ø" + inch(i["handle_hole_diameter"]))
-            if i.get("handle_hole_center_from_handle_end") is not None: parts.append("center " + inch(i["handle_hole_center_from_handle_end"]) + " from end")
-            value = ", ".join(parts) or "Selected; size per confirmation drawing"
-        else: value = "None"
-        rows.append((PRODUCT_FIELDS["handle_hole_enabled"], value))
-    if "chamfer" in i:
-        value = "None"
-        if i["chamfer"]:
-            value = inch(i["chamfer_width"]) if i.get("chamfer_width") else "Selected; size per confirmation drawing"
-            if i.get("chamfer_angle_degrees"): value += f" × {i['chamfer_angle_degrees']:g}°"
-            if i.get("chamfer_side"): value += f", {i['chamfer_side']} face"
-        rows.append((PRODUCT_FIELDS["chamfer"], value))
-    if "handle_label" in i:
-        label = (i["handle_label"] or "").strip()
-        rows.append((PRODUCT_FIELDS["handle_label"], f'“{label}”' if label and label != "No label" else "None"))
+    value = "None"
+    if i.get("handle_hole_enabled"):
+        parts = []
+        if i.get("handle_hole_diameter") is not None:
+            parts.append("Ø" + inch(i["handle_hole_diameter"]))
+        if i.get("handle_hole_center_from_handle_end") is not None:
+            parts.append("center " + inch(i["handle_hole_center_from_handle_end"]) + " from end")
+        value = ", ".join(parts) or "Selected; size per confirmation drawing"
+    rows.append((PRODUCT_FIELDS["handle_hole_enabled"], value))
+    value = "None"
+    if i.get("chamfer"):
+        value = inch(i["chamfer_width"]) if i.get("chamfer_width") else "Selected; size per confirmation drawing"
+        if i.get("chamfer_angle_degrees"):
+            value += f" × {i['chamfer_angle_degrees']:g}°"
+        if i.get("chamfer_side"):
+            value += f", {i['chamfer_side']} face"
+    rows.append((PRODUCT_FIELDS["chamfer"], value))
+    label = (i.get("handle_label") or "").strip()
+    rows.append((PRODUCT_FIELDS["handle_label"], f'“{label}”' if label and label != "No label" else "None"))
     if "ships_in_days" in i:
         rows.append((PRODUCT_FIELDS["ships_in_days"].split(" (")[0], f"{i['ships_in_days']} calendar days (est.)"))
     return rows
@@ -391,10 +393,14 @@ class Doc:
 
         # ordering + terms panels, side by side
         colw = (W - 2 * M - 14) / 2
-        live = False  # Phase 1: saved-quote ordering copy is intentionally unavailable.
-        link = f"o-plates.com/quotes/{q['quote_id']}"
+        live = bool(q.get("retrieval_live") and q.get("retrieval_url"))
+        link = q.get("retrieval_url", "")
+        # The implemented account route is the routing authority. Keep the full
+        # quote number a standalone, unbroken token; never print a guessed slug.
+        parsed_link = urlsplit(link)
+        display_route = parsed_link.netloc + parsed_link.path
         steps = [
-            f"View or order this quote at {link}. Sign in to open it, or find it under My Quotes in your account.",
+            f"View or order this quote at {display_route}. Sign in and find {q['quote_id']} under My Quotes.",
             "Select Review & Order. Current prices and lead times are confirmed before payment.",
             "Choose shipping and pay through secure Stripe checkout.",
             "Review and approve the confirmation drawing sent with your order. Manufacture follows approval.",
@@ -412,11 +418,14 @@ class Doc:
             "Plates are made to order to the specifications listed. Any change creates a new quote revision with its own number.",
             "This is a quotation only. It is not an order, an invoice or an approved manufacturing drawing.",
         ]
+        # Compact vertical spacing fits an ordinary one-plate revision without
+        # shrinking type, dropping specifications, or creating a terms-only page.
+        leading, item_gap = 9.5, 2
         def panel_h(items, num):
             n = 0
             for s in items:
                 n += len(self.wrap(s, 7.9, "400", colw - (40 if num else 32)))
-            return 28 + n * 10.2 + len(items) * 3 + 28
+            return 26 + n * leading + len(items) * item_gap + 24
         h = max(panel_h(steps, True), panel_h(terms, False))
         if y - h < BOTTOM:
             y = self.new_page()
@@ -425,7 +434,7 @@ class Doc:
             self.rect(x, y - h, colw, h, fill=TINT if k == 0 else PANEL)
             self.rect(x, y - h, 2.5, h, fill=ACCENT if k == 0 else NAVY)
             self.t(x + 12, y - 15, title, 6.8, "600", ACCENT_DK if k == 0 else MUTED, cs=0.8)
-            yy = y - 30
+            yy = y - 28
             for n, s in enumerate(items, 1):
                 if k == 0:
                     self.c.setFillColor(ACCENT); self.c.circle(x + 18, yy + 2.8, 5.2, fill=1, stroke=0)
@@ -435,13 +444,15 @@ class Doc:
                     self.c.setFillColor(NAVY); self.c.rect(x + 13, yy + 2, 2.6, 2.6, fill=1, stroke=0)
                     tx, tw_ = x + 21, colw - 32
                 for j, L in enumerate(self.wrap(s, 7.9, "400", tw_)):
-                    self.t(tx, yy - j * 10.2, L, 7.9, "400", INK)
-                yy -= len(self.wrap(s, 7.9, "400", tw_)) * 10.2 + 3
+                    self.t(tx, yy - j * leading, L, 7.9, "400", INK)
+                    if live and k == 0 and n == 1:
+                        self.c.linkURL(link, (tx, yy - j * leading - 2, tx + tw_, yy - j * leading + 8), relative=0)
+                yy -= len(self.wrap(s, 7.9, "400", tw_)) * leading + item_gap
             if k == 0:
                 self.hline(x + 12, x + colw - 12, y - h + 28, HexColor("#C9D6FB"))
                 if live:
-                    self.t(x + 12, y - h + 17, "Ordering for a colleague? Ask them to use Share with Purchasing.", 7.4, "600", INK)
-                    self.t(x + 12, y - h + 7, f"PO, invoicing or vendor setup: sales@o-plates.com, ref. {q['quote_id']}.", 7.4, "400", INK)
+                    self.t(x + 12, y - h + 17, "Ordering for a colleague? Use Share with Purchasing.", 7.0, "600", INK)
+                    self.t(x + 12, y - h + 7, f"PO / vendor setup: sales@o-plates.com · {q['quote_id']}", 6.5, "400", INK)
                 else:
                     self.t(x + 12, y - h + 17, "Purchase order, invoicing or vendor setup?", 7.6, "600", INK)
                     self.t(x + 12, y - h + 7, f"sales@o-plates.com · Reference {q['quote_id']} before ordering.", 6.9, "400", INK)

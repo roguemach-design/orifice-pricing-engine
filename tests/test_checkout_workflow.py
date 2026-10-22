@@ -200,9 +200,11 @@ def install_completed_webhook(monkeypatch, session, event_type="checkout.session
     )
 
 
+@pytest.mark.parametrize("saved_quotes_enabled", ["false", "true"])
 def test_authenticated_checkout_reprices_persists_pending_and_is_idempotent(
-    monkeypatch, checkout_client, database
+    monkeypatch, checkout_client, database, saved_quotes_enabled
 ):
+    monkeypatch.setenv("SAVED_QUOTES_ENABLED", saved_quotes_enabled)
     calls = install_idempotent_stripe(monkeypatch)
     headers = {"Authorization": "Bearer synthetic", "x-api-key": "test-ui-key"}
 
@@ -414,9 +416,11 @@ def test_invalid_bearer_cannot_downgrade_to_guest_with_valid_ui_key(
     assert calls == []
 
 
+@pytest.mark.parametrize("saved_quotes_enabled", ["false", "true"])
 def test_authenticated_cart_checkout_uses_verified_user_and_idempotency(
-    monkeypatch, checkout_client, database
+    monkeypatch, checkout_client, database, saved_quotes_enabled
 ):
+    monkeypatch.setenv("SAVED_QUOTES_ENABLED", saved_quotes_enabled)
     calls = install_idempotent_stripe(monkeypatch)
     monkeypatch.setattr(
         api_app,

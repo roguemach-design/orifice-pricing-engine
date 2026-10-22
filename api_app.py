@@ -238,11 +238,17 @@ class AppConfig(Base):
     config_json = Column(JSON, nullable=False)
 
 
+from saved_quotes import register_models
+QUOTE_MODELS = register_models(Base)
+
+
 def init_db() -> None:
     if not engine:
         return
 
     Base.metadata.create_all(bind=engine)
+    from saved_quote_guards import install as install_quote_guards
+    install_quote_guards(engine)
 
     # Lightweight additive startup migration. Any failure intentionally aborts
     # startup so the API cannot run against a partially compatible schema.
@@ -930,6 +936,9 @@ class CheckoutCreateRequest(BaseModel):
 class CartCheckoutCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    saved_quote_id: Optional[str] = Field(default=None, max_length=40)
+    saved_quote_review_id: Optional[str] = Field(default=None, max_length=40)
+    saved_quote_acknowledged: StrictBool = False
     items: List[QuoteRequest]
     recovery_contexts: Optional[List[Optional[dict]]] = None
     pricing_config_version: Optional[str] = None
@@ -1364,9 +1373,18 @@ def checkout_cart_create(
     customer_user_id: str = Depends(_require_customer_user_id),
     checkout_mode: Optional[str] = Header(default=None, alias="x-oplates-checkout-mode"),
     journey_session: Optional[str] = Header(default=None, alias="x-oplates-journey"),
+    authorization: Optional[str] = Header(default=None, alias="authorization"),
 ):
     owner_test = _stripe_checkout_required(customer_user_id, checkout_mode)
     _db_required()
+
+    if req.saved_quote_id:
+        from saved_quotes import verified_identity
+        import sys
+        person = verified_identity(sys.modules[__name__], authorization)
+        if person["id"] != customer_user_id:
+            raise HTTPException(401, "Unauthorized")
+        return SAVED_QUOTES.checkout(req, person, checkout_mode, journey_session)
 
     if not req.items:
         raise HTTPException(status_code=400, detail="Cart is empty")
@@ -1495,6 +1513,13 @@ def checkout_cart_create(
             "pricing_config_version": req.pricing_config_version or "",
         },
     )
+    from saved_quotes import CHECKOUT_QUOTE
+    quote_context = CHECKOUT_QUOTE.get()
+    if quote_context:
+        checkout_args["customer_email"] = quote_context["email"]
+        checkout_args["expires_at"] = quote_context["expires_at"]
+        checkout_args["client_reference_id"] = customer_user_id
+        checkout_args["metadata"]["saved_quote_id"] = quote_context["quote_id"]
     if req.idempotency_key:
         checkout_args["idempotency_key"] = req.idempotency_key
     session = _create_checkout_session(checkout_args, owner_test, customer_user_id)
@@ -1503,6 +1528,7 @@ def checkout_cart_create(
         stripe_session_id=session.id,
         quote_payload={
             "cart_items": normalized_items,
+            **({"saved_quote_id": quote_context["quote_id"]} if quote_context else {}),
             **({"_payment": {"mode": "owner_test", "owner_id": customer_user_id}} if owner_test else {}),
             **(
                 {
@@ -1953,6 +1979,8 @@ async def _complete_stripe_webhook(request: Request, *, owner_test):
             order.status = "completed"
             order.paid_at = datetime.now(timezone.utc)
             order.last_stripe_event_id = event_id
+            SAVED_QUOTES.paid(db, order)
+            customer_email = order.customer_email
 
             if order.order_number:
                 db.commit()
@@ -2075,3 +2103,9 @@ if frozen_plate_enabled(app_env=APP_ENV):
 
 from journey.api import install as install_journey
 install_journey(app, _rate_limit_admin)
+
+
+# Additive authenticated commercial quote routes; existing checkout remains authoritative.
+import sys as _sys
+from saved_quotes import install_routes as _install_saved_quote_routes
+SAVED_QUOTES = _install_saved_quote_routes(_sys.modules[__name__])

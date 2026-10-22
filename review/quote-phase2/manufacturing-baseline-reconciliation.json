@@ -1,0 +1,532 @@
+{
+  "scope_explanation": "51 regenerated non-drawing manufacturing, packaging and Haas outputs are SHA-256 invariants. The separate 42 entries are tracked historical artifacts checked by Git blob SHA-1. These are different scopes, not nine missing historical files. Both sets are fully verified.",
+  "production_baseline_commit": "45ee4dc58ac9c2556a1b891c30512fa1eb28fe04",
+  "regenerated_outputs": {
+    "checked": 51,
+    "unchanged": true,
+    "files": [
+      {
+        "path": "chamfer/dxf",
+        "expected_sha256": "704abfa62d0bef0b3ac91d97a58bc0dfa7f093418d87f12ae3763d12118ecfb8",
+        "actual_sha256": "704abfa62d0bef0b3ac91d97a58bc0dfa7f093418d87f12ae3763d12118ecfb8",
+        "matched": true
+      },
+      {
+        "path": "chamfer/json",
+        "expected_sha256": "d455856cf4cd7b843380f990d4773ee4712198de7e8235a91198b24a7c3a5c84",
+        "actual_sha256": "d455856cf4cd7b843380f990d4773ee4712198de7e8235a91198b24a7c3a5c84",
+        "matched": true
+      },
+      {
+        "path": "chamfer/packaging/assembly.md",
+        "expected_sha256": "63ace11c608daf17ba46913956fdd63bddd985c67a6af15a6091167b11fed714",
+        "actual_sha256": "63ace11c608daf17ba46913956fdd63bddd985c67a6af15a6091167b11fed714",
+        "matched": true
+      },
+      {
+        "path": "chamfer/packaging/fixture-reference.svg",
+        "expected_sha256": "4e5b410af1c5a3bb4d2db265f7723d82b2a1f561c3e316040bb81c8c81e9986c",
+        "actual_sha256": "4e5b410af1c5a3bb4d2db265f7723d82b2a1f561c3e316040bb81c8c81e9986c",
+        "matched": true
+      },
+      {
+        "path": "chamfer/packaging/geometry.json",
+        "expected_sha256": "ca4a28aafaaff130a0998613a9d24a25b444ed790dc5ebd295f27a956cf20af2",
+        "actual_sha256": "ca4a28aafaaff130a0998613a9d24a25b444ed790dc5ebd295f27a956cf20af2",
+        "matched": true
+      },
+      {
+        "path": "chamfer/packaging/inputs.json",
+        "expected_sha256": "bbc81aee295989e98dde37c28bc47d6fe029cce03410ce34cbb40115af19dd3b",
+        "actual_sha256": "bbc81aee295989e98dde37c28bc47d6fe029cce03410ce34cbb40115af19dd3b",
+        "matched": true
+      },
+      {
+        "path": "chamfer/packaging/layout.svg",
+        "expected_sha256": "b9a305e16bc0fadda54466b6b0013194a7306ba27c2a578d6b5d930a3faf792f",
+        "actual_sha256": "b9a305e16bc0fadda54466b6b0013194a7306ba27c2a578d6b5d930a3faf792f",
+        "matched": true
+      },
+      {
+        "path": "chamfer/packaging/manifest.json",
+        "expected_sha256": "b6dc23d8831b597ecc3d17687bcfbb3b1cbca5dddbedec5dcfd35c4779bec854",
+        "actual_sha256": "b6dc23d8831b597ecc3d17687bcfbb3b1cbca5dddbedec5dcfd35c4779bec854",
+        "matched": true
+      },
+      {
+        "path": "chamfer/packaging/packaging.dxf",
+        "expected_sha256": "1d7534cdd216f210c7954241a9c7cce518391aae6629ca0f253c2b0e816944d2",
+        "actual_sha256": "1d7534cdd216f210c7954241a9c7cce518391aae6629ca0f253c2b0e816944d2",
+        "matched": true
+      },
+      {
+        "path": "chamfer/packaging/schedule.json",
+        "expected_sha256": "b62f339fd0b555ac340263ae851468fbbb18bb694b1a5c9f7f9ce6db1ab6db30",
+        "actual_sha256": "b62f339fd0b555ac340263ae851468fbbb18bb694b1a5c9f7f9ce6db1ab6db30",
+        "matched": true
+      },
+      {
+        "path": "chamfer/svg",
+        "expected_sha256": "f384bc6a348ebbb80b07dd05b07fcad0e9778bb9db494e33b799d615fbef21ef",
+        "actual_sha256": "f384bc6a348ebbb80b07dd05b07fcad0e9778bb9db494e33b799d615fbef21ef",
+        "matched": true
+      },
+      {
+        "path": "haas/inputs.json",
+        "expected_sha256": "6d65e7c0eae410fec04f4d3bd4108c38a6f0b93a1a0ea57fa9c418d25b4793da",
+        "actual_sha256": "6d65e7c0eae410fec04f4d3bd4108c38a6f0b93a1a0ea57fa9c418d25b4793da",
+        "matched": true
+      },
+      {
+        "path": "haas/inspection.md",
+        "expected_sha256": "b0e75f135e8bfa9669c6a2c5f9beae7eddf35d94a7742ffad5f74aedc318d55a",
+        "actual_sha256": "b0e75f135e8bfa9669c6a2c5f9beae7eddf35d94a7742ffad5f74aedc318d55a",
+        "matched": true
+      },
+      {
+        "path": "haas/manifest.json",
+        "expected_sha256": "ce66bed69c99c87072df708743ce619095922593baf0a2ebbfaf2aca3aabef02",
+        "actual_sha256": "ce66bed69c99c87072df708743ce619095922593baf0a2ebbfaf2aca3aabef02",
+        "matched": true
+      },
+      {
+        "path": "haas/paths.svg",
+        "expected_sha256": "cd41bfd54e5d493ea4f5f1175d3fcaad3f1443f2ad32aa15555ab125c51ba60b",
+        "actual_sha256": "cd41bfd54e5d493ea4f5f1175d3fcaad3f1443f2ad32aa15555ab125c51ba60b",
+        "matched": true
+      },
+      {
+        "path": "haas/program.NC",
+        "expected_sha256": "71296965e3689c2b9928c613a705f8b02f13cccfef6acbead77a762b250ddd96",
+        "actual_sha256": "71296965e3689c2b9928c613a705f8b02f13cccfef6acbead77a762b250ddd96",
+        "matched": true
+      },
+      {
+        "path": "haas/setup.md",
+        "expected_sha256": "5c4d7cc0bfbf728ebf30e0b0a4b6f64d5e6e108edaaeaf8fa9392b81a737fab3",
+        "actual_sha256": "5c4d7cc0bfbf728ebf30e0b0a4b6f64d5e6e108edaaeaf8fa9392b81a737fab3",
+        "matched": true
+      },
+      {
+        "path": "haas/simulation.json",
+        "expected_sha256": "bdd3f0e2e31769158489bbf94f5be5252df9d40d584c840f3a636516e2e619fc",
+        "actual_sha256": "bdd3f0e2e31769158489bbf94f5be5252df9d40d584c840f3a636516e2e619fc",
+        "matched": true
+      },
+      {
+        "path": "hole/dxf",
+        "expected_sha256": "1f794dd49c07bb5d934f442fe1527972845127e0f6bbfe33564e965690404d6d",
+        "actual_sha256": "1f794dd49c07bb5d934f442fe1527972845127e0f6bbfe33564e965690404d6d",
+        "matched": true
+      },
+      {
+        "path": "hole/json",
+        "expected_sha256": "4f0a1d8e6ec2e660bf165213359ddef00e84648544c0cac883a7eb90257137b8",
+        "actual_sha256": "4f0a1d8e6ec2e660bf165213359ddef00e84648544c0cac883a7eb90257137b8",
+        "matched": true
+      },
+      {
+        "path": "hole/packaging/assembly.md",
+        "expected_sha256": "63ace11c608daf17ba46913956fdd63bddd985c67a6af15a6091167b11fed714",
+        "actual_sha256": "63ace11c608daf17ba46913956fdd63bddd985c67a6af15a6091167b11fed714",
+        "matched": true
+      },
+      {
+        "path": "hole/packaging/fixture-reference.svg",
+        "expected_sha256": "4e5b410af1c5a3bb4d2db265f7723d82b2a1f561c3e316040bb81c8c81e9986c",
+        "actual_sha256": "4e5b410af1c5a3bb4d2db265f7723d82b2a1f561c3e316040bb81c8c81e9986c",
+        "matched": true
+      },
+      {
+        "path": "hole/packaging/geometry.json",
+        "expected_sha256": "ca4a28aafaaff130a0998613a9d24a25b444ed790dc5ebd295f27a956cf20af2",
+        "actual_sha256": "ca4a28aafaaff130a0998613a9d24a25b444ed790dc5ebd295f27a956cf20af2",
+        "matched": true
+      },
+      {
+        "path": "hole/packaging/inputs.json",
+        "expected_sha256": "eb3060b723c22398b94ae6d93e1c7a58d1a01bcbf1d6d22a97730645ce39221e",
+        "actual_sha256": "eb3060b723c22398b94ae6d93e1c7a58d1a01bcbf1d6d22a97730645ce39221e",
+        "matched": true
+      },
+      {
+        "path": "hole/packaging/layout.svg",
+        "expected_sha256": "b9a305e16bc0fadda54466b6b0013194a7306ba27c2a578d6b5d930a3faf792f",
+        "actual_sha256": "b9a305e16bc0fadda54466b6b0013194a7306ba27c2a578d6b5d930a3faf792f",
+        "matched": true
+      },
+      {
+        "path": "hole/packaging/manifest.json",
+        "expected_sha256": "8dbbe754d49ec06b6896ed9030933b0efe6d7bdacb46e683b8e93572b46ad237",
+        "actual_sha256": "8dbbe754d49ec06b6896ed9030933b0efe6d7bdacb46e683b8e93572b46ad237",
+        "matched": true
+      },
+      {
+        "path": "hole/packaging/packaging.dxf",
+        "expected_sha256": "1d7534cdd216f210c7954241a9c7cce518391aae6629ca0f253c2b0e816944d2",
+        "actual_sha256": "1d7534cdd216f210c7954241a9c7cce518391aae6629ca0f253c2b0e816944d2",
+        "matched": true
+      },
+      {
+        "path": "hole/packaging/schedule.json",
+        "expected_sha256": "b62f339fd0b555ac340263ae851468fbbb18bb694b1a5c9f7f9ce6db1ab6db30",
+        "actual_sha256": "b62f339fd0b555ac340263ae851468fbbb18bb694b1a5c9f7f9ce6db1ab6db30",
+        "matched": true
+      },
+      {
+        "path": "hole/svg",
+        "expected_sha256": "cdf398dff43f5f9b65aeff2485e0381f23d77d1b5c6982b7f0a2620c09f7e0ef",
+        "actual_sha256": "cdf398dff43f5f9b65aeff2485e0381f23d77d1b5c6982b7f0a2620c09f7e0ef",
+        "matched": true
+      },
+      {
+        "path": "long/dxf",
+        "expected_sha256": "f6410f995442343841657e53c6ea590f703fc026e6a0fb0e60afaa281f75b471",
+        "actual_sha256": "f6410f995442343841657e53c6ea590f703fc026e6a0fb0e60afaa281f75b471",
+        "matched": true
+      },
+      {
+        "path": "long/json",
+        "expected_sha256": "303c8d34eec82136623270eb541551d6c53a1a31234911612caa1b15248bc0f3",
+        "actual_sha256": "303c8d34eec82136623270eb541551d6c53a1a31234911612caa1b15248bc0f3",
+        "matched": true
+      },
+      {
+        "path": "long/packaging/assembly.md",
+        "expected_sha256": "06870b5d65fd895c4ce09aeafd451f3fc9504caa9e30512f31cf07a360329964",
+        "actual_sha256": "06870b5d65fd895c4ce09aeafd451f3fc9504caa9e30512f31cf07a360329964",
+        "matched": true
+      },
+      {
+        "path": "long/packaging/fixture-reference.svg",
+        "expected_sha256": "546894e37d9802f581416c9b22ed3a3f25e60f51c5ad25654464bb908b3dcfd7",
+        "actual_sha256": "546894e37d9802f581416c9b22ed3a3f25e60f51c5ad25654464bb908b3dcfd7",
+        "matched": true
+      },
+      {
+        "path": "long/packaging/geometry.json",
+        "expected_sha256": "b4838505b67b6cc386b367e55a5a383fc35bd3ab6a9006f8036a8d6439eb446f",
+        "actual_sha256": "b4838505b67b6cc386b367e55a5a383fc35bd3ab6a9006f8036a8d6439eb446f",
+        "matched": true
+      },
+      {
+        "path": "long/packaging/inputs.json",
+        "expected_sha256": "a927cead42b6a6fed9b7fc0904eed42b15b142e9491cfbf700cf7fe2639d2bcf",
+        "actual_sha256": "a927cead42b6a6fed9b7fc0904eed42b15b142e9491cfbf700cf7fe2639d2bcf",
+        "matched": true
+      },
+      {
+        "path": "long/packaging/layout.svg",
+        "expected_sha256": "310f3c0e64fe05225a58e55fb33ca298ffe9df5af549c5c0d9055477b5d88f4a",
+        "actual_sha256": "310f3c0e64fe05225a58e55fb33ca298ffe9df5af549c5c0d9055477b5d88f4a",
+        "matched": true
+      },
+      {
+        "path": "long/packaging/manifest.json",
+        "expected_sha256": "4d1e4ae2d8e68fea8daf2280fc7e37129c392e1dc1bb6ee44d6b65f38bd45fa0",
+        "actual_sha256": "4d1e4ae2d8e68fea8daf2280fc7e37129c392e1dc1bb6ee44d6b65f38bd45fa0",
+        "matched": true
+      },
+      {
+        "path": "long/packaging/packaging.dxf",
+        "expected_sha256": "256691a00af9d0ee199ce49667cbaf7311a9a77024c2607fdc995f47419eab93",
+        "actual_sha256": "256691a00af9d0ee199ce49667cbaf7311a9a77024c2607fdc995f47419eab93",
+        "matched": true
+      },
+      {
+        "path": "long/packaging/schedule.json",
+        "expected_sha256": "ebc4ef830e8220381f0a02af01babdf9a8a2fd14ddd0c5ee9222d9cede93fae1",
+        "actual_sha256": "ebc4ef830e8220381f0a02af01babdf9a8a2fd14ddd0c5ee9222d9cede93fae1",
+        "matched": true
+      },
+      {
+        "path": "long/svg",
+        "expected_sha256": "0170b0a81084ce16394becb316e9565a16e2cbcf9dd581ffe504b923e155ec77",
+        "actual_sha256": "0170b0a81084ce16394becb316e9565a16e2cbcf9dd581ffe504b923e155ec77",
+        "matched": true
+      },
+      {
+        "path": "standard/dxf",
+        "expected_sha256": "704abfa62d0bef0b3ac91d97a58bc0dfa7f093418d87f12ae3763d12118ecfb8",
+        "actual_sha256": "704abfa62d0bef0b3ac91d97a58bc0dfa7f093418d87f12ae3763d12118ecfb8",
+        "matched": true
+      },
+      {
+        "path": "standard/json",
+        "expected_sha256": "a72a7df23fc7c22b7594a516da2c466e086f2f300ad13afe57393f6c464cc0af",
+        "actual_sha256": "a72a7df23fc7c22b7594a516da2c466e086f2f300ad13afe57393f6c464cc0af",
+        "matched": true
+      },
+      {
+        "path": "standard/packaging/assembly.md",
+        "expected_sha256": "63ace11c608daf17ba46913956fdd63bddd985c67a6af15a6091167b11fed714",
+        "actual_sha256": "63ace11c608daf17ba46913956fdd63bddd985c67a6af15a6091167b11fed714",
+        "matched": true
+      },
+      {
+        "path": "standard/packaging/fixture-reference.svg",
+        "expected_sha256": "4e5b410af1c5a3bb4d2db265f7723d82b2a1f561c3e316040bb81c8c81e9986c",
+        "actual_sha256": "4e5b410af1c5a3bb4d2db265f7723d82b2a1f561c3e316040bb81c8c81e9986c",
+        "matched": true
+      },
+      {
+        "path": "standard/packaging/geometry.json",
+        "expected_sha256": "ca4a28aafaaff130a0998613a9d24a25b444ed790dc5ebd295f27a956cf20af2",
+        "actual_sha256": "ca4a28aafaaff130a0998613a9d24a25b444ed790dc5ebd295f27a956cf20af2",
+        "matched": true
+      },
+      {
+        "path": "standard/packaging/inputs.json",
+        "expected_sha256": "9245290b051b0273bc38a2457d06180455e9da9927a2ff1e00a03804cb1789d4",
+        "actual_sha256": "9245290b051b0273bc38a2457d06180455e9da9927a2ff1e00a03804cb1789d4",
+        "matched": true
+      },
+      {
+        "path": "standard/packaging/layout.svg",
+        "expected_sha256": "b9a305e16bc0fadda54466b6b0013194a7306ba27c2a578d6b5d930a3faf792f",
+        "actual_sha256": "b9a305e16bc0fadda54466b6b0013194a7306ba27c2a578d6b5d930a3faf792f",
+        "matched": true
+      },
+      {
+        "path": "standard/packaging/manifest.json",
+        "expected_sha256": "93ef118e79d9e68f4b09a68dd0fc8fc26c38cb55dc672081a966347a0fcb7956",
+        "actual_sha256": "93ef118e79d9e68f4b09a68dd0fc8fc26c38cb55dc672081a966347a0fcb7956",
+        "matched": true
+      },
+      {
+        "path": "standard/packaging/packaging.dxf",
+        "expected_sha256": "1d7534cdd216f210c7954241a9c7cce518391aae6629ca0f253c2b0e816944d2",
+        "actual_sha256": "1d7534cdd216f210c7954241a9c7cce518391aae6629ca0f253c2b0e816944d2",
+        "matched": true
+      },
+      {
+        "path": "standard/packaging/schedule.json",
+        "expected_sha256": "b62f339fd0b555ac340263ae851468fbbb18bb694b1a5c9f7f9ce6db1ab6db30",
+        "actual_sha256": "b62f339fd0b555ac340263ae851468fbbb18bb694b1a5c9f7f9ce6db1ab6db30",
+        "matched": true
+      },
+      {
+        "path": "standard/svg",
+        "expected_sha256": "f384bc6a348ebbb80b07dd05b07fcad0e9778bb9db494e33b799d615fbef21ef",
+        "actual_sha256": "f384bc6a348ebbb80b07dd05b07fcad0e9778bb9db494e33b799d615fbef21ef",
+        "matched": true
+      }
+    ]
+  },
+  "historical_files": {
+    "checked": 42,
+    "unchanged": true,
+    "files": [
+      {
+        "path": "prototype_output/README.md",
+        "unchanged": true,
+        "git_blob_sha": "4341b24961c4c6c845fbf264306fdfd35c4bfb49"
+      },
+      {
+        "path": "prototype_output/archive/phase3c/phase3c-golden-layout.pdf",
+        "unchanged": true,
+        "git_blob_sha": "99d6bbaba3868d752fa6192982f7b34e5c8cc247"
+      },
+      {
+        "path": "prototype_output/archive/phase3c/phase3c-golden-layout.sha256",
+        "unchanged": true,
+        "git_blob_sha": "1153b7b9c608c9b5b04f6a0d7df82848ebab7ade"
+      },
+      {
+        "path": "prototype_output/chamfer-review/OP-EXAMPLE-CHAMFER-NOT-DEFAULT.dxf",
+        "unchanged": true,
+        "git_blob_sha": "1c0543acf32844488b94b236469478f00140f92c"
+      },
+      {
+        "path": "prototype_output/chamfer-review/OP-EXAMPLE-CHAMFER-NOT-DEFAULT.json",
+        "unchanged": true,
+        "git_blob_sha": "52818091fc396f73a39251ef856c4811ee0be87b"
+      },
+      {
+        "path": "prototype_output/chamfer-review/OP-EXAMPLE-CHAMFER-NOT-DEFAULT.pdf",
+        "unchanged": true,
+        "git_blob_sha": "03c144a5e66e9867ccc8b30a38e967d2b640794c"
+      },
+      {
+        "path": "prototype_output/current/OP-PROTOTYPE-001.dxf",
+        "unchanged": true,
+        "git_blob_sha": "1c0543acf32844488b94b236469478f00140f92c"
+      },
+      {
+        "path": "prototype_output/current/OP-PROTOTYPE-001.json",
+        "unchanged": true,
+        "git_blob_sha": "4c25f26a0e7f1701a4a51cecfbe1249eda7f9191"
+      },
+      {
+        "path": "prototype_output/current/OP-PROTOTYPE-001.pdf",
+        "unchanged": true,
+        "git_blob_sha": "c420e664f95144c1b3294a3a5e23dd6bc473302b"
+      },
+      {
+        "path": "prototype_output/phase4/OP-PROTOTYPE-001-L1-R1.dxf",
+        "unchanged": true,
+        "git_blob_sha": "1c0543acf32844488b94b236469478f00140f92c"
+      },
+      {
+        "path": "prototype_output/phase4/OP-PROTOTYPE-001-L1-R1.json",
+        "unchanged": true,
+        "git_blob_sha": "e15fa22518862607d3128e6fbded7ba41b1a7677"
+      },
+      {
+        "path": "prototype_output/phase4/OP-PROTOTYPE-001-L1-R1.pdf",
+        "unchanged": true,
+        "git_blob_sha": "62834f28478502aae810ba1ccf8b1195208d378d"
+      },
+      {
+        "path": "prototype_output/phase4/OP-PROTOTYPE-001-L1-R2.dxf",
+        "unchanged": true,
+        "git_blob_sha": "1c0543acf32844488b94b236469478f00140f92c"
+      },
+      {
+        "path": "prototype_output/phase4/OP-PROTOTYPE-001-L1-R2.json",
+        "unchanged": true,
+        "git_blob_sha": "4122e80e421b5a52f182bafaaa4b8b46b435888c"
+      },
+      {
+        "path": "prototype_output/phase4/OP-PROTOTYPE-001-L1-R2.pdf",
+        "unchanged": true,
+        "git_blob_sha": "7055cd02814311941ab9abd22fadcf169abfae24"
+      },
+      {
+        "path": "prototype_output/phase4/acceptance-manifest.json",
+        "unchanged": true,
+        "git_blob_sha": "cc6c2c2bffd4f5b949946560178e2711c37dfa28"
+      },
+      {
+        "path": "prototype_output/phase4/customer-email-preview.html",
+        "unchanged": true,
+        "git_blob_sha": "ad505654e5a0ddf4f22f64427ade68bdf8cfa179"
+      },
+      {
+        "path": "prototype_output/phase4/customer-email-preview.png",
+        "unchanged": true,
+        "git_blob_sha": "ba0b516a539a254fff5f42b746dfd772cb064eaa"
+      },
+      {
+        "path": "prototype_output/phase4/customer-success.html",
+        "unchanged": true,
+        "git_blob_sha": "653dff3ecad110f369a9fe6223bfa4af6a5e2533"
+      },
+      {
+        "path": "prototype_output/phase4/customer-success.png",
+        "unchanged": true,
+        "git_blob_sha": "582677dc2f72867429ee5a167c93fac4d4e606c7"
+      },
+      {
+        "path": "review/drawing-v6/exact-output-baseline.json",
+        "unchanged": true,
+        "git_blob_sha": "75d5d708645be7f20759a49e989253ebbd0c4d1a"
+      },
+      {
+        "path": "review/handle-hole/evidence.json",
+        "unchanged": true,
+        "git_blob_sha": "af9ffb0dab675a625178d01d00b2a54cc3c2eac1"
+      },
+      {
+        "path": "review/handle-hole/handle-hole-off-configurator.png",
+        "unchanged": true,
+        "git_blob_sha": "6141ecd1e12972c85bf42a44e20ee759df4134ff"
+      },
+      {
+        "path": "review/handle-hole/handle-hole-off-configurator.svg",
+        "unchanged": true,
+        "git_blob_sha": "597c383723fab7737ab6fb04ce455df3fff58d2f"
+      },
+      {
+        "path": "review/handle-hole/handle-hole-off.dxf",
+        "unchanged": true,
+        "git_blob_sha": "14100642cf1eec5a2ddeed3e219664e27fb2219f"
+      },
+      {
+        "path": "review/handle-hole/handle-hole-off.json",
+        "unchanged": true,
+        "git_blob_sha": "440344b1e7b46c9036eddbefbce97ec73cb82808"
+      },
+      {
+        "path": "review/handle-hole/handle-hole-off.pdf",
+        "unchanged": true,
+        "git_blob_sha": "94687d7708a75f34ca4f62b4e173755616e2df8b"
+      },
+      {
+        "path": "review/handle-hole/handle-hole-off.png",
+        "unchanged": true,
+        "git_blob_sha": "551fd723350848cf7c598efd435b1ad4339da7c7"
+      },
+      {
+        "path": "review/handle-hole/handle-hole-off.svg",
+        "unchanged": true,
+        "git_blob_sha": "666347b860f9806189ed608af96f34c213fb14bf"
+      },
+      {
+        "path": "review/handle-hole/handle-hole-on-configurator.png",
+        "unchanged": true,
+        "git_blob_sha": "1b899a873249d857ad5eb33e68420f85a1c53fc4"
+      },
+      {
+        "path": "review/handle-hole/handle-hole-on-configurator.svg",
+        "unchanged": true,
+        "git_blob_sha": "820b7a889b5414b5786221254532a060db0a6820"
+      },
+      {
+        "path": "review/handle-hole/handle-hole-on.dxf",
+        "unchanged": true,
+        "git_blob_sha": "2a5ff4975f19dd88c06c959739a7335f5151d949"
+      },
+      {
+        "path": "review/handle-hole/handle-hole-on.json",
+        "unchanged": true,
+        "git_blob_sha": "175cb124219ae8679bc48f58f69de4ae43883b1d"
+      },
+      {
+        "path": "review/handle-hole/handle-hole-on.pdf",
+        "unchanged": true,
+        "git_blob_sha": "3cd9dc17064f8b72e67f19be38615b21ad198051"
+      },
+      {
+        "path": "review/handle-hole/handle-hole-on.png",
+        "unchanged": true,
+        "git_blob_sha": "13161876776a49ec05df5c2169e8cb640f8392d7"
+      },
+      {
+        "path": "review/handle-hole/handle-hole-on.svg",
+        "unchanged": true,
+        "git_blob_sha": "8b3fd5d3d11b44ed5846179f04286b34d99564f5"
+      },
+      {
+        "path": "review/handle-hole/no-hole-compatibility-hashes.json",
+        "unchanged": true,
+        "git_blob_sha": "3302d7122e61e2965080a19a59bf09f804b6a87c"
+      },
+      {
+        "path": "tests/fixtures/legacy-v3e-drawing-provenance.md",
+        "unchanged": true,
+        "git_blob_sha": "43f5dd59c2af32785d4b62e13b5d78fbe1c00d3f"
+      },
+      {
+        "path": "tests/fixtures/legacy-v3e-hole.pdf",
+        "unchanged": true,
+        "git_blob_sha": "0e90668fb06632d717017851528a4fff0e6b7b9a"
+      },
+      {
+        "path": "tests/fixtures/legacy-v3e.pdf",
+        "unchanged": true,
+        "git_blob_sha": "f31b26c3b35e917ac354366ceab08004ff1a204d"
+      },
+      {
+        "path": "tests/fixtures/legacy-v6-hole.pdf",
+        "unchanged": true,
+        "git_blob_sha": "4e1e3d58d30f88d028f90378c4ee1165d3eae193"
+      },
+      {
+        "path": "tests/fixtures/legacy-v6.pdf",
+        "unchanged": true,
+        "git_blob_sha": "32eb1a5b8a3397904033b341e2e0686415e7c28d"
+      }
+    ]
+  }
+}
