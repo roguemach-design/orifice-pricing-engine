@@ -1,0 +1,2 @@
+# Review quotations are binary artifacts, not source text.
+review/quote-phase*/*.pdf binary
