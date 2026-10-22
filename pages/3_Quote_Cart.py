@@ -6,6 +6,7 @@ from journey.ui import emit as journey_event, headers as journey_headers
 from customer_safety import service_message, customer_product_details
 
 import io
+from pathlib import Path
 import os
 import uuid
 import hashlib
@@ -42,6 +43,12 @@ if "cart" not in st.session_state or not isinstance(st.session_state.cart, list)
     st.session_state.cart = []
 
 cart: List[Dict[str, Any]] = st.session_state.cart
+saved_source = st.session_state.get("saved_quote_cart")
+if saved_source:
+    st.info("Reviewing saved quote " + saved_source["quote_id"] + ". Configurations are preserved for purchasing.")
+    if st.button("Return to saved quote"):
+        st.session_state["saved_quote_intent"] = saved_source["quote_id"]
+        st.switch_page(str(Path(__file__).resolve().parent / "7_My_Quotes.py"))
 API_BASE = (os.environ.get("API_BASE") or "").strip().rstrip("/")
 if API_BASE and "://" not in API_BASE:
     API_BASE = f"http://{API_BASE}"
@@ -196,13 +203,15 @@ def _make_pdf_quote(lines: List[Dict[str, Any]], *, customer: Dict[str, Any] | N
 # ----------------------------
 top = st.columns([1, 1, 2])
 with top[0]:
-    if st.button("➕ Add another plate"):
+    if st.button("➕ Add another plate", disabled=bool(saved_source)):
         if cart and cart[-1].get("assisted_quote"):
             st.session_state["phase1k_new_plate_requested"] = True
         st.switch_page("pages/1_Quote.py")
 with top[1]:
     if st.button("🧹 Clear cart"):
         st.session_state.cart = []
+        st.session_state.pop("saved_quote_cart", None)
+        st.session_state.pop("quote_revision_source", None)
         st.session_state.pop("cart_recovery_review_required", None)
         st.session_state.pop("cart_recovered_reference", None)
         # Optional: reset quote number when cart is cleared
@@ -252,7 +261,7 @@ for idx, item in enumerate(cart):
                 value=int(inputs.get("quantity") or 1),
                 step=1,
                 key=f"qty_{line_id}",
-                disabled=assisted_line,
+                disabled=assisted_line or bool(saved_source),
             )
             if assisted_line:
                 st.caption(
@@ -280,7 +289,7 @@ for idx, item in enumerate(cart):
         # Remove button
         rm_cols = st.columns([1, 5])
         with rm_cols[0]:
-            if st.button("Remove", key=f"rm_{line_id}"):
+            if st.button("Remove", key=f"rm_{line_id}", disabled=bool(saved_source)):
                 st.session_state.cart = [x for x in st.session_state.cart if x.get("line_id") != line_id]
                 st.rerun()
 
@@ -338,17 +347,38 @@ if st.session_state.get("cart_recovery_review_required"):
 c1, c2 = st.columns(2)
 
 with c1:
-    pdf_bytes = _make_pdf_quote(line_views, customer=st.session_state.quote_customer)
-    filename = quote_filename(st.session_state.quote_meta["quote_id"])
-    if st.download_button(
-        "📄 Generate PDF Quote",
-        data=pdf_bytes,
-        file_name=filename,
-        mime="application/pdf",
-        use_container_width=True,
-    ):
-        journey_event("pdf_quote", "success")
-    st.caption("Downloads a PDF summary of the current cart.")
+    if os.environ.get("SAVED_QUOTES_ENABLED") == "true":
+        from auth import api_post, api_get
+        from urllib.parse import quote as quote_path
+        if saved_source:
+            response = api_get("/quotes/" + quote_path(saved_source["quote_id"], safe="") + "/pdf")
+            if response.status_code == 200:
+                st.download_button("Download saved PDF", response.content, file_name=quote_filename(saved_source["quote_id"]), mime="application/pdf")
+        elif st.button("Save branded PDF quote", use_container_width=True):
+            source = st.session_state.get("quote_revision_source")
+            payload = {"items": [l["inputs"] for l in line_views], "customer": st.session_state.quote_customer}
+            if not source: payload["pricing_config_version"] = cart_pricing_config_version
+            response = api_post("/quotes/" + quote_path(source, safe="") + "/revisions" if source else "/quotes", payload=payload)
+            if response.status_code == 200:
+                st.session_state["saved_quote_intent"] = response.json()["quote_id"]
+                st.session_state.pop("quote_revision_source", None)
+                st.switch_page(str(Path(__file__).resolve().parent / "7_My_Quotes.py"))
+            else: st.error(service_message(response.status_code))
+        st.caption("Save configurations and a branded PDF in My Quotes, then share with Purchasing.")
+    else:
+        pdf_bytes = _make_pdf_quote(line_views, customer=st.session_state.quote_customer)
+        filename = quote_filename(st.session_state.quote_meta["quote_id"])
+        if st.download_button("📄 Generate PDF Quote", data=pdf_bytes, file_name=filename,
+                              mime="application/pdf", use_container_width=True):
+            journey_event("pdf_quote", "success")
+        st.caption("Downloads a PDF summary of the current cart.")
+
+saved_review_current = not saved_source or (
+    [l["inputs"] for l in line_views] == saved_source["inputs"]
+    and cart_pricing_config_version == saved_source["pricing_config_version"]
+)
+if not saved_review_current:
+    st.warning("This cart has changed. Return to the saved quote and review current pricing again.")
 
 with c2:
     if not owner_checkout_allowed:
@@ -361,7 +391,7 @@ with c2:
     if st.button(
         "💳 Checkout All Items",
         use_container_width=True,
-        disabled=not owner_checkout_allowed or not recovery_review_current,
+        disabled=not owner_checkout_allowed or not recovery_review_current or not saved_review_current,
     ):
         cart_items = [lv["inputs"] for lv in line_views]
         fingerprint = hashlib.sha256(
@@ -388,6 +418,9 @@ with c2:
                 f"{API_BASE}/checkout/cart/create",
                 json={
                     "items": cart_items,
+                    **({"saved_quote_id": saved_source["quote_id"],
+                        "saved_quote_review_id": saved_source["review_id"],
+                        "saved_quote_acknowledged": saved_source["acknowledged"]} if saved_source else {}),
                     "recovery_contexts": [
                         (
                             attest_context(

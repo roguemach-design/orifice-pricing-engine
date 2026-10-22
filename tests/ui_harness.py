@@ -10,6 +10,7 @@ def customer_page_test(path, *, default_timeout=20):
     routes = [
         ("pages/1_Quote.py", "Quote"),
         ("pages/2_My_Orders.py", "My_Orders"),
+        ("pages/7_My_Quotes.py", "My_Quotes"),
         ("pages/3_Quote_Cart.py", "Quote_Cart"),
         ("pages/4_Success.py", "Success"),
         ("pages/5_Drawing_Approval.py", "Drawing_Approval"),

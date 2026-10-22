@@ -45,6 +45,7 @@ def run_customer_app():
             st.Page(_legacy_root, default=True, visibility="hidden"),
             st.Page("pages/1_Quote.py", title="Configure your plate", url_path="Quote"),
             st.Page("pages/2_My_Orders.py", title="My Orders", url_path="My_Orders"),
+            st.Page("pages/7_My_Quotes.py", title="My Quotes", url_path="My_Quotes"),
             st.Page("pages/3_Quote_Cart.py", title="Quote Cart", url_path="Quote_Cart"),
             st.Page("pages/4_Success.py", url_path="Success", visibility="hidden"),
             st.Page(
@@ -121,6 +122,8 @@ def render_customer_shell():
         st.page_link(
             Path(__file__).resolve().parent / "pages/2_My_Orders.py", label="My Orders"
         )
+        if os.environ.get("SAVED_QUOTES_ENABLED") == "true":
+            st.page_link(Path(__file__).resolve().parent / "pages/7_My_Quotes.py", label="My Quotes")
         st.page_link(
             Path(__file__).resolve().parent / "pages/3_Quote_Cart.py",
             label="Quote Cart",

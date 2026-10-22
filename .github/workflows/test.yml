@@ -52,10 +52,14 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Verify visible customer configurator SVG
         run: python -m pytest -q tests/browser_smoke.py --basetemp=browser-results
+      - name: Verify saved quote purchasing UI
+        run: python -m pytest -q tests/saved_quotes_browser.py --basetemp=quote-browser-results
       - name: Save browser smoke evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: configurator-browser-${{ github.sha }}
-          path: browser-results/
+          path: |
+            browser-results/
+            quote-browser-results/
           if-no-files-found: ignore

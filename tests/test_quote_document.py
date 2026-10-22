@@ -55,7 +55,40 @@ def test_partial_long_customer_and_marking(customer):
         assert all(c['x1']<=573 for p in pdf.pages for c in p.chars)
 
 def test_only_present_fields_no_defaulted_geometry():
-    assert spec_rows({'chamfer':True,'handle_label':'No label'})==[('Chamfer','Selected; size per confirmation drawing'),('Handle marking','None')]
+    assert spec_rows({'chamfer':True,'handle_label':'No label'})==[('Handle hole','None'),('Chamfer','Selected; size per confirmation drawing'),('Handle marking','None')]
+    assert spec_rows({})==[('Handle hole','None'),('Chamfer','None'),('Handle marking','None')]
+
+@pytest.mark.parametrize('sample',['A1','B5'])
+@pytest.mark.parametrize('revision',[1,2])
+@pytest.mark.parametrize('live',[False,True])
+def test_ordinary_single_plate_is_one_page_with_every_specification(sample,revision,live):
+    d=document()
+    d['lines'][0]['inputs']=deepcopy(SAMPLES[sample]['inputs'])
+    d['customer']={'company':'Example Process Co.','name':'Jordan Example','addr1':'100 Sample Way','city_state_zip':'Anytown, OH 00000','country':'United States','email':'j.example@example.test','phone':'+1 555-0100'}
+    if revision==2:
+        d['supersedes']=d['quote_id'];d['quote_id']+='-R2'
+    d['retrieval_live']=live
+    d['retrieval_url']='https://quote.o-plates.com/My_Quotes?quote='+d['quote_id']
+    with pdfplumber.open(BytesIO(render_quote_pdf(d))) as pdf:
+        assert len(pdf.pages)==1
+        text=' '.join(pdf.pages[0].extract_text().split())
+        # Read columns independently: whole-page extraction interleaves the
+        # left specification label into wrapped values in the right column.
+        columns=[' '.join(pdf.pages[0].crop(box).extract_text().split()) for box in
+                 ((76,0,328,705),(328,0,570,705))]
+        for label,value in spec_rows(d['lines'][0]['inputs']):
+            assert label in text
+            assert any(' '.join(value.split()) in column for column in columns)
+        assert 'HOW TO ORDER FROM THIS QUOTATION' in text and 'QUOTATION TERMS' in text
+        assert 'https://' not in text
+        if live:
+            assert 'find '+d['quote_id']+' under My Quotes' in text
+            assert 'quote.o-plates.com/My_Quotes' in text
+            assert any(a.get('uri')==d['retrieval_url'] for a in pdf.pages[0].annots)
+        else:
+            assert 'quote.o-plates.com/My_Quotes' not in text
+        # Panel text must remain above the footer, not merely inside the page.
+        assert all(c['bottom'] < 705 for c in pdf.pages[0].chars if c['top'] < 700)
 
 def test_timezone_and_cart_adapter_does_not_reprice():
     d=document(); l=d['lines'][0]
