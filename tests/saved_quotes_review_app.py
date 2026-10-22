@@ -112,6 +112,7 @@ auth._restore_auth_from_cookie_if_needed = lambda: None
 auth._refresh_session_if_needed = lambda: None
 if st.query_params.get("fixture_quote") == "1":
     st.session_state["saved_quote_intent"] = qid
+    st.query_params.pop('fixture_quote',None)
 with st.sidebar:
     st.caption('Synthetic local acceptance fixture; authentication is simulated.')
     for kind, match in [('quote','Quotation'),('invitation','Invitation')]:
