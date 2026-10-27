@@ -2173,9 +2173,10 @@ if frozen_plate_enabled(app_env=APP_ENV):
     from final4.runtime import enabled as final4_enabled
     if final4_enabled():
         from final4.api import router as final4_router
-        from final4.runtime import service as derived_service, configuration as derived_configuration
+        from final4.runtime import service as derived_service, configuration as derived_configuration, test_engineering as derived_test_engineering
         app.include_router(final4_router(_rate_limit_admin, derived_service,
-                           server_actor="owner-manufacturing-review"))
+                           server_actor="owner-manufacturing-review",
+                           get_test_engineering=derived_test_engineering))
 
         @app.get("/admin/manufacturing/configuration", dependencies=[Depends(_rate_limit_admin)])
         def manufacturing_configuration():

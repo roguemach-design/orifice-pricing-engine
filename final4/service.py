@@ -230,6 +230,8 @@ class DerivedService:
             if family == "HAAS"
             else "PACKAGING-PROTOTYPE"
         )
+        if staging and staging.get("mode") == "OWNER_TEST_ENGINEERING":
+            slug = "TEST-ENGINEERING-" + slug
         stem = f"OP-{slug}-{identifier(association['order_id'])}-{identifier(association['line_id'])}-R{r['number']}-{bundle_id[:8]}"
         for name, data in files.items():
             key = str((destination / name).relative_to(repo.objects))
@@ -305,6 +307,7 @@ class DerivedService:
                 input_sha256=b["input_sha256"],
                 manifest_sha256=b["manifest_sha256"],
                 created_at=b["created_at"],
+                created_by=b["created_by"],
                 files=rows,
                 statuses=dict(
                     file_exists=True,
@@ -379,7 +382,7 @@ class DerivedService:
             b, current, approved = self._bundle(db, bundle_id)
             manifest = json.loads(b["manifest_json"])
             if (
-                manifest.get("mode") == "AUTOMATIC"
+                manifest.get("mode") in ("AUTOMATIC", "OWNER_TEST_ENGINEERING")
                 and name in ("program.NC", "packaging.dxf")
                 and (not approved or (not current and not historical))
             ):
