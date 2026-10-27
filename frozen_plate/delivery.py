@@ -45,7 +45,8 @@ def send_confirmation(repo, snapshot, revision_id, *, environ=None, post=request
     sender = env.get("FROM_EMAIL", "orders@o-plates.com")
     payment = snapshot.get("quote_payload", {}).get("_payment", {})
     is_test = payment.get("mode") == "owner_test"
-    if is_test and (not payment.get("recipient") or recipient != payment["recipient"]
+    verified_test_recipient = payment.get("recipient") or snapshot.get("verified_test_recipient")
+    if is_test and (not verified_test_recipient or recipient != verified_test_recipient
                     or payment.get("owner_id") != snapshot.get("customer_id")):
         raise WorkflowError("authorized TEST recipient binding required")
     if (
@@ -124,8 +125,8 @@ def send_confirmation(repo, snapshot, revision_id, *, environ=None, post=request
         payload = {
             "personalizations": [{"to": [{"email": recipient}]}],
             "from": {"email": sender, "name": "O-Plates"},
-            "subject": str(message["Subject"]),
-            "content": [{"type": "text/html", "value": html}],
+            "subject": ("[TEST / NOT A REAL SALE] " if is_test and "TEST / NOT A REAL SALE" not in str(message["Subject"]) else "") + str(message["Subject"]),
+            "content": [{"type": "text/html", "value": ("<p><strong>TEST / NOT A REAL SALE. No manufacturing or shipment.</strong></p>" if is_test and "TEST / NOT A REAL SALE" not in html else "") + html}],
             "attachments": [
                 {
                     "content": base64.b64encode(contents["pdf"]).decode("ascii"),

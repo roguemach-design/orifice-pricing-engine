@@ -34,3 +34,5 @@ Automated fixtures simulate identity/provider responses and email transport. The
 ## Quote PR compatibility
 
 Read-only merge-tree checks against the published Quote heads: Phase 1 #41 merges cleanly. Phase 2 #42 has one content conflict in `api_app.py` where both branches extend checkout. Reconcile by retaining the database mode gate, TEST recipient metadata and per-session lock around the existing Stripe call, then retaining Phase 2 saved-quote persistence after the pending order is stored. Do not restore header/environment authority during that merge. Neither Quote branch was modified.
+
+Pre-selector compatibility: already-created owner TEST sessions without a recipient marker resolve only through the verified registry. Existing frozen sources are reused only when their full legacy source hash still matches exactly; no historical revision or artifact is rewritten. New TEST source provenance continues to block sourcing and manufacturing output.

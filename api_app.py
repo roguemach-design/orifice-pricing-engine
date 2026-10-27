@@ -1975,8 +1975,6 @@ async def _complete_stripe_webhook(request: Request, *, owner_test):
     customer_email = customer_details.get("email")
     if owner_test:
         customer_email = (session.get("metadata") or {}).get("test_recipient")
-        if not customer_email:
-            raise HTTPException(503, "Authorized TEST recipient verification unavailable; retry webhook.")
     amount_total = session.get("amount_total")
     amount_subtotal = session.get("amount_subtotal")
     amount_shipping = (session.get("shipping_cost") or {}).get("amount_total")
@@ -2025,8 +2023,19 @@ async def _complete_stripe_webhook(request: Request, *, owner_test):
             raise HTTPException(400, "Payment identity does not match the server-owned order.")
         if owner_test and (not _is_owner_test_order(order) or order.customer_id != customer_id):
             raise HTTPException(400, "Sandbox payment does not match the server-owned order.")
-        if owner_test and customer_email != ((order.quote_payload or {}).get("_payment") or {}).get("recipient"):
-            raise HTTPException(400, "Sandbox recipient does not match the server-owned order.")
+        if owner_test:
+            expected_recipient = ((order.quote_payload or {}).get("_payment") or {}).get("recipient")
+            if expected_recipient:
+                if customer_email != expected_recipient:
+                    raise HTTPException(400, "Sandbox recipient does not match the server-owned order.")
+            else:
+                # Pre-selector pending/completed owner TEST sessions have no
+                # recipient marker. Resolve only their confirmed registry address;
+                # never trust the Stripe contact email or rewrite frozen provenance.
+                from checkout_control import tester
+                customer_email = tester(_checkout_mode_database(), order.customer_id)
+                if not customer_email:
+                    raise HTTPException(503, "Verified legacy TEST recipient unavailable; retry webhook.")
         if not owner_test and _is_owner_test_order(order):
             raise HTTPException(400, "Live payment cannot complete a sandbox order.")
 
@@ -2125,8 +2134,13 @@ def _frozen_plate_order_snapshot(order_id):
             (order.stripe_session_id or "").startswith("cs_live_") or _is_owner_test_order(order)
         ):
             raise HTTPException(404, "Completed live customer order not found")
+        legacy_recipient = None
+        if _is_owner_test_order(order) and not order.quote_payload["_payment"].get("recipient"):
+            from checkout_control import tester
+            legacy_recipient = tester(_checkout_mode_database(), order.customer_id)
         return {"id": order.id, "customer_id": order.customer_id,
-                "customer_email": order.customer_email,
+                **({"verified_test_recipient": legacy_recipient} if legacy_recipient else {}),
+                "customer_email": legacy_recipient or order.customer_email,
                 "order_number_display": _format_order_number(order.order_number),
                 "quote_payload": copy.deepcopy(order.quote_payload)}
     finally:

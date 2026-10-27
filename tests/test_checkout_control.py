@@ -123,3 +123,38 @@ def test_paid_test_after_close_exact_drawing_approval_and_no_production(sandbox,
     stager = object.__new__(AutomaticStager)
     stager.service = SimpleNamespace(repo=sandbox.repo)
     assert stager.parents() == []
+
+@pytest.mark.parametrize('historical_frozen',[False,True])
+def test_preselector_test_completion_and_replay_preserve_frozen_provenance(sandbox,database,monkeypatch,historical_frozen):
+    values = {**checkout_body()['inputs'],'chamfer':False,'chamfer_width':None}
+    result = sandbox.client.post('/checkout/create',json=checkout_body(inputs=values),headers=headers())
+    sid = result.json()['session_id']
+    sandbox.sessions[sid]['metadata'].pop('test_recipient')
+    with database() as db:
+        order = db.query(api_app.Order).one()
+        data = dict(order.quote_payload)
+        data['_payment'] = {'mode':'owner_test','owner_id':'owner'}
+        order.quote_payload = data
+        if historical_frozen:
+            order.status='completed'
+        db.commit()
+        oid = order.id
+    from frozen_plate import orders
+    if historical_frozen:
+        original = orders.specification_from_order
+        def legacy_adapter(*args,**kwargs):
+            spec,source = original(*args,**kwargs)
+            source.pop('_payment')
+            return spec,source
+        monkeypatch.setattr(orders,'specification_from_order',legacy_adapter)
+        states = orders.complete_order(sandbox.repo,api_app._frozen_plate_order_snapshot(oid))
+        revision_before = sandbox.repo.revision(states[0]['revision_id'])
+        monkeypatch.setattr(orders,'specification_from_order',original)
+    assert change(sandbox,'CLOSED').status_code == 200
+    payload=event_payload(sandbox.sessions[sid])
+    response=sandbox.client.post('/stripe/test/webhook',content=payload,headers=sign(payload,'whsec_test_separate'))
+    assert response.status_code==200,response.text
+    assert all(s['state']=='FROZEN' for s in sandbox.deliveries[-1][1])
+    assert sandbox.deliveries[-1][0]['customer_email']=='owner@example.test'
+    if historical_frozen:
+        assert sandbox.repo.revision(revision_before['id']) == revision_before

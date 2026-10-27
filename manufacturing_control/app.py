@@ -47,7 +47,7 @@ def chip(label, kind=""):
 
 def mode_chip(mode):
     return chip(
-        "Mode unknown" if mode not in ("LIVE", "TEST", "OWNER TEST") else mode,
+        "Mode unknown" if mode not in ("LIVE", "TEST", "OWNER TEST") else (mode + " / NOT A REAL SALE" if mode in ("TEST", "OWNER TEST") else mode),
         "test" if mode in ("TEST", "OWNER TEST") else "live" if mode == "LIVE" else "",
     )
 
