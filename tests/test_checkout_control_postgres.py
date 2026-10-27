@@ -22,8 +22,8 @@ def test_real_postgres_migration_authority_concurrency_and_restarts():
         conn.execute(text(Path('migrations/checkout_control.sql').read_text().replace('BEGIN;','').replace('COMMIT;','')))
         conn.execute(text("INSERT INTO checkout_control.test_accounts VALUES ('tester','tester@example.test',true,now())"))
         conn.execute(text('UPDATE checkout_control.mode_state SET test_binding_verified_at=now()'))
-    def restricted_engine():
-        engine = create_engine(url, pool_size=1, max_overflow=0, pool_timeout=1)
+    def restricted_engine(pool_size=2):
+        engine = create_engine(url, pool_size=pool_size, max_overflow=0, pool_timeout=1)
         @event.listens_for(engine, 'connect')
         def role(connection, record):
             cursor = connection.cursor()
@@ -46,6 +46,10 @@ def test_real_postgres_migration_authority_concurrency_and_restarts():
                 conn.execute(text(sql))
     enabled = apply(engine,requested_mode='TEST',expected_version=1,confirmation='APPLY TEST',readiness=ready)
     assert enabled['effective_mode'] == 'TEST'
+    single_connection = restricted_engine(pool_size=1)
+    with locked(single_connection) as (connection, _):
+        assert tester(single_connection, 'tester', connection=connection) == 'tester@example.test'
+    single_connection.dispose()
     engine.dispose()
     engine = restricted_engine()
     assert status(engine,ready)['version'] == 2
