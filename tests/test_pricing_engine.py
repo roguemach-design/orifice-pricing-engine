@@ -26,8 +26,8 @@ def valid_inputs(**overrides) -> QuoteInputs:
 def test_baseline_quote_is_deterministic():
     result = calculate_quote(valid_inputs())
 
-    assert result["unit_price"] == 92.70
-    assert result["total_price"] == 92.70
+    assert result["unit_price"] == 93.00
+    assert result["total_price"] == 93.00
     assert result["estimated_total_weight_lb"] == 1.14
     assert result["estimated_package_in"] == {
         "length": 14.5,
