@@ -166,3 +166,7 @@ show(Client(),rev,plate,True,True)
     assert not app.exception
     assert app.session_state['attempts'] == ['HAAS', 'PACKAGING']
     assert any(b.proto.label == 'Download Packaging DXF' for b in app.get('download_button'))
+
+    next(b for b in app.button if b.label == 'Generate TEST Packaging DXF').click().run()
+    assert not app.exception  # idempotent generation must not duplicate audit widget keys
+    assert len(app.session_state['bundles']) == 1

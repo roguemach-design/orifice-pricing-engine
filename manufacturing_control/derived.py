@@ -132,7 +132,7 @@ def show(
                                 "/admin/manufacturing/test-engineering",
                                 dict(parent=association(rev, plate), family=family, confirmed=True),
                             )
-                            bundles.append(generated)
+                            bundles = [b for b in bundles if b["id"] != generated["id"]] + [generated]
                             latest = generated
                             st.success("Generated · immutable verified TEST engineering bundle")
                             st.session_state.pop(f"mc_test_result_{rev['id']}_{family}", None)
