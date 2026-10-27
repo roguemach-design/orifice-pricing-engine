@@ -54,6 +54,15 @@ def edit_map(label, value, prefix, unsupported=()):
 
 def run(client):
     st.title("Pricing & Availability")
+    workspace = st.radio(
+        "Pricing workspace", ["Pricing settings", "Checkout Control"],
+        key="mc_pricing_workspace", horizontal=True,
+    )
+    if workspace == "Checkout Control":
+        # Independent control: no pricing fetch/save is required, even on outage.
+        from .checkout import run as checkout_control
+        checkout_control(client)
+        return
     st.caption(
         "One active configuration · Changes affect future calculations. Historical order and approval evidence stays unchanged."
     )
