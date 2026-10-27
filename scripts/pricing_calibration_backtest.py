@@ -1,4 +1,5 @@
 """Offline comparison to the pinned deployed engine; no database or network writes."""
+import argparse
 import csv
 import itertools
 import json
@@ -90,6 +91,10 @@ def compare(payload, service, old):
             'proposed_chamfer_time_cost':proposed['chamfer_time_cost'],
             'proposed_chamfer_allowance':proposed['chamfer_diameter_allowance'],
             'proposed_chamfer_charge':proposed['chamfer_bore_cost'],
+            'proposed_chamfer_pass_count':proposed['chamfer_pass_count'],
+            'proposed_chamfer_minutes':proposed['chamfer_machining_minutes'],
+            'proposed_bore_pass_count':proposed['bore_pass_count'],
+            'proposed_bore_minutes':proposed['bore_machining_minutes'],
             'previous_subtotal':previous['subtotal_pre_multiplier'],
             'proposed_subtotal':proposed['subtotal_pre_multiplier'],
             'previous_unit_price':previous_price,'proposed_unit_price':proposed_price,
@@ -102,6 +107,14 @@ def main():
     out=ROOT/'review/pricing-calibration'
     out.mkdir(parents=True,exist_ok=True)
     old=legacy_engine()
+    # Read-only production snapshot; apply only to this offline process.
+    parser=argparse.ArgumentParser()
+    parser.add_argument('--active-settings',type=Path,help='Owner-private read-only snapshot; never commit it')
+    args=parser.parse_args()
+    snapshot=json.loads(args.active_settings.read_text()) if args.active_settings else None
+    if snapshot:
+        import api_app
+        api_app._apply_cfg_from_db_config(snapshot['config'])
     original=cfg.LEAD_TIME_MULTIPLIER
     cfg.LEAD_TIME_MULTIPLIER={21:1,14:1.6,7:2.3}  # offline hypotheses only
     rows=[]
@@ -117,7 +130,7 @@ def main():
                          ships_in_days=21 if service=='today_2_day' else service)
             rows.append(compare(payload,service,old))
         with (out/'OPlates_Pricing_Backtest_13824.csv').open('w',newline='') as f:
-            w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
+            w=csv.DictWriter(f,fieldnames=list(rows[0]),lineterminator="\n");w.writeheader();w.writerows(rows)
         reference=[]
         for material,chamfer,service in itertools.product(('304','316'),(False,True),(21,14,7,'today_2_day')):
             p=dict(quantity=1,material=material,thickness=.25,handle_width=1,
@@ -128,8 +141,8 @@ def main():
                    ships_in_days=21 if service=='today_2_day' else service)
             reference.append(compare(p,service,old))
         with (out/'reference.csv').open('w',newline='') as f:
-            w=csv.DictWriter(f,fieldnames=list(reference[0]));w.writeheader();w.writerows(reference)
-        summary=dict(baseline=BASE,config_basis='Bundled production defaults; no production settings were read or changed',
+            w=csv.DictWriter(f,fieldnames=list(reference[0]),lineterminator="\n");w.writeheader();w.writerows(reference)
+        summary=dict(baseline=BASE,config_basis='Owner-private active snapshot' if snapshot else 'Bundled repository defaults',
                      cases=len(rows),unchanged_components_reconciled=True,
                      cut_length=cut_length_audit(p),
                      ranges={name:dict(cases=len(group),minimum_percent=min(r['percent_difference'] for r in group),

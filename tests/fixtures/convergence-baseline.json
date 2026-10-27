@@ -17,7 +17,7 @@
         "ships_in_days": 21
       },
       "price": {
-        "pricing_model_version": "diameter-allowances-2026-10",
+        "pricing_model_version": "diameter-allowances-2026-10-v2",
         "rough_bore_diameter_in": 1.423,
         "bore_pass_count": 3,
         "bore_spring_passes": 0,
@@ -100,7 +100,7 @@
         "handle_hole_center_from_handle_end": 0.75
       },
       "price": {
-        "pricing_model_version": "diameter-allowances-2026-10",
+        "pricing_model_version": "diameter-allowances-2026-10-v2",
         "rough_bore_diameter_in": 1.423,
         "bore_pass_count": 4,
         "bore_spring_passes": 1,
@@ -188,7 +188,7 @@
         "handle_hole_center_from_handle_end": 0.75
       },
       "price": {
-        "pricing_model_version": "diameter-allowances-2026-10",
+        "pricing_model_version": "diameter-allowances-2026-10-v2",
         "rough_bore_diameter_in": 1.423,
         "bore_pass_count": 5,
         "bore_spring_passes": 2,
@@ -203,11 +203,11 @@
         "bore_time_cost": 2.136002505096989,
         "precision_bore_allowance": 50.31,
         "machine_bore_cost": 52.45,
-        "chamfer_pass_count": 1,
-        "chamfer_machining_minutes": 0.1759291886010284,
-        "chamfer_time_cost": 0.43982297150257105,
+        "chamfer_pass_count": 2,
+        "chamfer_machining_minutes": 0.3518583772020568,
+        "chamfer_time_cost": 0.8796459430051421,
         "chamfer_diameter_allowance": 7.74,
-        "chamfer_bore_cost": 8.18,
+        "chamfer_bore_cost": 8.62,
         "additional_chamfer_setup_cost": 0.0,
         "chamfer_method_confirmation_required": true,
         "manufacturing_cost_components": {
@@ -215,25 +215,25 @@
           "laser": 25.4821,
           "bore_time": 2.136002505096989,
           "precision_bore_allowance": 50.31,
-          "chamfer_time": 0.43982297150257105,
+          "chamfer_time": 0.8796459430051421,
           "chamfer_allowance": 7.74,
           "loading": 15.0,
           "inspection": 45.0
         },
-        "manufacturing_subtotal_unrounded": 153.30017547659958,
+        "manufacturing_subtotal_unrounded": 153.73999844810214,
         "area_sq_in": 65.0,
         "linear_inches": 30.85,
         "material_cost": 7.19,
         "laser_cost": 25.48,
         "load_cost": 15.0,
         "inspection_cost": 45.0,
-        "subtotal_pre_multiplier": 153.3,
+        "subtotal_pre_multiplier": 153.74,
         "lead_time_multiplier": 1.0,
-        "unit_price_pre_qty_discount": 153.3,
+        "unit_price_pre_qty_discount": 153.74,
         "qty_discount_multiplier": 1.0,
-        "unit_price": 153.3,
+        "unit_price": 153.74,
         "quantity": 1,
-        "total_price": 153.3,
+        "total_price": 153.74,
         "estimated_unit_weight_lb": 6.9,
         "estimated_total_weight_lb": 6.9,
         "estimated_package_in": {
@@ -255,5 +255,5 @@
       "svg_sha256": "cb975640395ada977f80441e0d2f7b8b1a62978ff5f8ce1f690c97a20a8aa610"
     }
   ],
-  "pricing_model": "diameter-allowances-2026-10; geometry/artifact hashes and payloads unchanged"
+  "pricing_model": "diameter-allowances-2026-10-v2; geometry/artifact hashes and payloads unchanged"
 }

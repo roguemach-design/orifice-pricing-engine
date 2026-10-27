@@ -14,3 +14,6 @@ examples/final4/output/
 
 # Reproducible full pricing matrix is delivered separately, not a giant PR diff.
 review/pricing-calibration/OPlates_Pricing_Backtest_13824.csv
+
+# Owner-private read-only production pricing snapshot.
+review/pricing-calibration/active-settings.json

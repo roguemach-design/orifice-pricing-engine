@@ -20,8 +20,8 @@ def test_estimated_contours_units_and_all_components(tol, spring):
     assert q['bore_machining_minutes'] == pytest.approx(minutes)
     assert q['bore_time_cost'] == pytest.approx(minutes * 150/60)
     assert q['precision_bore_allowance'] == 32.5
-    assert q['chamfer_pass_count'] == 1
-    assert q['chamfer_time_cost'] == pytest.approx(pi*1.0625/28*150/60)
+    assert q['chamfer_pass_count'] == 2
+    assert q['chamfer_time_cost'] == pytest.approx(2*pi*1.0625/28*150/60)
     assert q['chamfer_diameter_allowance'] == 5
     assert q['additional_chamfer_setup_cost'] == 0
     assert sum(q['manufacturing_cost_components'].values()) == pytest.approx(q['manufacturing_subtotal_unrounded'])
@@ -38,7 +38,7 @@ def test_entire_subtotal_gets_lead_then_quantity(monkeypatch, days, multiplier, 
 
 def test_no_chamfer_means_no_chamfer_cost_and_width_affects_estimate():
     a=calculate_quote(valid_inputs(chamfer=False,chamfer_width=None))
-    assert a['chamfer_bore_cost'] == a['chamfer_machining_minutes'] == a['chamfer_diameter_allowance'] == 0
+    assert a['chamfer_pass_count'] == a['chamfer_bore_cost'] == a['chamfer_machining_minutes'] == a['chamfer_diameter_allowance'] == 0
     b=calculate_quote(valid_inputs(chamfer_width=.03125))
     c=calculate_quote(valid_inputs(chamfer_width=.125))
     assert c['chamfer_time_cost'] > b['chamfer_time_cost']
@@ -126,8 +126,9 @@ def test_allowance_configuration_rejects_nonfinite_values(field):
             validate(changed,defaults)
 
 
+@pytest.mark.parametrize('stale_model',['', ':diameter-allowances-2026-10'])
 @pytest.mark.parametrize('cart',[False,True])
-def test_previous_model_version_cannot_create_single_or_cart_payment(client,monkeypatch,cart):
+def test_previous_model_version_cannot_create_single_or_cart_payment(client,monkeypatch,cart,stale_model):
     import api_app as api
     from pricing_calibration import MODEL_VERSION
     from test_checkout_workflow import install_idempotent_stripe, quote_inputs
@@ -140,7 +141,7 @@ def test_previous_model_version_cannot_create_single_or_cart_payment(client,monk
     values=quote_inputs()
     result=c.post('/quote',headers={'x-api-key':'synthetic-quote'},json=values).json()
     assert result['pricing_config_version'].endswith(':'+MODEL_VERSION)
-    old_version=result['pricing_config_version'].removesuffix(':'+MODEL_VERSION)
+    old_version=result['pricing_config_version'].removesuffix(':'+MODEL_VERSION)+stale_model
     body={'items':[values]} if cart else {'inputs':values}
     body['pricing_config_version']=old_version
     response=c.post('/checkout/cart/create' if cart else '/checkout/create',
@@ -148,3 +149,37 @@ def test_previous_model_version_cannot_create_single_or_cart_payment(client,monk
     assert response.status_code == 409 and response.json()['detail']['code']=='pricing_changed'
     assert calls == []
     with factory() as db: assert db.query(api.Order).count() == 0
+
+@pytest.mark.parametrize('cart',[False,True])
+@pytest.mark.parametrize('service',[0,1,2,'today_2_day'])
+def test_future_service_cannot_create_stripe_checkout(client,monkeypatch,cart,service):
+    import api_app as api
+    from test_checkout_workflow import install_idempotent_stripe, quote_inputs
+    c,factory=client
+    monkeypatch.setattr(api,'APP_ENV','test')
+    monkeypatch.setattr(api,'APP_BASE_URL','https://synthetic.example.test')
+    monkeypatch.setattr(api.stripe,'api_key','sk_test_synthetic')
+    monkeypatch.setattr(api,'_decode_supabase_user_id_from_bearer',lambda _: 'synthetic-owner')
+    calls=install_idempotent_stripe(monkeypatch)
+    values={**quote_inputs(),'ships_in_days':service}
+    body={'items':[values]} if cart else {'inputs':values}
+    response=c.post('/checkout/cart/create' if cart else '/checkout/create',
+                    headers={'authorization':'Bearer synthetic'},json=body)
+    assert response.status_code in (400,422)
+    assert calls == []
+    with factory() as db: assert db.query(api.Order).count() == 0
+
+
+def test_standard_45_radial_width_compatibility():
+    from plate_geometry import PlateSpec, build_plate_geometry
+    from section_geometry import build_section_geometry
+    # Exact standard definition reviewed from PR #46; no dependency on its branch.
+    values=valid_inputs(chamfer=True,chamfer_width=.0625).model_dump()
+    values.update(chamfer_angle_degrees=45.0,chamfer_side='downstream',
+                  flow_orientation='left-to-right',chamfer_width_definition='radial-angle-from-face')
+    spec=PlateSpec.from_configuration(values)
+    build_plate_geometry(spec)
+    assert 'HOLD' not in build_section_geometry(spec).status
+    priced=calculate_quote(type(valid_inputs())(**values))
+    assert priced['chamfer_pass_count'] == 2
+    assert priced['chamfer_machining_minutes'] == pytest.approx(2*pi*(values['bore_dia']+.0625)/28)

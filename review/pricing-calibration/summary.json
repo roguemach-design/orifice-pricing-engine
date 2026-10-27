@@ -1,6 +1,6 @@
 {
   "baseline": "a9615a1e4d2b2013b0be7ddbf40ff409385c50ac",
-  "config_basis": "Bundled production defaults; no production settings were read or changed",
+  "config_basis": "Bundled repository defaults",
   "cases": 13824,
   "unchanged_components_reconciled": true,
   "cut_length": {
@@ -17,8 +17,8 @@
     },
     "chamfer": {
       "cases": 10368,
-      "minimum_percent": -37.08637589632261,
-      "maximum_percent": -11.919385796545107
+      "minimum_percent": -36.72291296625222,
+      "maximum_percent": -11.787038672081943
     }
   }
 }

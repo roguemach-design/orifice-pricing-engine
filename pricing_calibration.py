@@ -3,7 +3,7 @@ from math import pi
 from types import SimpleNamespace
 from plate_geometry import rough_bore_diameter
 
-MODEL_VERSION = "diameter-allowances-2026-10"
+MODEL_VERSION = "diameter-allowances-2026-10-v2"
 TODAY_2_DAY_ID = "today_2_day"
 TODAY_2_DAY_LABEL = "Today / 2-Day"
 SPRING_PASSES = {0.005: 0, 0.002: 1, 0.001: 2}
@@ -22,10 +22,10 @@ def machining_costs(x, cfg):
     bore_allowance = x.bore_dia * cfg.PRECISION_BORE_ALLOWANCE_PER_IN
     if x.chamfer and x.chamfer_width is None:
         raise ValueError("chamfer_width is required for chamfer pricing")
-    # One nominal chamfer contour at its mean diameter. Tool/face access and
-    # single-pass capability require owner confirmation before production adoption.
+    # Two owner-confirmed nominal contours at the existing mean diameter.
+    # Tool/face access remains independent of this pricing estimate.
     # No second setup/load or unverified flip time is silently charged.
-    chamfer_minutes = (pi * (x.bore_dia + x.chamfer_width) / cfg.CHAMFER_SPEED_IPM
+    chamfer_minutes = (2 * pi * (x.bore_dia + x.chamfer_width) / cfg.CHAMFER_SPEED_IPM
                        if x.chamfer else 0.0)
     chamfer_time_cost = chamfer_minutes * cfg.MILL_LABOR_PER_HR / 60
     chamfer_allowance = x.bore_dia * cfg.CHAMFER_ALLOWANCE_PER_IN if x.chamfer else 0.0
@@ -39,7 +39,7 @@ def machining_costs(x, cfg):
         bore_time_cost=bore_time_cost,
         precision_bore_allowance=bore_allowance,
         machine_bore_cost=bore_time_cost + bore_allowance,
-        chamfer_pass_count=1 if x.chamfer else 0,
+        chamfer_pass_count=2 if x.chamfer else 0,
         chamfer_machining_minutes=chamfer_minutes,
         chamfer_time_cost=chamfer_time_cost,
         chamfer_diameter_allowance=chamfer_allowance,

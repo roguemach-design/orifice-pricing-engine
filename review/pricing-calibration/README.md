@@ -9,7 +9,7 @@ For finished bore diameter D, the existing canonical rough-bore helper gives R =
 
 Bore minutes = π × sum(contour diameters) / cutting feed in inches/minute. Bore time cost = minutes × hourly rate / 60. Initial feed remains 28 IPM and rate $150/hour. Add the independent commercial allowance $32.50 × D. The allowance is a selling-price calibration input, not cycle time.
 
-Chamfer minutes = π × (D + radial width) / chamfer feed, for one nominal contour. Time cost = minutes × hourly rate / 60; add $5.00 × D. This is a pricing estimate at the mean chamfer diameter, not a tool-center path or a verified production cycle. A chamfer requires its width; missing width is rejected, never defaulted. Chamfer NO costs zero. No second loading, setup, flip or unverified handling charge is added.
+Chamfer minutes = 2 × π × (D + radial width) / chamfer feed, for two owner-confirmed contours at the existing modeled mean diameter. Time cost = minutes × hourly rate / 60; add $5.00 × D. This is a pricing estimate at the mean chamfer diameter, not a tool-center path or a verified production cycle. A chamfer requires its width; missing width is rejected, never defaulted. Chamfer NO costs zero. No second loading, setup, flip or unverified handling charge is added.
 
 Manufacturing subtotal = existing material + existing laser blanking + bore time + bore allowance + chamfer time + chamfer allowance + existing loading + existing inspection. Apply the selected lead multiplier to the entire subtotal, then the quantity multiplier; round once at unit level and extend that rounded unit by quantity. Shipping remains separate and unchanged. No other manufacturing fees existed in the accepted engine; none are silently removed or invented.
 
@@ -35,34 +35,34 @@ Future readiness requires confirmed material, blank, capacity, cutoff, qualified
 
 The reproducible script is `scripts/pricing_calibration_backtest.py`; it reads the pinned old engine through git, runs only offline, and restores its temporary hypothetical lead map in finally. It generates 13,824 cases spanning all 3 supported materials × 4 thicknesses, 3 outside diameters, 2 bore ratios, all 3 tolerances, chamfer NO plus 3 radial widths, quantities 1/5/10/25, and 21/14/hypothetical 7/hypothetical Today / 2-Day.
 
-This is broader than the earlier 2,304-case audit, not a claim to recreate its unavailable exact input grid. Material, active legacy laser, loading, inspection, shipping and weight outputs reconcile exactly in every case. All calculations use the accepted bundled configuration, not a claim to have read protected production pricing settings.
+This is broader than the earlier 2,304-case audit, not a claim to recreate its unavailable exact input grid. Material, active legacy laser, loading, inspection, shipping and weight outputs reconcile exactly in every case. Published evidence uses bundled repository defaults. A separate owner-private comparison applied a read-only production settings snapshot to both the pinned deployed engine and this proposal; the private package contains that evidence. Production configuration is not published. To repeat an authorized private comparison, pass --active-settings /private/path/to/snapshot.json to the offline script. Missing process settings retain deployed code defaults. No live configuration was saved.
 
-Non-chamfered unit-price differences: -0.7018% to 0.5429%. Chamfered differences: -37.0864% to -11.9194%.
+Non-chamfered unit-price differences: -0.7018% to 0.5429%. Chamfered differences: -36.7229% to -11.7870%.
 
-Small departures from the earlier approximate ±0.6% preservation band arise from exact π, stock-based nominal contours, tolerance-specific spring passes and final cent rounding. Prices are not forced to equal the old bug. The revised chamfer surcharge reflects one nominal contour plus its independent diameter allowance, rather than another full bore charge.
+Small departures from the earlier approximate ±0.6% preservation band arise from exact π, stock-based nominal contours, tolerance-specific spring passes and final cent rounding. Prices are not forced to equal the old bug. The revised chamfer surcharge reflects two nominal contours plus its independent diameter allowance, rather than another full bore charge.
 
 ### Historical geometry reference
 
 14.250 inch OD × 8.500 inch finished bore × 0.250 inch; handle width 1 inch; centerline to end 13.125 inches; hole Ø0.375 inch at 0.625 inch from end; ±0.005 inch bore tolerance; quantity 1; chamfer YES uses radial width 0.062 inch. These are synthetic pricing inputs, not mutations of a customer order.
 
-| Material | Chamfer | Lead | Old subtotal | New subtotal | Old unit | New unit | Difference |
+| Material | Chamfer | Lead | Live subtotal | Proposed subtotal | Live unit | Proposed unit | Difference |
 |---|---|---|---:|---:|---:|---:|---:|
 | 304 | False | 21 | $430.94 | $428.34 | $430.94 | $428.34 | -0.603% |
 | 304 | False | 14 | $430.94 | $428.34 | $689.50 | $685.35 | -0.602% |
 | 304 | False | 7 | $430.94 | $428.34 | $991.16 | $985.19 | -0.602% |
 | 304 | False | today_2_day | $430.94 | $428.34 | $1422.10 | $1413.53 | -0.603% |
-| 304 | True | 21 | $716.90 | $473.24 | $716.90 | $473.24 | -33.988% |
-| 304 | True | 14 | $716.90 | $473.24 | $1147.05 | $757.19 | -33.988% |
-| 304 | True | 7 | $716.90 | $473.24 | $1648.88 | $1088.46 | -33.988% |
-| 304 | True | today_2_day | $716.90 | $473.24 | $2365.78 | $1561.71 | -33.988% |
+| 304 | True | 21 | $716.90 | $475.65 | $716.90 | $475.65 | -33.652% |
+| 304 | True | 14 | $716.90 | $475.65 | $1147.05 | $761.03 | -33.653% |
+| 304 | True | 7 | $716.90 | $475.65 | $1648.88 | $1093.99 | -33.653% |
+| 304 | True | today_2_day | $716.90 | $475.65 | $2365.78 | $1569.63 | -33.653% |
 | 316 | False | 21 | $465.54 | $462.94 | $465.54 | $462.94 | -0.558% |
 | 316 | False | 14 | $465.54 | $462.94 | $744.86 | $740.71 | -0.557% |
 | 316 | False | 7 | $465.54 | $462.94 | $1070.74 | $1064.77 | -0.558% |
 | 316 | False | today_2_day | $465.54 | $462.94 | $1536.28 | $1527.71 | -0.558% |
-| 316 | True | 21 | $751.50 | $507.84 | $751.50 | $507.84 | -32.423% |
-| 316 | True | 14 | $751.50 | $507.84 | $1202.40 | $812.55 | -32.423% |
-| 316 | True | 7 | $751.50 | $507.84 | $1728.46 | $1168.04 | -32.423% |
-| 316 | True | today_2_day | $751.50 | $507.84 | $2479.96 | $1675.88 | -32.423% |
+| 316 | True | 21 | $751.50 | $510.25 | $751.50 | $510.25 | -32.102% |
+| 316 | True | 14 | $751.50 | $510.25 | $1202.40 | $816.39 | -32.103% |
+| 316 | True | 7 | $751.50 | $510.25 | $1728.46 | $1173.56 | -32.104% |
+| 316 | True | today_2_day | $751.50 | $510.25 | $2479.96 | $1683.81 | -32.103% |
 
 `reference.csv` includes each cost component, allowances/time split, multiplier, discount, absolute and percentage difference. `summary.json` records coverage and diagnostic cut lengths. The full CSV matrix is generated separately to keep the PR focused.
 
@@ -77,7 +77,7 @@ The owner-supplied commercial supplier comparison is reported privately rather t
 ## Manufacturing assumptions still requiring owner confirmation
 
 - These are nominal part-contour cutting-time estimates, excluding approach, acceleration, tool changes and measured cycle overhead; existing load/inspection charges are preserved. Cutter-center geometry, tooling and actual cycles require machining evidence.
-- Confirm that one pass covers each proposed chamfer width and material/thickness using the selected tool. Confirm face access: accessible-face machining, flipping, or back-chamfer tooling cannot be established from the commercial quote inputs. If a flip/second setup is required, propose a separate measured setup charge before production adoption.
+- The owner confirmed two chamfer passes. Confirm face access: accessible-face machining, flipping, or back-chamfer tooling cannot be established from the commercial quote inputs. If a flip/second setup is required, propose a separate measured setup charge before production adoption.
 - Existing chamfer-specification/Frozen Plate HOLD and engineering fixture limits remain independent. This proposal does not manufacture missing geometry, qualify a setup, bypass a HOLD, change approvals or enable sourcing/release.
 - Approve any separate laser-length/rate correction only after like-for-like supplier samples and the recalculated selling-price impact are reviewed.
 
@@ -86,3 +86,20 @@ The owner-supplied commercial supplier comparison is reported privately rather t
 Tests cover independent units/pass arithmetic; subtotal-wide lead and quantity multiplication; width-dependent chamfer time; no second load; owner-only allowance editing, invalid values, version conflict and history restore; disabled rush despite readiness; original public Coming Soon behavior; independent DXF cut-length agreement; accepted customer payloads and protected artifact hashes.
 
 Historical customer orders, approvals and Frozen Plate artifacts are not repriced or regenerated. Only the pricing sections of synthetic convergence fixtures were updated; their request payloads and manufacturing hashes remain unchanged. No production API/configuration writes are performed by this task.
+
+
+## Consolidated successor to PR #49
+
+This PR includes the complete #49 calibration against the production branch; merge this successor only, never both implementations. #49 remains unmerged. Model version is `diameter-allowances-2026-10-v2`; both the deployed bare configuration token and #49's prior model token are stale for single/cart checkout. The server recomputes current prices and rejects mismatched tokens before order/session creation. Requests without a supplied token are still priced by the current server model; they cannot select an old formula.
+
+PR #46 compatibility was reviewed without merging it: its standard is 45°, downstream face, left-to-right flow, radial width measured at the face (`radial-angle-from-face`). The pricing estimate uses D + radial width for both contours and reports pass count 2, or 0 when disabled. A test exercises that exact canonical specification with the existing geometry/section validators. This PR neither broadens checkout eligibility nor repairs missing historical specifications. PR #46 remains independently reviewable; pricing cannot substitute for its checkout preflight.
+
+Two passes double only chamfer estimated minutes/time cost relative to #49. The diameter allowance remains $5 × D exactly once, loading remains six minutes once, and there is no new fixture, machine setup, flip or back-tool model. For the historical reference, two-pass chamfer time is approximately 1.9213 minutes ($4.80); its allowance is $42.50, yielding a $47.30 charge rather than #49's $44.90. No active laser length or rate change is included.
+
+## Deployment considerations — separate authorization required
+
+Keep this PR unmerged and undeployed until owner review. A later approved release requires the API formula and Manufacturing Control editor from this same successor, with API first; preserve the existing checkout mode and all availability flags. No database migration is needed and no read creates new settings. Refresh displayed quotes/cart prices after release; old supplied tokens fail with pricing_changed, including #49 tokens. Already stored orders, quotes and payment snapshots remain immutable.
+
+Rollback means restoring the previously deployed code SHA and, only if someone deliberately saved pricing settings after deployment, restoring the matching prior configuration through the existing owner history with its current version/confirmation. Never edit historical order/Frozen Plate records. Model-version changes invalidate forward tokens when reverting as well. Today / 2-Day remains Coming Soon and cannot purchase even with readiness evidence; no availability setting is introduced.
+
+Remaining owner decisions: approve the two-pass customer-price results before release; qualify actual tool/face access and measured cycle overhead before adding any separately proposed setup charge; approve future cutoff/capacity/business-calendar/shipment rules before a distinct rush activation; consider the separate laser discrepancy only under separate scope. The two-pass count itself is now confirmed and is not an open decision.
