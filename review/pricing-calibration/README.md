@@ -13,6 +13,8 @@ Chamfer minutes = π × (D + radial width) / chamfer feed, for one nominal conto
 
 Manufacturing subtotal = existing material + existing laser blanking + bore time + bore allowance + chamfer time + chamfer allowance + existing loading + existing inspection. Apply the selected lead multiplier to the entire subtotal, then the quantity multiplier; round once at unit level and extend that rounded unit by quantity. Shipping remains separate and unchanged. No other manufacturing fees existed in the accepted engine; none are silently removed or invented.
 
+The existing quote-version token now includes the pricing-model version as well as the configuration timestamp. A formula release invalidates stale single/cart purchase prices even when no settings row changed; the existing checkout conflict response requires a fresh price review. This does not rewrite stored quote/order snapshots or alter the owner editor's configuration-version mechanism.
+
 The quote result preserves existing rounded cost fields and adds full-precision component reconciliation, estimated minutes, pass counts, rough diameter and separate commercial allowances. Manufacturing generators and canonical geometry remain unchanged.
 
 ## Owner controls and recovery

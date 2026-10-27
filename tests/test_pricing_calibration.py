@@ -124,3 +124,27 @@ def test_allowance_configuration_rejects_nonfinite_values(field):
         changed[field]=value
         with pytest.raises(ValueError,match='finite'):
             validate(changed,defaults)
+
+
+@pytest.mark.parametrize('cart',[False,True])
+def test_previous_model_version_cannot_create_single_or_cart_payment(client,monkeypatch,cart):
+    import api_app as api
+    from pricing_calibration import MODEL_VERSION
+    from test_checkout_workflow import install_idempotent_stripe, quote_inputs
+    c,factory=client
+    monkeypatch.setattr(api,'APP_ENV','test')
+    monkeypatch.setattr(api,'APP_BASE_URL','https://synthetic.example.test')
+    monkeypatch.setattr(api.stripe,'api_key','sk_test_synthetic')
+    monkeypatch.setattr(api,'_decode_supabase_user_id_from_bearer',lambda _: 'synthetic-owner')
+    calls=install_idempotent_stripe(monkeypatch)
+    values=quote_inputs()
+    result=c.post('/quote',headers={'x-api-key':'synthetic-quote'},json=values).json()
+    assert result['pricing_config_version'].endswith(':'+MODEL_VERSION)
+    old_version=result['pricing_config_version'].removesuffix(':'+MODEL_VERSION)
+    body={'items':[values]} if cart else {'inputs':values}
+    body['pricing_config_version']=old_version
+    response=c.post('/checkout/cart/create' if cart else '/checkout/create',
+                    headers={'authorization':'Bearer synthetic'},json=body)
+    assert response.status_code == 409 and response.json()['detail']['code']=='pricing_changed'
+    assert calls == []
+    with factory() as db: assert db.query(api.Order).count() == 0

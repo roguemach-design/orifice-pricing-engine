@@ -947,7 +947,8 @@ def _calculate_quote_with_db_knobs(inputs: QuoteInputs) -> dict:
         finally:
             _restore_cfg_baseline()
 
-    result["pricing_config_version"] = version
+    from pricing_calibration import MODEL_VERSION
+    result["pricing_config_version"] = f"{version}:{MODEL_VERSION}"
     return result
 
 # ----------------------------
