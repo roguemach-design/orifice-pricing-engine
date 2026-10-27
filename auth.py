@@ -114,9 +114,10 @@ def _cookie_get() -> Optional[dict]:
             return None
         raw = cm.get(COOKIE_NAME)
 
-    if not raw and not st.session_state.get("_auth_cookie_bootstrapped"):
-        # A cross-site return can omit a cookie from the initial request. Read
-        # the actual quote-origin browser cookie, not a cached Python mirror.
+    if not context_available and not raw and not st.session_state.get("_auth_cookie_bootstrapped"):
+        # Compatibility fallback only when request cookies are unavailable.
+        # Current Streamlit supplies the quote-origin cookie synchronously;
+        # anonymous pages must not mount an unnecessary cookie component.
         raw_cookies = _cookie_component(method="getAll", key="auth_cookie_restore", default=None)
         if raw_cookies is None:
             # No identity is available yet. Keep the anonymous configurator

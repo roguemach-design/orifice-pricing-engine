@@ -65,9 +65,11 @@ def test_browser_ack_and_readback_are_required_before_continuation(page, monkeyp
     assert page.cart == [{"quantity": 2}] and page.configuration == {"paddle_dia": 3}
 
 
-def test_cross_site_return_restores_browser_cookie_and_checks_provider(page, monkeypatch):
+def test_legacy_context_restores_browser_cookie_and_checks_provider(page, monkeypatch):
     saved = dict(page.auth)
     page.auth = {}
+    monkeypatch.setattr(auth.st, "context", SimpleNamespace())
+    monkeypatch.setattr(auth, "_cookie_mgr", lambda: SimpleNamespace(get=lambda key: None))
     monkeypatch.setattr(auth, "_cookie_component", lambda **kw: {auth.COOKIE_NAME: saved})
     monkeypatch.setattr(auth, "_cookie_set", lambda value: None)
     calls = []

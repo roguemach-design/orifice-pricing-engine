@@ -168,11 +168,14 @@ def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded, tm
             assert state["sends"] == 1
             assert state["protected"] and all(state["protected"])
             page.get_by_role("button", name="Log out", exact=True).click()
-            expect(page.get_by_role("button", name="Send code", exact=True)).to_be_visible(timeout=20000)
+            expect(page.get_by_text("Signed in as:", exact=False)).to_have_count(0, timeout=20000)
+            expect(page.get_by_text("TEST DRAWING APPROVED — NOT A REAL SALE", exact=True)).to_have_count(0)
+            expect(page.get_by_role("button", name="Send code", exact=True)).to_be_attached(timeout=20000)
             page.reload()
             expect(page.get_by_role("button", name="Send code", exact=True)).to_be_visible(timeout=20000)
             assert state["revoked"]
         finally:
+            print("Synthetic journey page:", scope.locator("body").inner_text())
             page.screenshot(path=str(tmp_path / "auth-journey.png"), full_page=True)
             (tmp_path / "auth-journey.html").write_text(page.content())
             browser.close()
