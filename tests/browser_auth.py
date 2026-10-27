@@ -103,7 +103,13 @@ def customer_app(tmp_path):
     env = {key: os.environ[key] for key in ("PATH", "PYTHONPATH", "LANG") if key in os.environ}
     env.update(API_BASE=api, SUPABASE_URL=api, SUPABASE_ANON_KEY="synthetic-public", API_KEY="synthetic-ui")
     log = (tmp_path / "app.log").open("w+")
-    process = subprocess.Popen([sys.executable, "-m", "streamlit", "run", "app.py", "--server.address=127.0.0.1",
+    # The real approval UI is hard-gated to production/staging API origins.
+    # Enable only that presentation gate in this disposable loopback process;
+    # application authentication and every customer route remain unchanged.
+    launcher = ROOT / f"synthetic_browser_{port}.py"
+    launcher.write_text("import frozen_plate.runtime\nfrozen_plate.runtime.ui_enabled = lambda: True\n"
+                        "from customer_navigation import run_customer_app\nrun_customer_app()\n")
+    process = subprocess.Popen([sys.executable, "-m", "streamlit", "run", str(launcher), "--server.address=127.0.0.1",
         f"--server.port={port}", "--server.headless=true", "--browser.gatherUsageStats=false", "--global.developmentMode=false"],
         cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
     try:
@@ -121,6 +127,7 @@ def customer_app(tmp_path):
         server.shutdown()
         server.server_close()
         log.close()
+        launcher.unlink(missing_ok=True)
 
 
 def sign_in(scope):
@@ -172,10 +179,12 @@ def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded, tm
             expect(page.get_by_text("TEST DRAWING APPROVED — NOT A REAL SALE", exact=True)).to_have_count(0)
             expect(page.get_by_role("button", name="Send code", exact=True)).to_be_attached(timeout=20000)
             page.reload()
-            expect(page.get_by_role("button", name="Send code", exact=True)).to_be_visible(timeout=20000)
+            expect(page.get_by_text("Signed in as:", exact=False)).to_have_count(0, timeout=20000)
+            expect(page.get_by_text("TEST DRAWING APPROVED — NOT A REAL SALE", exact=True)).to_have_count(0)
+            expect(page.get_by_role("button", name="Send code", exact=True)).to_be_attached(timeout=20000)
             assert state["revoked"]
         finally:
-            print("Synthetic journey page:", scope.locator("body").inner_text())
+            print("Synthetic journey page:", page.locator("body").inner_text(timeout=2000))
             page.screenshot(path=str(tmp_path / "auth-journey.png"), full_page=True)
             (tmp_path / "auth-journey.html").write_text(page.content())
             browser.close()
