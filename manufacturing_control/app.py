@@ -204,6 +204,10 @@ def overview(snapshot, client):
     )
     scope(snapshot)
     counts = snapshot["counts"]
+    production_orders = [
+        o for o in snapshot["orders"]
+        if o.get("payment_mode") not in {"TEST", "OWNER TEST"}
+    ]
     metrics = [
         (
             "Recent orders",
@@ -214,7 +218,7 @@ def overview(snapshot, client):
             "Awaiting customer approval",
             sum(
                 any(l["metadata_available"] and not l["approved"] for l in o["lines"])
-                for o in snapshot["orders"]
+                for o in production_orders
             ),
             "Orders with an unapproved current plate",
         ),
@@ -230,7 +234,7 @@ def overview(snapshot, client):
                 or any(
                     not l["metadata_available"] or not l["approved"] for l in o["lines"]
                 )
-                for o in snapshot["orders"]
+                for o in production_orders
             ),
             "Missing records or approval outstanding",
         ),
@@ -251,7 +255,7 @@ def overview(snapshot, client):
     with st.expander("Owner attention · approval and missing records"):
         attention = [
             o
-            for o in snapshot["orders"]
+            for o in production_orders
             if not o["lines"]
             or any(not l["approved"] or not l["metadata_available"] for l in o["lines"])
         ]

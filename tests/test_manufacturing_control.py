@@ -316,6 +316,9 @@ def test_session_unlock_lock_no_lazy_reads_and_selected_context(monkeypatch):
     app.text_input[0].set_value("fixture-owner")
     next(b for b in app.button if b.label == "Unlock").click().run()
     assert not app.exception
+    # TEST records remain reviewable but cannot inflate production attention.
+    overview = next(e.value for e in app.markdown if '<div class="mc-grid">' in e.value)
+    assert 'Owner attention</div><div class="mc-number">0</div>' in overview
     assert "owner_admin_credential" not in app.session_state
     next(b for b in app.button if b.label == "OP-0014").click().run()
     assert not app.exception and app.session_state["mc_order"] == "o1"
