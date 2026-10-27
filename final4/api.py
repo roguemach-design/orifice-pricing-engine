@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.routing import APIRoute
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
+from typing import Literal
 from frozen_plate.repository import WorkflowError
 
 
@@ -24,6 +25,13 @@ class GenerateRequest(BaseModel):
     reviewed_record: dict | None = None
 
 
+class TestEngineeringRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    parent: Association
+    family: Literal["HAAS", "PACKAGING"]
+    confirmed: Literal[True]
+
+
 class BoundedRoute(APIRoute):
     def get_route_handler(self):
         original = super().get_route_handler()
@@ -41,7 +49,7 @@ class BoundedRoute(APIRoute):
         return bounded
 
 
-def router(admin_auth, get_service, *, server_actor):
+def router(admin_auth, get_service, *, server_actor, get_test_engineering=None):
     r = APIRouter(
         prefix="/admin/manufacturing",
         dependencies=[Depends(admin_auth)],
@@ -67,6 +75,25 @@ def router(admin_auth, get_service, *, server_actor):
                 reviewed_record=body.reviewed_record,
             )
         )
+
+    @r.post("/test-engineering")
+    def test_engineering(body: TestEngineeringRequest):
+        if get_test_engineering is None:
+            raise HTTPException(503, "TEST engineering unavailable")
+        try:
+            bundle_id = get_test_engineering().ensure(
+                body.family, body.parent.model_dump(), actor=server_actor)
+            result = get_service().metadata(bundle_id)
+            # Idempotent returns verify stored bytes too; never regenerate downloads.
+            for artifact in result["files"]:
+                get_service().download(bundle_id, artifact["name"])
+            return result
+        except ValueError as error:
+            if str(error) == "bore/tool sweep lacks radial fixture opening clearance":
+                raise HTTPException(409, "Blocked: controlled fixture opening clearance is insufficient") from None
+            raise HTTPException(409, "Blocked: controlled geometry or profile validation failed") from None
+        except (WorkflowError, KeyError, TypeError):
+            raise HTTPException(409, "Unavailable: current approved TEST parent or artifact verification failed") from None
 
     @r.post("/bundles/query")
     def query(body: Association):

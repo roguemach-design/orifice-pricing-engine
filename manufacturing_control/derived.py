@@ -1,5 +1,6 @@
-"""Download-only manufacturing workflow; automatic staging never runs on view."""
+"""Owner engineering actions and verified downloads; passive views never generate."""
 
+import json
 from copy import deepcopy
 from functools import partial
 import streamlit as st
@@ -45,6 +46,16 @@ def show(
     client, rev, plate, current, approved, *, frozen_audit=None, include_audit=True
 ):
     bundles, config, staging = [], None, {}
+    try:
+        test_order = json.loads(rev.get("source_json") or "{}").get("_payment", {}).get("mode") == "owner_test"
+    except (ValueError, TypeError):
+        test_order = False
+    if test_order:
+        st.info("TEST / NOT A REAL SALE: automatic staging is intentionally excluded. Owner engineering generation never releases production.")
+        engineering_confirmed = st.checkbox(
+            "I confirm TEST engineering review only; no manufacturing or shipping authorization.",
+            key="mc_test_engineering_confirm_" + rev["id"],
+        )
     if all(rev.get(k) for k in ("id", "spec_sha256", "source_sha256")):
         try:
             config = client.json("/admin/manufacturing/configuration")
@@ -81,7 +92,7 @@ def show(
             b
             for b in bundles
             if b["family"] == family
-            and b.get("staging", {}).get("mode") == "AUTOMATIC"
+            and b.get("staging", {}).get("mode") == ("OWNER_TEST_ENGINEERING" if test_order else "AUTOMATIC")
             and expected
             and b["staging"].get("profile_sha256") == expected
         ]
@@ -93,7 +104,7 @@ def show(
                 b
                 for b in bundles
                 if b["family"] == family
-                and b.get("staging", {}).get("mode") == "AUTOMATIC"
+                and b.get("staging", {}).get("mode") == ("OWNER_TEST_ENGINEERING" if test_order else "AUTOMATIC")
             ]
             retained_packaging = bool(found)
         latest = max(found, key=lambda b: (b["created_at"], b["id"])) if found else None
@@ -109,6 +120,27 @@ def show(
                 st.markdown("**" + title + "**")
                 st.caption(warning)
             with action_col:
+                if test_order:
+                    st.caption("NOT MACHINE-PROVEN / REVIEW REQUIRED" if family == "HAAS"
+                               else "PROTOTYPE / NOT QUALIFIED FOR SHIPPING")
+                    if st.button("Generate TEST " + ("Haas NC" if family == "HAAS" else "Packaging DXF"),
+                                 key=f"mc_test_generate_{rev['id']}_{family}",
+                                 disabled=not (current and approved and config and engineering_confirmed),
+                                 width="stretch"):
+                        try:
+                            generated = client.manufacturing_post(
+                                "/admin/manufacturing/test-engineering",
+                                dict(parent=association(rev, plate), family=family, confirmed=True),
+                            )
+                            bundles = [b for b in bundles if b["id"] != generated["id"]] + [generated]
+                            latest = generated
+                            st.success("Generated · immutable verified TEST engineering bundle")
+                            st.session_state.pop(f"mc_test_result_{rev['id']}_{family}", None)
+                        except PortalError as error:
+                            st.session_state[f"mc_test_result_{rev['id']}_{family}"] = ERRORS[error.category]
+                    failure = st.session_state.get(f"mc_test_result_{rev['id']}_{family}")
+                    if failure:
+                        st.warning("Blocked / unavailable: " + failure)
                 artifact = next(
                     (f for f in (latest or {}).get("files", []) if f["name"] == output),
                     None,
@@ -132,6 +164,9 @@ def show(
                         key=f"mc_derived_missing_{rev['id']}_{family}",
                         width="stretch",
                     )
+                    if test_order:
+                        st.info("Not generated for the active controlled profile. Use the explicit owner action above after approval.")
+                        continue
                     state = staging.get(family, {})
                     st.info(state.get("state", "Automatic staging pending"))
                     st.caption(
