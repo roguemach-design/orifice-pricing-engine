@@ -125,6 +125,7 @@ for o in orders:
         {
             "Order #": o.get("order_number_display") or "(finalizing...)",
             "_order_id": o.get("id", ""),
+            "Mode": "TEST / NOT A REAL SALE" if o.get("payment_mode") in {"TEST", "OWNER TEST"} else o.get("payment_mode", "Unknown"),
             "Created": _dt(o.get("created_at", "")),
             "Email": o.get("customer_email", ""),
             "Total": _usd(o.get("amount_total_usd")),
@@ -173,7 +174,12 @@ with st.spinner("Loading order details..."):
 
     detail = r2.json()
 
+is_test_order = detail.get("payment_mode") in {"TEST", "OWNER TEST"}
+if is_test_order:
+    st.warning("TEST / NOT A REAL SALE — no manufacturing or shipment.")
+
 summary = {
+    "Mode": "TEST / NOT A REAL SALE" if is_test_order else detail.get("payment_mode", "Unknown"),
     "Order #": detail.get("order_number_display") or "",
     "Created": _dt(detail.get("created_at", "")),
     "Email": detail.get("customer_email", ""),
@@ -218,7 +224,7 @@ if frozen_response.status_code == 200:
             continue
         st.subheader(f"Drawing approval — {plate['line_id']}")
         if plate["lifecycle"] in ("CUSTOMER_APPROVED", "READY_FOR_RELEASE"):
-            st.success("YOUR ORDER IS IN PRODUCTION")
+            st.success("TEST DRAWING APPROVED — NOT A REAL SALE" if is_test_order else "YOUR ORDER IS IN PRODUCTION")
             continue
         session_key = "frozen-confirmation-" + plate["current_revision"]
         if st.button("Review attached drawing", key="review-" + plate["id"]):
@@ -258,7 +264,7 @@ if frozen_response.status_code == 200:
                 )
                 if response.status_code == 200:
                     st.session_state.pop(session_key, None)
-                    st.success("YOUR ORDER IS IN PRODUCTION")
+                    st.success("TEST DRAWING APPROVED — NOT A REAL SALE" if is_test_order else "YOUR ORDER IS IN PRODUCTION")
                 else:
                     st.error(
                         "Approval was not recorded. Refresh to review the current drawing."

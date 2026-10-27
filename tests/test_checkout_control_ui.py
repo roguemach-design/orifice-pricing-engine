@@ -45,3 +45,26 @@ def test_owner_selector_deliberate_save_live_disabled_and_close():
     next(b for b in app.button if b.label == 'Close New Checkout').click().run()
     assert app.metric[0].value == 'CLOSED'
     assert ui_client.writes[-1]['requested_mode'] == 'CLOSED'
+
+
+def test_my_orders_cannot_describe_test_approval_as_production(monkeypatch):
+    import auth
+    from ui_harness import customer_page_test
+    from types import SimpleNamespace
+    monkeypatch.setattr(auth,'render_auth_sidebar',lambda **kwargs:None)
+    monkeypatch.setattr(auth,'require_login',lambda *args:None)
+    for mode in ('OWNER TEST','TEST','LIVE'):
+        order={'id':'order','payment_mode':mode,'order_number_display':'OP-TEST','quote_payload':{}}
+        def get(path,**kwargs):
+            data=([{'id':'plate','current_revision':'r1','line_id':'line-1','lifecycle':'CUSTOMER_APPROVED'}]
+                  if path.endswith('/frozen-plates') else [order] if path=='/me/orders' else order)
+            return SimpleNamespace(status_code=200,json=lambda:data)
+        monkeypatch.setattr(auth,'api_get',get)
+        app=customer_page_test('pages/2_My_Orders.py').run()
+        assert not app.exception
+        if mode=='LIVE':
+            assert any(s.value=='YOUR ORDER IS IN PRODUCTION' for s in app.success)
+        else:
+            assert app.dataframe[0].value['Mode'].iloc[0]=='TEST / NOT A REAL SALE'
+            assert any('NOT A REAL SALE' in w.value for w in app.warning)
+            assert all('YOUR ORDER IS IN PRODUCTION' not in s.value for s in app.success)
