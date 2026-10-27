@@ -125,6 +125,9 @@ def test_logout_revokes_current_provider_session_and_confirms_browser_removal(pa
 
 def test_cookie_pause_restores_canonical_choices_after_widget_cleanup(page, monkeypatch):
     page["phase1g_form_snapshot"] = {"chamfer": False, "ships_in_days": 14, "paddle_dia": 4.0}
+    page["quote_field_chamfer"] = False
+    page["quote_field_ships_in_days"] = 14
+    auth.remember_customer_inputs()
     page["quote_field_chamfer"] = None
     page["quote_field_ships_in_days"] = None
     payload = dict(page.auth)
@@ -141,3 +144,11 @@ def test_cookie_pause_restores_canonical_choices_after_widget_cleanup(page, monk
     assert page["quote_field_ships_in_days"] == 14
     assert page["quote_field_paddle_dia"] == 4.0
     assert page.cart == [{"quantity": 2}]
+
+
+def test_current_cleared_input_is_not_replaced_by_an_old_snapshot(page):
+    page["phase1g_form_snapshot"] = {"paddle_dia": 3.0}
+    page["quote_field_paddle_dia"] = None
+    auth.remember_customer_inputs()
+    auth._queue_cookie(dict(page.auth))
+    assert page["_auth_cookie_pending"]["customer_inputs"]["quote_field_paddle_dia"] is None

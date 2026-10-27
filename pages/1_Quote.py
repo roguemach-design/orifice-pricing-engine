@@ -19,6 +19,7 @@ from auth import (
     current_user_id_hint,
     is_logged_in,
     render_auth_sidebar,
+    remember_customer_inputs,
 )
 from drawing_intake.checkout_context import attest_context, selected_part_context
 from drawing_intake.checkout_recovery import (
@@ -797,6 +798,7 @@ with st.container(key="configurator_starter", border=False):
         else:
             st.caption("Manage your orders and quote cart")
             if st.button("Sign in", key="starter_sign_in", type="secondary"):
+                remember_customer_inputs()
                 _starter_sign_in()
 
 starter_notice = None
@@ -813,7 +815,8 @@ if not drawing_access_allowed:
             "Upload drawing", icon=":material/upload:", type="primary",
             key="drawing_sign_in_cta", disabled=not DRAWING_ASSISTED_ENABLED or is_logged_in(),
         ):
-            _starter_sign_in()
+            remember_customer_inputs()
+        _starter_sign_in()
 
 if drawing_access_allowed:
     with starter_upload:

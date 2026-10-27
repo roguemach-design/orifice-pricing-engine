@@ -159,13 +159,24 @@ def _cookie_set(payload: dict) -> None:
     _sync_cookie()
 
 
-def _queue_cookie(payload):
-    # Widget cleanup can occur during a dialog/component interruption. Keep
-    # the last complete canonical form values outside widget-owned state.
-    customer_inputs = {k: st.session_state[k] for k in list(st.session_state)
-                       if k.startswith("quote_field_")}
+def _customer_inputs():
+    values = {k: st.session_state[k] for k in list(st.session_state)
+              if k.startswith("quote_field_")}
     for field, value in st.session_state.get("phase1g_form_snapshot", {}).items():
-        customer_inputs["quote_field_" + field] = value
+        values.setdefault("quote_field_" + field, value)
+    return values
+
+
+def remember_customer_inputs() -> None:
+    """Capture current edits before opening the sign-in dialog."""
+    st.session_state["_auth_signin_inputs"] = _customer_inputs()
+
+
+def _queue_cookie(payload):
+    # Keep values outside widget-owned state during component interruptions.
+    customer_inputs = st.session_state.pop("_auth_signin_inputs", None)
+    if customer_inputs is None:
+        customer_inputs = _customer_inputs()
     st.session_state["_auth_cookie_pending"] = {
         "id": secrets.token_hex(12), "payload": payload, "customer_inputs": customer_inputs,
         "expires": (datetime.now(timezone.utc) + timedelta(days=COOKIE_TTL_DAYS)).isoformat(),
@@ -432,6 +443,8 @@ def _render_connection_debug() -> None:
 
 def render_auth_sidebar(*, show_debug: bool = False, placement: str = "default") -> None:
     from customer_navigation import render_customer_shell
+    if placement == "default":
+        st.session_state.pop("_auth_signin_inputs", None)
     if placement in ("default", "deferred"):
         render_customer_shell()
     # ✅ IMPORTANT: restore BEFORE widgets
