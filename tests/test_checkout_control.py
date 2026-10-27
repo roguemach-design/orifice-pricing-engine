@@ -158,3 +158,11 @@ def test_preselector_test_completion_and_replay_preserve_frozen_provenance(sandb
     assert sandbox.deliveries[-1][0]['customer_email']=='owner@example.test'
     if historical_frozen:
         assert sandbox.repo.revision(revision_before['id']) == revision_before
+
+
+def test_customer_api_key_cannot_gain_mode_control_even_if_owner_config_is_misbound(sandbox,monkeypatch):
+    monkeypatch.setattr(api_app,'ADMIN_API_KEY','test-ui-key')
+    auth={'x-api-key':'test-ui-key'}
+    assert sandbox.client.get('/admin/checkout-control',headers=auth).status_code==503
+    assert sandbox.client.put('/admin/checkout-control',headers=auth,json={
+        'requested_mode':'TEST','expected_version':1,'confirmation':'APPLY TEST'}).status_code==503

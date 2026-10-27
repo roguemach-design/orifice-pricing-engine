@@ -1270,19 +1270,27 @@ def checkout_recovery(
 # ----------------------------
 # Checkout endpoints
 # ----------------------------
+def _distinct_checkout_owner_key():
+    if not ADMIN_API_KEY or ADMIN_API_KEY == API_KEY:
+        raise HTTPException(503, "A separate owner credential is required for Checkout Control.")
+
+
 class CheckoutModeChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     requested_mode: Literal["CLOSED", "TEST", "LIVE"]
-    expected_version: int
+    expected_version: int = Field(ge=1, strict=True)
     confirmation: str
 
 
 @app.get("/admin/checkout-control", dependencies=[Depends(_rate_limit_admin)])
 def admin_checkout_control():
+    _distinct_checkout_owner_key()
     return _checkout_control_status()
 
 
 @app.put("/admin/checkout-control", dependencies=[Depends(_rate_limit_admin)])
 def admin_apply_checkout_control(change: CheckoutModeChange):
+    _distinct_checkout_owner_key()
     from checkout_control import apply
     return apply(_checkout_mode_database(), readiness=_checkout_control_readiness(), **change.model_dump())
 
