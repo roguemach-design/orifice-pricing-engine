@@ -418,10 +418,14 @@ def test_configured_cookie_name_persists_and_restores_session(monkeypatch, confi
     payload = {"access_token": "synthetic-access", "refresh_token": "synthetic-refresh", "email": "buyer@example.com"}
     cookies = {}
 
-    def save_cookie(name, value, **kwargs):
-        assert name == expected_name
-        assert kwargs["expires_at"].tzinfo is not None
-        cookies[name] = value
+    def component(**kwargs):
+        if kwargs["method"] == "set":
+            assert kwargs["cookie"] == expected_name
+            assert kwargs["options"]["secure"] is True
+            assert kwargs["options"]["sameSite"] == "lax"
+            cookies[expected_name] = kwargs["value"]
+            return True
+        return dict(cookies)
 
     try:
         with monkeypatch.context() as patch:
@@ -429,7 +433,7 @@ def test_configured_cookie_name_persists_and_restores_session(monkeypatch, confi
             importlib.reload(auth)
             state = AttrDict()
             patch.setattr(auth, "st", SimpleNamespace(session_state=state, context=SimpleNamespace(cookies=cookies)))
-            patch.setattr(auth, "_cookie_mgr", lambda: SimpleNamespace(set=save_cookie))
+            patch.setattr(auth, "_cookie_component", component)
             auth._cookie_set(payload)
             auth._restore_auth_from_cookie_if_needed()
             assert state.auth["access_token"] == payload["access_token"]
