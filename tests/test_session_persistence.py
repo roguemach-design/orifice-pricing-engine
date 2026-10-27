@@ -121,3 +121,23 @@ def test_logout_revokes_current_provider_session_and_confirms_browser_removal(pa
     assert calls == ["bind", {"scope": "local"}]
     assert auth.auth_headers() == {} and not page.auth["refresh_token"]
     assert page.cart and page.configuration
+
+
+def test_cookie_pause_restores_canonical_choices_after_widget_cleanup(page, monkeypatch):
+    page["phase1g_form_snapshot"] = {"chamfer": False, "ships_in_days": 14, "paddle_dia": 4.0}
+    page["quote_field_chamfer"] = None
+    page["quote_field_ships_in_days"] = None
+    payload = dict(page.auth)
+    monkeypatch.setattr(auth, "_cookie_component", lambda **kw: None)
+    with pytest.raises(Paused):
+        auth._cookie_set(payload)
+    page.pop("quote_field_chamfer")
+    page.pop("quote_field_ships_in_days")
+    monkeypatch.setattr(auth, "_cookie_component", lambda **kw: True if kw["method"] == "set"
+                        else {auth.COOKIE_NAME: payload})
+    auth._sync_cookie()
+    auth._restore_auth_from_cookie_if_needed()
+    assert page["quote_field_chamfer"] is False
+    assert page["quote_field_ships_in_days"] == 14
+    assert page["quote_field_paddle_dia"] == 4.0
+    assert page.cart == [{"quantity": 2}]

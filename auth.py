@@ -160,8 +160,14 @@ def _cookie_set(payload: dict) -> None:
 
 
 def _queue_cookie(payload):
+    # Widget cleanup can occur during a dialog/component interruption. Keep
+    # the last complete canonical form values outside widget-owned state.
+    customer_inputs = {k: st.session_state[k] for k in list(st.session_state)
+                       if k.startswith("quote_field_")}
+    for field, value in st.session_state.get("phase1g_form_snapshot", {}).items():
+        customer_inputs["quote_field_" + field] = value
     st.session_state["_auth_cookie_pending"] = {
-        "id": secrets.token_hex(12), "payload": payload,
+        "id": secrets.token_hex(12), "payload": payload, "customer_inputs": customer_inputs,
         "expires": (datetime.now(timezone.utc) + timedelta(days=COOKIE_TTL_DAYS)).isoformat(),
     }
 
@@ -192,6 +198,7 @@ def _sync_cookie():
     if acknowledged is True:
         observed = _cookie_component(method="getAll", key="auth_cookie_verify_" + ident, default=None)
     if observed is not None and _decode_cookie(observed.get(COOKIE_NAME)) == payload:
+        st.session_state["_auth_resume_inputs"] = operation.get("customer_inputs", {})
         del st.session_state["_auth_cookie_pending"]
         st.session_state["_auth_cookie_bootstrapped"] = True
         # Component replies can rerun only the sign-in dialog fragment. Resume
@@ -220,6 +227,8 @@ def _cookie_clear() -> None:
 
 def _restore_auth_from_cookie_if_needed() -> None:
     _ensure_auth_state()
+    for key, value in st.session_state.pop("_auth_resume_inputs", {}).items():
+        st.session_state[key] = value
     _sync_cookie()
 
     if st.session_state.auth.get("access_token"):
