@@ -106,7 +106,7 @@ def test_overview_cards_ranges_five_recent_and_navigation(monkeypatch):
         next(r for r in app.radio if r.label == 'Sales period').set_value(label).run()
         assert not app.exception
         assert any('LIVE paid order total · $0.00' in m.value for m in app.markdown)
-    assert next(r for r in app.radio if r.label == 'Workspace').options == ['Overview','Orders','Pricing & Availability','Customer Journey']
+    assert next(r for r in app.radio if r.label == 'Workspace').options == ['Overview','Orders','Checkout Control','Pricing & Availability','Customer Journey']
     next(b for b in app.button if b.label == 'View All Orders').click().run()
     assert app.session_state['mc_nav'] == 'Orders'
 

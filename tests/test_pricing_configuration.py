@@ -20,6 +20,11 @@ def client(monkeypatch):
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
     api.Base.metadata.create_all(engine)
+    from checkout_control_fixture import install_control
+    install_control(engine)
+    monkeypatch.setattr(api, "engine", engine)
+    monkeypatch.setattr(api, "_jwk_client", object())
+    monkeypatch.setattr(api, "SUPABASE_JWT_ISSUER", "synthetic-issuer")
     factory = sessionmaker(bind=engine)
     monkeypatch.setattr(api, "SessionLocal", factory)
     monkeypatch.setattr(api, "ADMIN_API_KEY", "synthetic-owner")

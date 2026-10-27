@@ -71,6 +71,9 @@ purchasing_access = checkout_access(
     API_BASE, auth_headers(), owner_test_allowed=owner_test_checkout_allowed,
     owner_acceptance=OWNER_ACCEPTANCE_MODE,
 )
+if purchasing_access.get("available") and purchasing_access.get("mode") in {"test", "owner_test"}:
+    st.warning("TEST / NOT A REAL SALE — simulated purchase; no manufacturing or shipment.")
+
 owner_checkout_allowed = purchasing_access["available"]
 
 checkout_return = st.query_params.get("checkout")
@@ -577,7 +580,7 @@ with c2:
     st.caption("Prices are revalidated before Stripe checkout.")
     if OWNER_ACCEPTANCE_MODE and not owner_checkout_allowed:
         st.caption(
-            "Checkout is currently closed."
+            "Purchasing is currently unavailable."
         )
     if st.button(
         "💳 Checkout All Items",

@@ -54,7 +54,8 @@ def email_html(context, url, *, csrf=None, pdf_url=None):
         else f'<div class="attachment">PDF attachment · {e(context["filename"])}</div>'
     )
     return page(
-        "<h1>Your O-Plate drawing is ready for confirmation.</h1>"
+        ("<p><strong>TEST / NOT A REAL SALE. No manufacturing or shipment.</strong></p>" if context.get("test_order") else "")
+        + "<h1>Your O-Plate drawing is ready for confirmation.</h1>"
         + details(context)
         + "<p>Please review the attached drawing carefully.</p>"
         + attachment
@@ -72,7 +73,7 @@ def success_html(context, approved_at, historical=False):
         else ""
     )
     return page(
-        '<p class="eyebrow">DRAWING APPROVED</p><h1>YOUR ORDER IS IN PRODUCTION</h1>'
+        ('<p class="eyebrow">TEST / NOT A REAL SALE</p><h1>TEST DRAWING APPROVED — NO MANUFACTURING</h1>' if context.get("test_order") else '<p class="eyebrow">DRAWING APPROVED</p><h1>YOUR ORDER IS IN PRODUCTION</h1>')
         + "<p>Your O-Plate drawing has been approved.</p>"
         + details(context)
         + f'<p>Revision {e(context["revision"])} was approved on {e(display_date)}.</p>'
@@ -104,7 +105,7 @@ def mime_email(context, url, pdf):
     msg = EmailMessage()
     msg["From"] = "O-Plates prototype <no-send@example.invalid>"
     msg["To"] = "prototype-customer@example.invalid"
-    msg["Subject"] = (
+    msg["Subject"] = ("[TEST / NOT A REAL SALE] " if context.get("test_order") else "") + (
         f'O-Plates drawing confirmation — {context["drawing"]} {context["revision"]}'
     )
     msg.set_content(

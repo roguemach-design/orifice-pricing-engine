@@ -43,6 +43,11 @@ def send_confirmation(repo, snapshot, revision_id, *, environ=None, post=request
     key = env.get("SENDGRID_API_KEY", "")
     recipient = snapshot.get("customer_email", "")
     sender = env.get("FROM_EMAIL", "orders@o-plates.com")
+    payment = snapshot.get("quote_payload", {}).get("_payment", {})
+    is_test = payment.get("mode") == "owner_test"
+    if is_test and (not payment.get("recipient") or recipient != payment["recipient"]
+                    or payment.get("owner_id") != snapshot.get("customer_id")):
+        raise WorkflowError("authorized TEST recipient binding required")
     if (
         not key
         or sender not in {"orders@o-plates.com", "no-reply@o-plates.com"}

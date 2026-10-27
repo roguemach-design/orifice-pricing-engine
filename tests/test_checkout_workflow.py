@@ -61,6 +61,10 @@ def database(monkeypatch):
         poolclass=StaticPool,
     )
     api_app.Base.metadata.create_all(bind=engine)
+    from checkout_control_fixture import install_control
+    install_control(engine)
+    monkeypatch.setattr(api_app, "engine", engine)
+    monkeypatch.setattr(api_app, "checkout_mode_engine", engine)
     factory = sessionmaker(bind=engine)
     monkeypatch.setattr(api_app, "SessionLocal", factory)
     yield factory
@@ -81,6 +85,8 @@ def checkout_client(monkeypatch, database):
         "_calculate_quote_with_db_knobs",
         authoritative_result,
     )
+    monkeypatch.setattr(api_app, "_jwk_client", object())
+    monkeypatch.setattr(api_app, "SUPABASE_JWT_ISSUER", "synthetic-issuer")
     original_decode = api_app._decode_supabase_user_id_from_bearer
     monkeypatch.setattr(api_app, "_decode_supabase_user_id_from_bearer",
                         lambda value: "signed-customer" if value == "Bearer synthetic" else original_decode(value))
@@ -626,7 +632,7 @@ def test_staging_rejects_live_stripe_key(monkeypatch, checkout_client):
         headers={"Authorization": "Bearer synthetic", "x-api-key": "test-ui-key"},
     )
 
-    assert response.status_code == 500
+    assert response.status_code == 503
     assert response.json()["detail"] == "Service temporarily unavailable. Please try again."
 
 
@@ -641,7 +647,7 @@ def test_checkout_fails_closed_when_app_environment_is_not_explicit(
         headers={"Authorization": "Bearer synthetic", "x-api-key": "test-ui-key"},
     )
 
-    assert response.status_code == 500
+    assert response.status_code == 503
     assert response.json()["detail"] == (
         "Service temporarily unavailable. Please try again."
     )
@@ -658,7 +664,7 @@ def test_checkout_fails_closed_when_return_url_is_not_explicit(
         headers={"Authorization": "Bearer synthetic", "x-api-key": "test-ui-key"},
     )
 
-    assert response.status_code == 500
+    assert response.status_code == 503
     assert response.json()["detail"] == (
         "Service temporarily unavailable. Please try again."
     )
@@ -1394,7 +1400,7 @@ def test_production_checkout_rejects_test_key_before_creating_session(monkeypatc
     monkeypatch.setattr(api_app, "APP_ENV", "production")
     calls = install_idempotent_stripe(monkeypatch)
     response = checkout_client.post("/checkout/create", json=checkout_body(), headers={"Authorization": "Bearer synthetic", "x-api-key": "test-ui-key"})
-    assert response.status_code == 500
+    assert response.status_code == 503
     assert response.json()["detail"] == "Service temporarily unavailable. Please try again."
     assert not calls
 

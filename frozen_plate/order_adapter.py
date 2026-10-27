@@ -24,6 +24,7 @@ def specification_from_order(order_snapshot, *, line_index, part_identifier):
     # No guessed geometry, tolerance or material defaults. Full input snapshot is
     # retained for provenance; line index is bound to this immutable source snapshot.
     return spec, {
+        **({"_payment": payload["_payment"]} if payload.get("_payment", {}).get("mode") == "owner_test" else {}),
         "order_id": order_snapshot["id"],
         "customer_id": order_snapshot["customer_id"],
         "line_index": line_index,

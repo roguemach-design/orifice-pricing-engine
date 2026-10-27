@@ -109,6 +109,21 @@ class OwnerClient:
             raise PortalError({401: "authorization", 403: "authorization", 429: "rate"}.get(response.status_code, "service"))
         return response.json()
 
+    def checkout_mode_write(self, body):
+        if not self.credential:
+            raise PortalError("authorization")
+        try:
+            response = requests.put(
+                self.base + "/admin/checkout-control", headers={"x-api-key": self.credential},
+                json=body, timeout=(10, 30), allow_redirects=False)
+        except requests.RequestException:
+            raise PortalError("service") from None
+        if response.status_code != 200:
+            if response.status_code in (409, 422):
+                return {"error": response.json().get("detail", "Mode was not applied.")}
+            raise PortalError({401: "authorization", 403: "authorization"}.get(response.status_code, "service"))
+        return response.json()
+
     def artifact(self, revision, kind, filename):
         rid = revision["id"]
         path = f"/admin/frozen-plates/revisions/{rid}/" + (

@@ -28,7 +28,7 @@ def test_no_guest_checkout_even_with_ui_key(monkeypatch, checkout_client, databa
 
 
 @pytest.mark.parametrize("acceptance", [None, "true", "false"])
-def test_live_owner_acceptance_and_public_readiness_are_independent(sandbox, monkeypatch, acceptance):
+def test_live_environment_readiness_cannot_override_database_test_mode(sandbox, monkeypatch, acceptance):
     monkeypatch.setenv("FROZEN_PLATE_LIVE_CHECKOUT_READY", "true")
     monkeypatch.setenv("OPLATES_STRIPE_TEST_VALIDATION_WINDOW", "false")
     if acceptance is None:
@@ -38,9 +38,9 @@ def test_live_owner_acceptance_and_public_readiness_are_independent(sandbox, mon
     owner = sandbox.client.get("/checkout/availability", headers=headers(mode=False)).json()
     public = sandbox.client.get("/checkout/availability").json()
     customer = sandbox.client.get("/checkout/availability", headers=headers("customer", mode=False)).json()
-    assert owner == {"available": True, "mode": "live"}
-    assert public["available"] is (acceptance == "false")
-    assert customer["available"] is (acceptance == "false")
+    assert owner == {"available": True, "mode": "owner_test"}
+    assert public["available"] is False
+    assert customer["available"] is False
     assert not sandbox.calls
     # Readiness never replaces authentication on the creation API.
     assert sandbox.client.post("/checkout/create", json=checkout_body(),
@@ -83,7 +83,7 @@ def test_sign_in_at_checkout_preserves_configuration_cart_and_resumes(monkeypatc
     monkeypatch.setattr(auth, "sb", lambda: SimpleNamespace(auth=SimpleNamespace(
         verify_otp=lambda payload: SimpleNamespace(session=SimpleNamespace(
             access_token=_jwt("signed-customer"), refresh_token=None), user=None))))
-    monkeypatch.setattr(requests, "get", lambda *a, **k: response(CONFIG))
+    monkeypatch.setattr(requests, "get", lambda url, **k: response({"available": True, "mode": "test"}) if url.endswith("/checkout/availability") else response(CONFIG))
     calls = []
     def post(url, **kwargs):
         calls.append((url, copy.deepcopy(kwargs)))

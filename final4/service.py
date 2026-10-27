@@ -77,6 +77,8 @@ class DerivedService:
         }:
             raise WorkflowError("complete exact parent association required")
         r, a, contents = self.repo._verified(db, association["revision_id"])
+        if require_current and json.loads(r["source_json"]).get("_payment", {}).get("mode") == "owner_test":
+            raise WorkflowError("TEST / NOT A REAL SALE: manufacturing output is prohibited")
         p = self.repo._one(
             db, "SELECT * FROM frozen_plates WHERE id=?", (r["plate_id"],)
         )
