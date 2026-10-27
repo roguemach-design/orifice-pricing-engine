@@ -174,6 +174,8 @@ def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded, tm
             expect(page.get_by_text("TEST DRAWING APPROVED — NOT A REAL SALE", exact=True)).to_be_visible(timeout=20000)
             assert state["sends"] == 1
             assert state["protected"] and all(state["protected"])
+            saved_cookies = [c for c in context.cookies() if c["name"] == "oplates_auth"]
+            assert len(saved_cookies) == 1
             page.get_by_role("button", name="Log out", exact=True).click()
             expect(page.get_by_text("Signed in as:", exact=False)).to_have_count(0, timeout=20000)
             expect(page.get_by_text("TEST DRAWING APPROVED — NOT A REAL SALE", exact=True)).to_have_count(0)
@@ -183,6 +185,15 @@ def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded, tm
             expect(page.get_by_text("TEST DRAWING APPROVED — NOT A REAL SALE", exact=True)).to_have_count(0)
             expect(page.get_by_role("button", name="Send code", exact=True)).to_be_attached(timeout=20000)
             assert state["revoked"]
+            assert not any(c["name"] == "oplates_auth" for c in context.cookies())
+            # A restored copy of the revoked credential cannot regain access.
+            protected_before = len(state["protected"])
+            context.add_cookies(saved_cookies)
+            page.goto(state["ui"] + "/My_Orders")
+            expect(page.get_by_role("button", name="Send code", exact=True)).to_be_attached(timeout=20000)
+            expect(page.get_by_text("Signed in as:", exact=False)).to_have_count(0)
+            assert len(state["protected"]) == protected_before
+            assert state["sends"] == 1
         finally:
             print("Synthetic journey page:", page.locator("body").inner_text(timeout=2000))
             page.screenshot(path=str(tmp_path / "auth-journey.png"), full_page=True)
