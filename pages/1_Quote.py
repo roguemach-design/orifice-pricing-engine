@@ -816,7 +816,7 @@ if not drawing_access_allowed:
             key="drawing_sign_in_cta", disabled=not DRAWING_ASSISTED_ENABLED or is_logged_in(),
         ):
             remember_customer_inputs()
-        _starter_sign_in()
+            _starter_sign_in()
 
 if drawing_access_allowed:
     with starter_upload:
