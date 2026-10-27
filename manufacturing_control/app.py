@@ -962,7 +962,10 @@ def render_owner():
     with st.sidebar:
         st.caption("ROGUE MACHINE / O-PLATES")
         st.subheader("Manufacturing Control")
-        primary = ["Overview", "Orders", "Checkout Control", "Pricing & Availability", "Customer Journey"]
+        if st.session_state.get("mc_nav") == "Checkout Control":
+            st.session_state["mc_nav"] = "Pricing & Availability"
+            st.session_state["mc_pricing_workspace"] = "Checkout Control"
+        primary = ["Overview", "Orders", "Pricing & Availability", "Customer Journey"]
         nav = st.session_state.get("mc_nav", "Overview")
         st.session_state["mc_primary_nav"] = nav if nav in primary else None
         st.radio("Workspace", primary, key="mc_primary_nav", index=None,
@@ -995,10 +998,6 @@ def render_owner():
     st.sidebar.button("Refresh", on_click=refresh, width="stretch")
     client = OwnerClient(os.environ.get("API_BASE", ""), st.session_state["mc_key"])
     try:
-        if st.session_state.get("mc_nav") == "Checkout Control":
-            from .checkout import run
-            run(client)
-            return
         if st.session_state.get("mc_nav") == "Customer Journey":
             from .journey import run as journey_workspace
             journey_workspace(client)
