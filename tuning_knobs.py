@@ -109,6 +109,12 @@ MILL_LABOR_PER_HR = 150
 MILL_SPEED_IPM = 28
 CHAMFER_SPEED_IPM = 28
 
+# Commercial calibration allowances, separate from estimated cycle time.
+PRECISION_BORE_ALLOWANCE_PER_IN = 32.50
+CHAMFER_ALLOWANCE_PER_IN = 5.00
+# One future service only; not part of purchasable LEAD_TIME_MULTIPLIER.
+TODAY_2_DAY_MULTIPLIER = 3.3
+
 LOAD_TIME_MINS = 6
 
 INSPECTION_MINS_BY_TOL = {

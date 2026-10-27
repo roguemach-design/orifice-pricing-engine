@@ -191,6 +191,7 @@ _CFG_BASELINE = {
     "MATERIAL_ENABLED": copy.deepcopy(getattr(cfg, "MATERIAL_ENABLED", {})),
     "THICKNESS_ENABLED_BY_MATERIAL": copy.deepcopy(getattr(cfg, "THICKNESS_ENABLED_BY_MATERIAL", {})),
     "LEAD_TIME_MULTIPLIER": copy.deepcopy(getattr(cfg, "LEAD_TIME_MULTIPLIER", {})),
+    "LEAD_TIME_MULTIPLIER_MASTER": copy.deepcopy(cfg.LEAD_TIME_MULTIPLIER_MASTER),
     "LEAD_TIME_ENABLED": copy.deepcopy(getattr(cfg, "LEAD_TIME_ENABLED", {})),
     "DEFAULT_LEAD_TIME_DAYS": getattr(cfg, "DEFAULT_LEAD_TIME_DAYS", 21),
     "WEIGHT_MULTIPLIER_BY_MATERIAL": copy.deepcopy(getattr(cfg, "WEIGHT_MULTIPLIER_BY_MATERIAL", {})),
@@ -919,7 +920,7 @@ def _apply_cfg_from_db_config(config_json: dict) -> None:
     cfg.PRICE_PER_SQ_IN = final_ppsi
 
     # Lead time multiplier: filter baseline master by enabled keys
-    master_lt = {int(k): v for k, v in config_json.get("lead_time_multipliers", _CFG_BASELINE["LEAD_TIME_MULTIPLIER"]).items()}
+    master_lt = {int(k): v for k, v in config_json.get("lead_time_multipliers", _CFG_BASELINE["LEAD_TIME_MULTIPLIER_MASTER"]).items()}
     cfg.LEAD_TIME_MULTIPLIER = {
         int(d): float(master_lt[int(d)])
         for d, enabled in cfg.LEAD_TIME_ENABLED.items()
@@ -946,7 +947,8 @@ def _calculate_quote_with_db_knobs(inputs: QuoteInputs) -> dict:
         finally:
             _restore_cfg_baseline()
 
-    result["pricing_config_version"] = version
+    from pricing_calibration import MODEL_VERSION
+    result["pricing_config_version"] = f"{version}:{MODEL_VERSION}"
     return result
 
 # ----------------------------
