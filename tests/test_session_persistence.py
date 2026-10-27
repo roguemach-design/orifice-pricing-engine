@@ -152,3 +152,15 @@ def test_current_cleared_input_is_not_replaced_by_an_old_snapshot(page):
     auth.remember_customer_inputs()
     auth._queue_cookie(dict(page.auth))
     assert page["_auth_cookie_pending"]["customer_inputs"]["quote_field_paddle_dia"] is None
+
+
+def test_cookie_write_retry_keeps_the_original_customer_inputs(page):
+    page["quote_field_ships_in_days"] = 21
+    payload = dict(page.auth)
+    auth._queue_cookie(payload)
+    operation_id = page["_auth_cookie_pending"]["id"]
+    page["quote_field_ships_in_days"] = None
+    auth._queue_cookie(payload)
+    pending = page["_auth_cookie_pending"]
+    assert pending["id"] != operation_id
+    assert pending["customer_inputs"]["quote_field_ships_in_days"] == 21

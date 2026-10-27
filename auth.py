@@ -175,6 +175,9 @@ def remember_customer_inputs() -> None:
 def _queue_cookie(payload):
     # Keep values outside widget-owned state during component interruptions.
     customer_inputs = st.session_state.pop("_auth_signin_inputs", None)
+    previous = st.session_state.get("_auth_cookie_pending")
+    if previous and previous.get("payload") == payload:
+        customer_inputs = previous.get("customer_inputs", customer_inputs)
     if customer_inputs is None:
         customer_inputs = _customer_inputs()
     st.session_state["_auth_cookie_pending"] = {
