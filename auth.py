@@ -119,9 +119,10 @@ def _cookie_get() -> Optional[dict]:
         # the actual quote-origin browser cookie, not a cached Python mirror.
         raw_cookies = _cookie_component(method="getAll", key="auth_cookie_restore", default=None)
         if raw_cookies is None:
-            st.info("Restoring your session…")
-            _retain_customer_inputs()
-            st.stop()
+            # No identity is available yet. Keep the anonymous configurator
+            # mounted while the component replies; protected routes still
+            # require is_logged_in()/backend authorization.
+            return None
         st.session_state["_auth_cookie_bootstrapped"] = True
         raw = raw_cookies.get(COOKIE_NAME)
     return _decode_cookie(raw)
@@ -192,6 +193,11 @@ def _sync_cookie():
     if observed is not None and _decode_cookie(observed.get(COOKIE_NAME)) == payload:
         del st.session_state["_auth_cookie_pending"]
         st.session_state["_auth_cookie_bootstrapped"] = True
+        # Component replies can rerun only the sign-in dialog fragment. Resume
+        # the complete app after persistence so its modal closes and prices /
+        # navigation are recomputed with the authenticated identity.
+        _retain_customer_inputs()
+        st.rerun()
         return
     if observed is not None:
         st.warning("Your browser has not saved the session. Allow cookies for this site, then retry.")

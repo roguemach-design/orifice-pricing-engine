@@ -432,7 +432,7 @@ def test_configured_cookie_name_persists_and_restores_session(monkeypatch, confi
             patch.setenv("AUTH_COOKIE_NAME", configured_name)
             importlib.reload(auth)
             state = AttrDict()
-            patch.setattr(auth, "st", SimpleNamespace(session_state=state, context=SimpleNamespace(cookies=cookies)))
+            patch.setattr(auth, "st", SimpleNamespace(session_state=state, context=SimpleNamespace(cookies=cookies), rerun=lambda: None))
             patch.setattr(auth, "_cookie_component", component)
             auth._cookie_set(payload)
             auth._restore_auth_from_cookie_if_needed()

@@ -134,7 +134,7 @@ def sign_in(scope):
 
 
 @pytest.mark.parametrize("embedded", [False, True])
-def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded):
+def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded, tmp_path):
     state, api = customer_app
     with sync_playwright() as p:
         browser = p.chromium.launch()
@@ -147,7 +147,9 @@ def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded):
             scope.get_by_role("spinbutton", name="Plate outside diameter (in.)", exact=True).fill("4")
             scope.get_by_role("spinbutton", name="Plate outside diameter (in.)", exact=True).press("Tab")
             sign_in(scope)
+            expect(scope.get_by_role("dialog")).to_have_count(0, timeout=20000)
             expect(scope.get_by_role("spinbutton", name="Plate outside diameter (in.)", exact=True)).to_have_value("4.000")
+            expect(scope.get_by_test_id("stMetric")).to_have_count(2)
             scope.get_by_role("button", name="Add another plate", exact=True).click()
             expect(scope.get_by_role("heading", name="Line items (1)", exact=True)).to_be_visible()
             scope.get_by_role("link", name="My Orders", exact=True).click()
@@ -171,4 +173,6 @@ def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded):
             expect(page.get_by_role("button", name="Send code", exact=True)).to_be_visible(timeout=20000)
             assert state["revoked"]
         finally:
+            page.screenshot(path=str(tmp_path / "auth-journey.png"), full_page=True)
+            (tmp_path / "auth-journey.html").write_text(page.content())
             browser.close()

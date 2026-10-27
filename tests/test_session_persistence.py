@@ -26,7 +26,7 @@ def page(monkeypatch):
     def stop():
         raise Paused()
     monkeypatch.setattr(auth, "st", SimpleNamespace(session_state=state, context=SimpleNamespace(cookies={}),
-        stop=stop, info=lambda *a: None, warning=lambda *a: None, button=lambda *a, **k: False))
+        stop=stop, rerun=lambda: None, info=lambda *a: None, warning=lambda *a: None, button=lambda *a, **k: False))
     return state
 
 
@@ -38,6 +38,14 @@ def test_disposable_sdk_cannot_rotate_in_background(monkeypatch):
     auth.sb()
     options = calls[0]["options"]
     assert options.auto_refresh_token is False and options.persist_session is False
+
+
+def test_pending_initial_cookie_read_keeps_anonymous_page_mounted(page, monkeypatch):
+    page.auth = {}
+    monkeypatch.setattr(auth, "_cookie_component", lambda **kw: None)
+    assert not auth.is_logged_in()
+    assert auth.auth_headers() == {}
+    assert page.configuration and page.cart
 
 
 def test_browser_ack_and_readback_are_required_before_continuation(page, monkeypatch):
