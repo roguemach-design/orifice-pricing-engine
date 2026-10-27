@@ -16,6 +16,8 @@ from typing import Any, Dict, List
 import streamlit as st
 import requests
 
+from checkout_geometry import checkout_geometry_error
+
 from auth import (
     auth_headers,
     current_user_id_hint,
@@ -574,7 +576,11 @@ with c1:
         journey_event("pdf_quote", "success")
     st.caption("Downloads a PDF summary of the current cart.")
 
+cart_geometry_errors = [(i, checkout_geometry_error(line["inputs"])) for i, line in enumerate(line_views, 1)]
+cart_geometry_errors = [(i, error) for i, error in cart_geometry_errors if error]
 with c2:
+    for i, error in cart_geometry_errors:
+        st.warning(f"Plate {i}: {error} Cart contents are retained for review.")
     if not owner_checkout_allowed:
         journey_event("checkout", "blocked", "system_restriction")
     st.caption("Prices are revalidated before Stripe checkout.")
@@ -585,7 +591,7 @@ with c2:
     if st.button(
         "💳 Checkout All Items",
         use_container_width=True,
-        disabled=not owner_checkout_allowed or not recovery_review_current,
+        disabled=not owner_checkout_allowed or not recovery_review_current or bool(cart_geometry_errors),
     ):
         cart_items = [lv["inputs"] for lv in line_views]
         fingerprint = hashlib.sha256(

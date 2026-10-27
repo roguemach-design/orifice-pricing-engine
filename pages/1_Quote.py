@@ -14,6 +14,8 @@ import requests
 import streamlit as st
 import streamlit.components.v1 as components
 
+from checkout_geometry import STANDARD_CHAMFER, STANDARD_DESCRIPTION, checkout_geometry_error
+
 from auth import (
     auth_headers,
     current_user_id_hint,
@@ -276,6 +278,7 @@ _FORM_KEYS = {
         "ships_in_days",
         "handle_label",
         "chamfer_width",
+        *STANDARD_CHAMFER,
     )
 }
 
@@ -560,6 +563,7 @@ default_form_values = {
     ),
     "handle_label": "",
     "chamfer_width": None,
+    **{field: None for field in STANDARD_CHAMFER},
 }
 
 
@@ -1247,18 +1251,20 @@ with right:
                 st.caption(
                     "Enter a chamfer width and press Enter or click outside the field to apply it."
                 )
-            if OWNER_ACCEPTANCE_MODE and not drawing_mode:
-                # Optional explicit geometry remains supported, but the public
-                # YES/NO + size contract never requires hidden legacy fields.
-                chamfer_details = {
-                    "chamfer_angle_degrees": st.session_state.get("staging_chamfer_angle"),
-                    "chamfer_side": st.session_state.get("staging_chamfer_side"),
-                    "flow_orientation": st.session_state.get("staging_chamfer_flow"),
-                    "chamfer_width_definition": st.session_state.get("staging_chamfer_definition"),
-                }
-                chamfer_details = {
-                    key: value for key, value in chamfer_details.items() if value is not None
-                }
+            saved_standard = all(st.session_state.get(_FORM_KEYS[k]) == v for k, v in STANDARD_CHAMFER.items())
+            specification = st.radio(
+                "Chamfer specification",
+                ["Standard 45° Chamfer", "Custom / drawing review"],
+                index=0 if saved_standard else None,
+                key="quote_chamfer_specification",
+            )
+            st.caption(STANDARD_DESCRIPTION)
+            if specification == "Standard 45° Chamfer":
+                chamfer_details = dict(STANDARD_CHAMFER)
+            else:
+                st.info("Select the standard specification for instant checkout. Custom or undefined chamfers remain quote/review-only.")
+        for field in STANDARD_CHAMFER:
+            st.session_state[_FORM_KEYS[field]] = chamfer_details.get(field)
 
         st.caption("DELIVERY")
         st.caption("Lead-time selection updates the verified quote total below.")
@@ -1285,6 +1291,7 @@ current_form_values = {
     "bore_tolerance": bore_tolerance,
     "chamfer": chamfer,
     "chamfer_width": chamfer_width,
+    **{field: chamfer_details.get(field) for field in STANDARD_CHAMFER},
     "handle_label": handle_label,
     "ships_in_days": ships_in_days,
 }
@@ -1539,7 +1546,7 @@ payload_inputs = None
 if not errors and all(
     value is not None
     for field, value in current_form_values.items()
-    if field not in {"chamfer_width", "handle_hole_diameter", "handle_hole_center_from_handle_end"}
+    if field not in {"chamfer_width", "handle_hole_diameter", "handle_hole_center_from_handle_end", *STANDARD_CHAMFER}
 ) and (chamfer is not True or chamfer_width is not None):
     payload_inputs = {
         "quantity": int(quantity),
@@ -1615,8 +1622,11 @@ pkg = result.get("estimated_package_in") if result else None
 # -----------------------------
 # LEFT: Quote summary + shipping estimates (tight)
 # -----------------------------
+geometry_error = checkout_geometry_error(payload_inputs) if payload_inputs is not None else None
+if geometry_error:
+    st.warning(geometry_error + " Your entries are retained; checkout is unavailable.")
 with left:
-    preview_ready = payload_inputs is not None and not errors
+    preview_ready = payload_inputs is not None and not errors and not geometry_error
     if preview_ready:
         # Streamlit 1.64 st.html uses an HTML-only sanitizer that removes SVG.
         # Render only our generated, escaped SVG through the inline Markdown path.
@@ -1633,6 +1643,7 @@ with left:
                 bore_tolerance=float(bore_tolerance),
                 handle_label=(handle_label or "").strip() or "No label",
                 chamfer=bool(chamfer),
+                **chamfer_details,
                 chamfer_width=(
                     float(chamfer_width) if chamfer_width is not None else None
                 ),
@@ -1747,6 +1758,7 @@ with right:
         with btn_cols[1]:
             checkout_disabled = (
                 result is None
+                or bool(geometry_error)
                 or (not purchasing_access["available"])
                 or (
                     active_assisted_session is not None

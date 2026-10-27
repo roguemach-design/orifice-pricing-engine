@@ -96,10 +96,7 @@ def exercise(app, case):
         ).set_value("3/4")
     if case["chamfer"]:
         app.number_input(key="quote_field_chamfer_width").set_value(0.02)
-        app.session_state["staging_chamfer_angle"] = 45.0
-        app.session_state["staging_chamfer_side"] = "downstream"
-        app.session_state["staging_chamfer_flow"] = "left-to-right"
-        app.session_state["staging_chamfer_definition"] = "radial-angle-from-face"
+        app.radio(key="quote_chamfer_specification").set_value("Standard 45° Chamfer")
     app.run()
     assert not app.exception
 

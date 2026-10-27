@@ -1,3 +1,4 @@
+from test_checkout_workflow import quote_inputs
 """Production owner sandbox gates, credential isolation and the real digital thread."""
 import hashlib
 import hmac
@@ -105,7 +106,7 @@ def test_sandbox_never_falls_back_to_live(sandbox, monkeypatch, setting, value):
 
 @pytest.mark.parametrize("cart", [False, True])
 def test_owner_checkout_persists_test_identity(sandbox, database, cart):
-    body = checkout_body(inputs={**checkout_body()["inputs"], "chamfer": False, "chamfer_width": None})
+    body = checkout_body(inputs=quote_inputs(chamfer=False, chamfer_width=None))
     if cart:
         body = {"items": [body["inputs"]], "idempotency_key": body["idempotency_key"]}
     result = sandbox.client.post("/checkout/cart/create" if cart else "/checkout/create", json=body, headers=headers())
@@ -154,7 +155,7 @@ def test_unsigned_test_event_rejected(sandbox):
 
 
 def test_replay_uses_production_frozen_path_and_exact_approval(sandbox, database, monkeypatch):
-    body = checkout_body(inputs={**checkout_body()["inputs"], "chamfer": False, "chamfer_width": None})
+    body = checkout_body(inputs=quote_inputs(chamfer=False, chamfer_width=None))
     result = sandbox.client.post("/checkout/create", json=body, headers=headers())
     assert result.status_code == 200
     sid = result.json()["session_id"]
