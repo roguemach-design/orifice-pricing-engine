@@ -48,6 +48,9 @@ def configurator(tmp_path_factory, request):
 
         def do_GET(self):
             requests_seen.append(("GET", self.path))
+            if self.path == "/checkout/availability":
+                self.reply({"available": False, "mode": None})
+                return
             self.reply(config if self.path == "/config/active" else {},
                        200 if self.path == "/config/active" else 405)
 
@@ -105,7 +108,7 @@ def configurator(tmp_path_factory, request):
         api.server_close()
         log.close()
     assert requests_seen
-    assert set(requests_seen) <= {("GET", "/config/active"), ("POST", "/quote")}
+    assert set(requests_seen) <= {("GET", "/config/active"), ("GET", "/checkout/availability"), ("POST", "/quote")}
     assert quote_leads and set(quote_leads) <= set(config["lead_times_days"])
 
 

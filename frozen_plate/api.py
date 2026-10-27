@@ -206,7 +206,7 @@ def router(customer_auth, admin_auth, load_order, *, approval_committed=None):
         result = run(lambda: repository().approve(body.token, customer_id))
         # Approval is already committed. Staging is internal, independent and
         # never changes the customer approval response/wording or its success.
-        if approval_committed is not None:
+        if approval_committed is not None and not result["context"].get("test_order"):
             try:
                 approval_committed()
             except Exception:

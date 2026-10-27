@@ -74,6 +74,8 @@ def bounded_summary(orders, repo, *, archive_view="Active", search=None):
                 )
     for order in orders:
         order["lines"] = [line for line in lines if line["order_id"] == order["id"]]
+    production_ids = {o["id"] for o in orders if o.get("payment_mode") not in {"TEST", "OWNER TEST"}}
+    lines = [line for line in lines if line["order_id"] in production_ids]
     return {
         "orders": orders,
         "scope": SCOPE
@@ -93,7 +95,7 @@ def bounded_summary(orders, repo, *, archive_view="Active", search=None):
                 l["approved"] and l["lifecycle"] == "READY_FOR_RELEASE" for l in lines
             ),
             "sourcing_recorded": sum(bool(l["sourcing_count"]) for l in lines),
-            "record_unavailable": sum(not o["lines"] for o in orders)
+            "record_unavailable": sum(not o["lines"] for o in orders if o["id"] in production_ids)
             + sum(not l["metadata_available"] for l in lines),
             "hold": None,
             "email_reconciliation": None,

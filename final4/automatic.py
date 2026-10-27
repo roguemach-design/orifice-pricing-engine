@@ -52,15 +52,16 @@ class AutomaticStager:
         # Metadata-only discovery. Passive owner views never request staging.
         with self.service.repo.connect() as db:
             return [
-                dict(r)
+                {k: v for k, v in dict(r).items() if k != "source_json"}
                 for r in db.execute("""SELECT p.order_id,p.line_id,p.id AS plate_id,
-                r.id AS revision_id,r.spec_sha256,r.source_sha256
+                r.id AS revision_id,r.spec_sha256,r.source_sha256,r.source_json
                 FROM frozen_plates p JOIN frozen_plate_revisions r ON r.id=p.current_revision
                 JOIN frozen_plate_approvals a ON a.revision_id=r.id
                 JOIN frozen_plate_artifacts f ON f.revision_id=r.id AND f.kind='pdf'
                 WHERE a.pdf_sha256=f.sha256 AND a.spec_sha256=r.spec_sha256
                 AND a.order_id=p.order_id AND a.customer_id=p.customer_id
                 ORDER BY p.id""")
+                if json.loads(r["source_json"]).get("_payment", {}).get("mode") != "owner_test"
             ]
 
     def ensure(self, family, association):

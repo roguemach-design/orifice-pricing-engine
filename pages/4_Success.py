@@ -68,6 +68,8 @@ if order.get("status") != "completed":
         st.rerun()
     st.stop()
 
+if order.get("payment_mode") in {"TEST", "OWNER TEST"}:
+    st.warning("TEST / NOT A REAL SALE — no money collected; no manufacturing or shipment.")
 st.title("Payment received ✅")
 st.write("Thanks — your O-Plates order is confirmed.")
 

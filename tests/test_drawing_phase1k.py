@@ -192,6 +192,8 @@ def _quote_app(monkeypatch, *, checkout_enabled, confirmed=True, authorized=True
     calls = []
 
     def fake_get(url, **kwargs):
+        if url.endswith("/checkout/availability"):
+            return Response({"available": checkout_enabled and authorized, "mode": "test"})
         return Response(
             ACTIVE
             if url.endswith("/config/active")
@@ -343,6 +345,8 @@ def test_owner_cart_freezes_confirmed_line_and_reprices_each_snapshot(monkeypatc
     calls = []
 
     def fake_get(url, **kwargs):
+        if url.endswith("/checkout/availability"):
+            return Response({"available": True, "mode": "test"})
         return Response(
             {"enabled": True, "authorized": True, "user_id": "internal-user"}
         )

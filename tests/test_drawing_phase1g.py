@@ -633,6 +633,8 @@ def test_real_page_keeps_manual_pricing_and_existing_svg_when_feature_disabled(
     quote_calls = []
 
     def fake_get(url, **kwargs):
+        if url.endswith("/checkout/availability"):
+            return _Response({"available": False, "mode": None})
         assert url.endswith("/config/active")
         return _Response(active_config)
 
@@ -673,6 +675,8 @@ def test_manual_chamfer_defaults_only_on_enable_and_blocks_cleared_width(
     quote_calls = []
 
     def fake_get(url, **kwargs):
+        if url.endswith("/checkout/availability"):
+            return _Response({"available": False, "mode": None})
         assert url.endswith("/config/active")
         return _Response(active_config)
 

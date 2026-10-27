@@ -128,6 +128,14 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "")
 Base = declarative_base()
 engine = create_engine(DATABASE_URL, pool_pre_ping=True) if DATABASE_URL else None
 SessionLocal = sessionmaker(bind=engine) if engine else None
+# Reuse the existing restricted Frozen Plate Postgres identity. No new secret,
+# service or customer-facing DB permission. UI only calls the authenticated API.
+_mode_database_url = os.environ.get("FROZEN_PLATE_DATABASE_URL", "")
+checkout_mode_engine = create_engine(_mode_database_url.replace("postgres://", "postgresql://", 1), pool_pre_ping=True, connect_args={"connect_timeout": 10}) if _mode_database_url else None
+
+
+def _checkout_mode_database():
+    return checkout_mode_engine if APP_ENV == "production" else engine
 
 # Email config
 SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
@@ -322,7 +330,7 @@ def _owner_test_configuration_required() -> None:
         raise HTTPException(503, "Production confirmation configuration unavailable.") from None
 
 
-def _stripe_checkout_required(customer_id=None, checkout_mode=None) -> bool:
+def _legacy_stripe_checkout_required(customer_id=None, checkout_mode=None) -> bool:
     if checkout_mode == "owner_test":
         if not _owner_test_authorized(customer_id):
             raise HTTPException(403, "Owner sandbox checkout unavailable.")
@@ -379,6 +387,65 @@ def _stripe_checkout_required(customer_id=None, checkout_mode=None) -> bool:
     return False
 
 
+def _checkout_control_readiness():
+    test_blockers = []
+    if APP_ENV == "production":
+        checks = (
+            (STRIPE_TEST_SECRET_KEY.startswith(("sk_test_", "rk_test_")), "Stripe TEST credential is missing or is not a TEST key."),
+            (bool(STRIPE_TEST_WEBHOOK_SECRET) and STRIPE_TEST_WEBHOOK_SECRET != WEBHOOK_SECRET, "Independent TEST webhook signing secret is missing."),
+            (APP_BASE_URL.startswith("https://"), "HTTPS checkout return origin is missing."),
+            (frozen_plate_enabled(app_env=APP_ENV), "Frozen Plate production workflow is disabled."),
+            (os.environ.get("FROZEN_PLATE_EMAIL_MODE") == "send", "Confirmation email delivery mode is not send."),
+            (bool(SENDGRID_API_KEY), "Confirmation email provider credential is missing."),
+            (bool(ADMIN_API_KEY), "Owner API authorization binding is missing."),
+            (os.environ.get("OPLATES_OWNER_TEST_CHECKOUT_ENABLED") == "true", "Hard environment TEST permission is disabled."),
+            (_drawing_assisted_feature_enabled() and bool(_drawing_assisted_allowed_user_ids()), "Existing server-authorized tester allowlist is disabled or empty."),
+        )
+        test_blockers.extend(message for passed, message in checks if not passed)
+        try:
+            from frozen_plate.api import repository as frozen_repository
+            frozen_repository()
+        except Exception:
+            test_blockers.append("Frozen Plate private database/storage/signing binding failed validation.")
+    else:
+        try:
+            _legacy_stripe_checkout_required()
+        except HTTPException as error:
+            test_blockers.append(str(error.detail))
+    if not _jwk_client or not SUPABASE_JWT_ISSUER:
+        test_blockers.append("Verified customer authentication is unavailable.")
+    return {
+        "stripe_test_credentials_configured": STRIPE_TEST_SECRET_KEY.startswith(("sk_test_", "rk_test_")),
+        "stripe_live_credentials_configured": str(stripe.api_key or "").startswith(("sk_live_", "rk_live_")),
+        "test_webhook_configured": bool(STRIPE_TEST_WEBHOOK_SECRET and STRIPE_TEST_WEBHOOK_SECRET != WEBHOOK_SECRET),
+        "live_webhook_configured": bool(WEBHOOK_SECRET and WEBHOOK_SECRET != STRIPE_TEST_WEBHOOK_SECRET),
+        "frozen_plate_and_email_configuration_ready": not test_blockers,
+        "stripe_live_readiness": "Separate supervised activation required" if os.environ.get("FROZEN_PLATE_LIVE_CHECKOUT_READY") == "true" else "Existing LIVE readiness gate is closed",
+        "provider_readiness": "Requires recorded supervised acceptance; configured values alone are not verification.",
+        "test_blockers": test_blockers,
+    }
+
+
+def _checkout_control_status():
+    from checkout_control import status
+    return status(_checkout_mode_database(), _checkout_control_readiness())
+
+
+def _stripe_checkout_required(customer_id=None, checkout_mode=None) -> bool:
+    # The compatibility header is never authority: derive mode from protected DB.
+    state = _checkout_control_status()
+    if state["effective_mode"] != "TEST":
+        raise HTTPException(503, "Checkout is currently closed.")
+    from checkout_control import tester
+    if not tester(_checkout_mode_database(), customer_id):
+        raise HTTPException(403, "Purchasing is unavailable for this account.")
+    if APP_ENV == "production":
+        return _legacy_stripe_checkout_required(customer_id, "owner_test")
+    _legacy_stripe_checkout_required(customer_id)
+    return False
+
+
+
 def _is_owner_test_order(order) -> bool:
     marker = (order.quote_payload or {}).get("_payment") or {}
     return bool(
@@ -397,7 +464,21 @@ def _create_checkout_session(checkout_args, owner_test, customer_id):
         checkout_args["metadata"]["oplates_payment_mode"] = "owner_test"
         if "idempotency_key" in checkout_args:
             checkout_args["idempotency_key"] = "owner-test:" + customer_id + ":" + checkout_args["idempotency_key"]
-    session = stripe.checkout.Session.create(**checkout_args)
+    from checkout_control import locked, tester
+    with locked(_checkout_mode_database()) as (mode_connection, state):
+        if state["requested_mode"] != "TEST" or not state["test_binding_verified_at"]:
+            raise HTTPException(503, "Checkout is currently closed.")
+        if _checkout_control_readiness()["test_blockers"]:
+            raise HTTPException(503, "TEST readiness is unavailable; checkout is CLOSED.")
+        recipient = tester(_checkout_mode_database(), customer_id, connection=mode_connection)
+        if not recipient:
+            raise HTTPException(403, "Verified TEST recipient unavailable.")
+        checkout_args["customer_email"] = recipient
+        checkout_args["metadata"]["test_recipient"] = recipient
+        for item in checkout_args.get("line_items", []):
+            product = item.get("price_data", {}).get("product_data", {})
+            product["name"] = "TEST / NOT A REAL SALE — " + product.get("name", "O-Plates")
+        session = stripe.checkout.Session.create(**checkout_args)
     if owner_test and (session.livemode is not False or not session.id.startswith("cs_test_")):
         raise HTTPException(502, "Sandbox Checkout session verification failed.")
     if not owner_test:
@@ -1189,6 +1270,31 @@ def checkout_recovery(
 # ----------------------------
 # Checkout endpoints
 # ----------------------------
+def _distinct_checkout_owner_key():
+    if not ADMIN_API_KEY or ADMIN_API_KEY == API_KEY:
+        raise HTTPException(503, "A separate owner credential is required for Checkout Control.")
+
+
+class CheckoutModeChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    requested_mode: Literal["CLOSED", "TEST", "LIVE"]
+    expected_version: int = Field(ge=1, strict=True)
+    confirmation: str
+
+
+@app.get("/admin/checkout-control", dependencies=[Depends(_rate_limit_admin)])
+def admin_checkout_control():
+    _distinct_checkout_owner_key()
+    return _checkout_control_status()
+
+
+@app.put("/admin/checkout-control", dependencies=[Depends(_rate_limit_admin)])
+def admin_apply_checkout_control(change: CheckoutModeChange):
+    _distinct_checkout_owner_key()
+    from checkout_control import apply
+    return apply(_checkout_mode_database(), readiness=_checkout_control_readiness(), **change.model_dump())
+
+
 @app.get("/checkout/availability")
 def checkout_availability(
     authorization: Optional[str] = Header(default=None, alias="authorization"),
@@ -1198,16 +1304,10 @@ def checkout_availability(
     if authorization and not customer_id:
         raise HTTPException(401, "Unauthorized")
     try:
-        _stripe_checkout_required(customer_id)
-        return {"available": True, "mode": "live" if APP_ENV == "production" else "test"}
+        owner_test = _stripe_checkout_required(customer_id)
+        return {"available": True, "mode": "owner_test" if owner_test else "test"}
     except HTTPException:
-        if _owner_test_authorized(customer_id):
-            try:
-                _stripe_checkout_required(customer_id, "owner_test")
-                return {"available": True, "mode": "owner_test"}
-            except HTTPException:
-                pass
-    return {"available": False, "mode": None}
+        return {"available": False, "mode": None}
 
 
 @app.post("/checkout/create")
@@ -1336,7 +1436,7 @@ def checkout_create(
         stripe_session_id=session.id,
         quote_payload={
             **req.inputs.model_dump(),
-            **({"_payment": {"mode": "owner_test", "owner_id": customer_user_id}} if owner_test else {}),
+            **({"_payment": {"mode": "owner_test", "owner_id": customer_user_id, "recipient": checkout_args["customer_email"]}} if owner_test else {}),
             **(
                 {
                     "_checkout_recovery": {
@@ -1503,7 +1603,7 @@ def checkout_cart_create(
         stripe_session_id=session.id,
         quote_payload={
             "cart_items": normalized_items,
-            **({"_payment": {"mode": "owner_test", "owner_id": customer_user_id}} if owner_test else {}),
+            **({"_payment": {"mode": "owner_test", "owner_id": customer_user_id, "recipient": checkout_args["customer_email"]}} if owner_test else {}),
             **(
                 {
                     "_checkout_recovery": {
@@ -1543,6 +1643,7 @@ def get_order_by_session(
         response = {
             "id": o.id,
             "status": o.status,
+            "payment_mode": _admin_payment_mode(o),
             "order_number": o.order_number,
             "order_number_display": _format_order_number(o.order_number),
             "amount_total_usd": (o.amount_total_cents or 0) / 100.0,
@@ -1880,6 +1981,8 @@ async def _complete_stripe_webhook(request: Request, *, owner_test):
     payment_intent = session.get("payment_intent")
     customer_details = session.get("customer_details") or {}
     customer_email = customer_details.get("email")
+    if owner_test:
+        customer_email = (session.get("metadata") or {}).get("test_recipient")
     amount_total = session.get("amount_total")
     amount_subtotal = session.get("amount_subtotal")
     amount_shipping = (session.get("shipping_cost") or {}).get("amount_total")
@@ -1928,6 +2031,19 @@ async def _complete_stripe_webhook(request: Request, *, owner_test):
             raise HTTPException(400, "Payment identity does not match the server-owned order.")
         if owner_test and (not _is_owner_test_order(order) or order.customer_id != customer_id):
             raise HTTPException(400, "Sandbox payment does not match the server-owned order.")
+        if owner_test:
+            expected_recipient = ((order.quote_payload or {}).get("_payment") or {}).get("recipient")
+            if expected_recipient:
+                if customer_email != expected_recipient:
+                    raise HTTPException(400, "Sandbox recipient does not match the server-owned order.")
+            else:
+                # Pre-selector pending/completed owner TEST sessions have no
+                # recipient marker. Resolve only their confirmed registry address;
+                # never trust the Stripe contact email or rewrite frozen provenance.
+                from checkout_control import tester
+                customer_email = tester(_checkout_mode_database(), order.customer_id)
+                if not customer_email:
+                    raise HTTPException(503, "Verified legacy TEST recipient unavailable; retry webhook.")
         if not owner_test and _is_owner_test_order(order):
             raise HTTPException(400, "Live payment cannot complete a sandbox order.")
 
@@ -2026,8 +2142,13 @@ def _frozen_plate_order_snapshot(order_id):
             (order.stripe_session_id or "").startswith("cs_live_") or _is_owner_test_order(order)
         ):
             raise HTTPException(404, "Completed live customer order not found")
+        legacy_recipient = None
+        if _is_owner_test_order(order) and not order.quote_payload["_payment"].get("recipient"):
+            from checkout_control import tester
+            legacy_recipient = tester(_checkout_mode_database(), order.customer_id)
         return {"id": order.id, "customer_id": order.customer_id,
-                "customer_email": order.customer_email,
+                **({"verified_test_recipient": legacy_recipient} if legacy_recipient else {}),
+                "customer_email": legacy_recipient or order.customer_email,
                 "order_number_display": _format_order_number(order.order_number),
                 "quote_payload": copy.deepcopy(order.quote_payload)}
     finally:

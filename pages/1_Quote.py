@@ -769,6 +769,9 @@ purchasing_access = checkout_access(
     API_BASE, auth_headers() if is_logged_in() else {},
     owner_test_allowed=owner_test_checkout_allowed, owner_acceptance=OWNER_ACCEPTANCE_MODE,
 )
+if purchasing_access.get("available") and purchasing_access.get("mode") in {"test", "owner_test"}:
+    st.warning("TEST / NOT A REAL SALE — simulated purchase; no manufacturing or shipment.")
+
 
 @st.dialog("Sign in")
 def _starter_sign_in():
@@ -1729,7 +1732,7 @@ with right:
 
         if not purchasing_access["available"]:
             st.caption(
-                "Checkout is currently closed."
+                "Purchasing is currently unavailable."
             )
         elif active_assisted_session is not None and not owner_test_checkout_allowed:
             st.caption("Checkout remains disabled for drawing-assisted configurations.")
@@ -1780,7 +1783,6 @@ with right:
             add_disabled = (
                 not is_logged_in()
                 or result is None
-                or (not purchasing_access["available"])
                 or (
                     active_assisted_session is not None
                     and not owner_test_checkout_allowed
