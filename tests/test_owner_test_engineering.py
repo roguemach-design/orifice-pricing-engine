@@ -45,6 +45,7 @@ def test_both_families_idempotent_verified_and_isolated(system):
         assert all("TEST-ENGINEERING" in name for name, _, _ in artifacts.values())
         if family == "HAAS":
             raw = artifacts["program.NC"][2]
+            assert raw.splitlines()[0] == b"%" and raw.splitlines()[1].startswith(b"O")
             assert b"#3000=1" in raw and b"NOT MACHINE-PROVEN / REVIEW REQUIRED" in raw
         else:
             raw = artifacts["packaging.dxf"][2]

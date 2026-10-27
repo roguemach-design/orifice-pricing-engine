@@ -44,7 +44,8 @@ class TestEngineering:
                 files = haas(spec, s.profile, self.stager.fixture, s.parameters, parent)
                 warning = "NOT MACHINE-PROVEN / REVIEW REQUIRED"
                 files["program.NC"] = files["program.NC"].replace(
-                    b"%\n", b"%\n(TEST / NOT A REAL SALE - NOT MACHINE-PROVEN / REVIEW REQUIRED)\n", 1)
+                    b"(REVIEW / SETUP VERIFICATION REQUIRED)",
+                    b"(TEST / NOT A REAL SALE - NOT MACHINE-PROVEN / REVIEW REQUIRED)\n(REVIEW / SETUP VERIFICATION REQUIRED)", 1)
             else:
                 files = packaging(spec, s.packaging_config, parent)
                 warning = "PROTOTYPE / NOT QUALIFIED FOR SHIPPING"
