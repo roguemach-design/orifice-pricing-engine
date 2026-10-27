@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def jwt(exp=None):
-    value = json.dumps({"exp": exp or time.time() + 3600, "sub": "synthetic-customer"})
+    value = json.dumps({"exp": int(exp or time.time() + 3600), "sub": "synthetic-customer"})
     return "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9." + base64.urlsafe_b64encode(value.encode()).decode().rstrip("=") + ".c3ludGhldGlj"
 
 
@@ -188,18 +188,18 @@ def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded, tm
             page.get_by_role("button", name="Log out", exact=True).click()
             expect(page.get_by_text("Signed in as:", exact=False)).to_have_count(0, timeout=20000)
             expect(page.get_by_text("TEST DRAWING APPROVED — NOT A REAL SALE", exact=True)).to_have_count(0)
-            expect(page.get_by_role("button", name="Send code", exact=True)).to_be_attached(timeout=20000)
+            expect(page.get_by_role("button", name="Send code", exact=True, include_hidden=True)).to_be_attached(timeout=20000)
             page.reload()
             expect(page.get_by_text("Signed in as:", exact=False)).to_have_count(0, timeout=20000)
             expect(page.get_by_text("TEST DRAWING APPROVED — NOT A REAL SALE", exact=True)).to_have_count(0)
-            expect(page.get_by_role("button", name="Send code", exact=True)).to_be_attached(timeout=20000)
+            expect(page.get_by_role("button", name="Send code", exact=True, include_hidden=True)).to_be_attached(timeout=20000)
             assert state["revoked"]
             assert not any(c["name"] == "oplates_auth" for c in context.cookies())
             # A restored copy of the revoked credential cannot regain access.
             protected_before = len(state["protected"])
             context.add_cookies(saved_cookies)
             page.goto(state["ui"] + "/My_Orders")
-            expect(page.get_by_role("button", name="Send code", exact=True)).to_be_attached(timeout=20000)
+            expect(page.get_by_role("button", name="Send code", exact=True, include_hidden=True)).to_be_attached(timeout=20000)
             expect(page.get_by_text("Signed in as:", exact=False)).to_have_count(0)
             assert len(state["protected"]) == protected_before
             assert state["sends"] == 1
