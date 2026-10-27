@@ -101,15 +101,21 @@ def customer_app(tmp_path):
     state["ui"] = f"http://127.0.0.1:{port}"
     api = f"http://127.0.0.1:{server.server_port}"
     env = {key: os.environ[key] for key in ("PATH", "PYTHONPATH", "LANG") if key in os.environ}
-    env.update(API_BASE=api, SUPABASE_URL=api, SUPABASE_ANON_KEY="synthetic-public", API_KEY="synthetic-ui")
+    # Use the real staging UI gate while redirecting all server API traffic
+    # to loopback before Streamlit starts. No production feature gate changes.
+    staging = "https://oplates-pricing-api-staging.onrender.com"
+    (tmp_path / "sitecustomize.py").write_text(
+        "import requests\n"
+        "original = requests.sessions.Session.request\n"
+        "def isolated(self, method, url, *args, **kwargs):\n"
+        f"    if url.startswith({staging!r} + '/'): url = {api!r} + url[len({staging!r}):]\n"
+        "    return original(self, method, url, *args, **kwargs)\n"
+        "requests.sessions.Session.request = isolated\n"
+    )
+    env["PYTHONPATH"] = str(tmp_path) + os.pathsep + env.get("PYTHONPATH", "")
+    env.update(API_BASE=staging, SUPABASE_URL=api, SUPABASE_ANON_KEY="synthetic-public", API_KEY="synthetic-ui")
     log = (tmp_path / "app.log").open("w+")
-    # The real approval UI is hard-gated to production/staging API origins.
-    # Enable only that presentation gate in this disposable loopback process;
-    # application authentication and every customer route remain unchanged.
-    launcher = ROOT / f"synthetic_browser_{port}.py"
-    launcher.write_text("import frozen_plate.runtime\nfrozen_plate.runtime.ui_enabled = lambda: True\n"
-                        "from customer_navigation import run_customer_app\nrun_customer_app()\n")
-    process = subprocess.Popen([sys.executable, "-m", "streamlit", "run", str(launcher), "--server.address=127.0.0.1",
+    process = subprocess.Popen([sys.executable, "-m", "streamlit", "run", "app.py", "--server.address=127.0.0.1",
         f"--server.port={port}", "--server.headless=true", "--browser.gatherUsageStats=false", "--global.developmentMode=false"],
         cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
     try:
@@ -126,8 +132,9 @@ def customer_app(tmp_path):
         process.wait(timeout=15)
         server.shutdown()
         server.server_close()
+        log.seek(0)
+        print("Synthetic app log:", log.read())
         log.close()
-        launcher.unlink(missing_ok=True)
 
 
 def sign_in(scope):
@@ -153,6 +160,8 @@ def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded, tm
             scope = page.frame_locator("#plate-configurator") if embedded else page
             scope.get_by_role("spinbutton", name="Plate outside diameter (in.)", exact=True).fill("4")
             scope.get_by_role("spinbutton", name="Plate outside diameter (in.)", exact=True).press("Tab")
+            expect(scope.locator('[data-feature="od-dimension-label"]')).to_have_text("Ø4.000")
+            expect(scope.get_by_test_id("stMetric")).to_have_count(2)
             sign_in(scope)
             expect(scope.get_by_role("dialog")).to_have_count(0, timeout=20000)
             expect(scope.get_by_role("spinbutton", name="Plate outside diameter (in.)", exact=True)).to_have_value("4.000")
@@ -195,7 +204,12 @@ def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded, tm
             assert len(state["protected"]) == protected_before
             assert state["sends"] == 1
         finally:
-            print("Synthetic journey page:", page.locator("body").inner_text(timeout=2000))
+            for frame in page.frames:
+                if frame.url.startswith(state["ui"] + "/"):
+                    try:
+                        print("Synthetic journey page:", frame.locator("body").inner_text(timeout=2000))
+                    except Exception:
+                        pass
             page.screenshot(path=str(tmp_path / "auth-journey.png"), full_page=True)
             (tmp_path / "auth-journey.html").write_text(page.content())
             browser.close()
