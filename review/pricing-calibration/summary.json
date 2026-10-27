@@ -1,0 +1,24 @@
+{
+  "baseline": "a9615a1e4d2b2013b0be7ddbf40ff409385c50ac",
+  "config_basis": "Bundled production defaults; no production settings were read or changed",
+  "cases": 13824,
+  "unchanged_components_reconciled": true,
+  "cut_length": {
+    "canonical_outside_length_in": 56.752558786176465,
+    "rough_bore_cut_length_in": 26.310838473814517,
+    "handle_hole_cut_length_in": 1.1780972450961724,
+    "canonical_total_cut_length_in": 84.24149450508696
+  },
+  "ranges": {
+    "non_chamfer": {
+      "cases": 3456,
+      "minimum_percent": -0.7017850382924273,
+      "maximum_percent": 0.5429391803706561
+    },
+    "chamfer": {
+      "cases": 10368,
+      "minimum_percent": -37.08637589632261,
+      "maximum_percent": -11.919385796545107
+    }
+  }
+}

@@ -10,6 +10,9 @@ import math
 
 PROCESS_KEYS = (
     "laser_per_linear_in",
+    "precision_bore_allowance_per_in",
+    "chamfer_allowance_per_in",
+    "today_2_day_multiplier",
     "mill_labor_per_hr",
     "mill_speed_ipm",
     "chamfer_speed_ipm",
@@ -26,10 +29,9 @@ def project(active, baseline):
         if isinstance(value, dict):
             value = {str(k): v for k, v in value.items()}
         result.setdefault(key, value)
-    result.setdefault(
-        "lead_time_multipliers",
-        {str(k): v for k, v in baseline["LEAD_TIME_MULTIPLIER"].items()},
-    )
+    multipliers = result.setdefault("lead_time_multipliers", {})
+    for days, multiplier in baseline.get("LEAD_TIME_MULTIPLIER_MASTER", baseline["LEAD_TIME_MULTIPLIER"]).items():
+        multipliers.setdefault(str(days), multiplier)
     return result
 
 
@@ -159,8 +161,10 @@ def validate(value, defaults):
     number(
         value["max_handle_label_chars"], "Marking length", positive=True, integer=True
     )
-    for name in ("laser_per_linear_in", "mill_labor_per_hr", "load_time_mins"):
+    for name in ("laser_per_linear_in", "mill_labor_per_hr", "load_time_mins",
+                 "precision_bore_allowance_per_in", "chamfer_allowance_per_in"):
         number(value[name], name)
+    number(value["today_2_day_multiplier"], "Today / 2-Day multiplier", positive=True)
     inspection = mapping("inspection_mins_by_tol")
     if set(inspection) != set(defaults["inspection_mins_by_tol"]):
         raise ValueError("Inspection tolerance catalog must remain complete.")
