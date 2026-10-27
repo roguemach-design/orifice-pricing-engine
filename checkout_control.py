@@ -3,7 +3,7 @@
 Tables are installed only by the reviewed migration, never on application startup.
 The locked singleton also serializes Stripe session creation against owner changes.
 """
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from uuid import uuid4
 from sqlalchemy import text
@@ -36,11 +36,11 @@ def locked(engine):
         raise HTTPException(503, 'Checkout mode could not be verified; checkout is CLOSED.') from None
 
 
-def tester(engine, customer_id):
+def tester(engine, customer_id, *, connection=None):
     if not engine or not customer_id:
         return None
     try:
-        with engine.connect() as conn:
+        with (nullcontext(connection) if connection is not None else engine.connect()) as conn:
             row = conn.execute(text(f'SELECT email FROM {_table(engine, "test_accounts")} '
                                     'WHERE customer_id=:uid AND enabled=true AND verified_at IS NOT NULL'),
                                {'uid': customer_id}).mappings().first()

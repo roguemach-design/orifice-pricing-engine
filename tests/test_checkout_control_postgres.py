@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine, text, event
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
-from checkout_control import status, apply, locked
+from checkout_control import status, apply, locked, tester
 
 
 def test_real_postgres_migration_authority_concurrency_and_restarts():
@@ -23,7 +23,7 @@ def test_real_postgres_migration_authority_concurrency_and_restarts():
         conn.execute(text("INSERT INTO checkout_control.test_accounts VALUES ('tester','tester@example.test',true,now())"))
         conn.execute(text('UPDATE checkout_control.mode_state SET test_binding_verified_at=now()'))
     def restricted_engine():
-        engine = create_engine(url)
+        engine = create_engine(url, pool_size=1, max_overflow=0, pool_timeout=1)
         @event.listens_for(engine, 'connect')
         def role(connection, record):
             cursor = connection.cursor()
@@ -53,7 +53,8 @@ def test_real_postgres_migration_authority_concurrency_and_restarts():
     # waits for that in-flight creation, then all later creations observe CLOSED.
     started, release, closing = Event(), Event(), Event()
     def session_creation():
-        with locked(engine) as (_, state):
+        with locked(engine) as (connection, state):
+            assert tester(engine, "tester", connection=connection) == "tester@example.test"
             assert state['requested_mode'] == 'TEST'
             started.set()
             assert release.wait(10)

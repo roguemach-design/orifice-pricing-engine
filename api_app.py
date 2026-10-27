@@ -465,12 +465,12 @@ def _create_checkout_session(checkout_args, owner_test, customer_id):
         if "idempotency_key" in checkout_args:
             checkout_args["idempotency_key"] = "owner-test:" + customer_id + ":" + checkout_args["idempotency_key"]
     from checkout_control import locked, tester
-    with locked(_checkout_mode_database()) as (_, state):
+    with locked(_checkout_mode_database()) as (mode_connection, state):
         if state["requested_mode"] != "TEST" or not state["test_binding_verified_at"]:
             raise HTTPException(503, "Checkout is currently closed.")
         if _checkout_control_readiness()["test_blockers"]:
             raise HTTPException(503, "TEST readiness is unavailable; checkout is CLOSED.")
-        recipient = tester(_checkout_mode_database(), customer_id)
+        recipient = tester(_checkout_mode_database(), customer_id, connection=mode_connection)
         if not recipient:
             raise HTTPException(403, "Verified TEST recipient unavailable.")
         checkout_args["customer_email"] = recipient
