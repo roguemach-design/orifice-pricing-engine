@@ -30,14 +30,16 @@ run(ui_client)
     assert app.metric[0].value == "CLOSED"
 
 
-def test_stale_top_level_checkout_navigation_redirects_safely():
+def test_stale_top_level_checkout_navigation_redirects_safely(monkeypatch):
+    import streamlit as st
+    import manufacturing_control.app as control
+    import manufacturing_control.pricing as pricing
+    monkeypatch.setattr(control, "ui_enabled", lambda: True)
+    monkeypatch.setattr(control, "OwnerClient", lambda *args: object())
+    monkeypatch.setattr(pricing, "run", lambda client: st.write("Nested checkout destination"))
     app = AppTest.from_string('''
 import streamlit as st
 import manufacturing_control.app as control
-control.ui_enabled = lambda: True
-control.OwnerClient = lambda *args: object()
-import manufacturing_control.pricing as pricing
-pricing.run = lambda client: st.write("Nested checkout destination")
 st.session_state["mc_key"] = "synthetic"
 st.session_state["mc_nav"] = "Checkout Control"
 control.run()
