@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine, text, event
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
-from checkout_control import status, apply, locked, tester
+from checkout_control import status, apply, locked, tester as authorized_tester
 
 
 def test_real_postgres_migration_authority_concurrency_and_restarts():
@@ -48,7 +48,7 @@ def test_real_postgres_migration_authority_concurrency_and_restarts():
     assert enabled['effective_mode'] == 'TEST'
     single_connection = restricted_engine(pool_size=1)
     with locked(single_connection) as (connection, _):
-        assert tester(single_connection, 'tester', connection=connection) == 'tester@example.test'
+        assert authorized_tester(single_connection, 'tester', connection=connection) == 'tester@example.test'
     single_connection.dispose()
     engine.dispose()
     engine = restricted_engine()
@@ -58,7 +58,7 @@ def test_real_postgres_migration_authority_concurrency_and_restarts():
     started, release, closing = Event(), Event(), Event()
     def session_creation():
         with locked(engine) as (connection, state):
-            assert tester(engine, "tester", connection=connection) == "tester@example.test"
+            assert authorized_tester(engine, "tester", connection=connection) == "tester@example.test"
             assert state['requested_mode'] == 'TEST'
             started.set()
             assert release.wait(10)
