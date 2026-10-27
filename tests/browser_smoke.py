@@ -42,7 +42,7 @@ def test_standard_chamfer_is_deliberate_and_infeasible_edits_block(configurator,
                    if request.request.url.startswith(configurator + "/") else request.abort())
         try:
             page.goto(configurator + route)
-            page.get_by_role("radio", name="CHAMFERED BORE Add a chamfer to the bore edge.", exact=True).click()
+            page.get_by_role("radio", name=re.compile("^CHAMFERED BORE")).click()
             standard = page.get_by_role("radio", name="Standard 45° Chamfer", exact=True)
             expect(standard).to_be_visible(timeout=15000)
             expect(standard).not_to_be_checked()
@@ -276,6 +276,7 @@ def test_actual_landing_host_renders_one_visible_drawing(configurator, width, tm
             child.get_by_role("radio", name=re.compile("^CHAMFERED BORE")).press("Space")
             chamfer = child.get_by_role("spinbutton", name="Chamfer Width (in.)", exact=True)
             expect(chamfer).to_have_value("0.0620")
+            child.get_by_role("radio", name="Standard 45° Chamfer", exact=True).check()
             child.get_by_role("radio", name="HANDLE HOLE", exact=True).press("Space")
             diameter = child.get_by_role("textbox", name="Handle Hole Diameter (in.)", exact=True)
             distance = child.get_by_role("textbox", name="Handle End to Hole Center (in.)", exact=True)
