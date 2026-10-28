@@ -7,13 +7,20 @@ replicas. Failures stay pending and retry independently of customer approval.
 
 from threading import Event, Lock, Thread
 import logging
+import os
 
 wake_event = Event()
 logger = logging.getLogger(__name__)
 
 
+def automatic_enabled():
+    # Worker-only switch. FINAL4_ENABLED still owns the manual engineering routes.
+    return os.environ.get("FINAL4_AUTOMATIC_STAGING_ENABLED", "true") == "true"
+
+
 def request_scan():
-    wake_event.set()
+    if automatic_enabled():
+        wake_event.set()
 
 
 class StagingWorker:
@@ -24,6 +31,8 @@ class StagingWorker:
         self.thread = None
 
     def sweep(self):
+        if not automatic_enabled():
+            return self.states
         stager = self.factory()
         states = {}
         for parent in stager.parents():
@@ -74,6 +83,14 @@ class StagingWorker:
         return states
 
     def status(self, revision_id):
+        if not automatic_enabled():
+            return {
+                family: dict(
+                    state="AUTOMATIC STAGING DISABLED",
+                    detail="Owner containment: manual engineering routes remain independently authorized.",
+                )
+                for family in ("HAAS", "PACKAGING")
+            }
         with self.lock:
             return self.states.get(revision_id, {})
 
@@ -87,6 +104,8 @@ class StagingWorker:
             wake_event.wait(self.interval)
 
     def start(self):
+        if not automatic_enabled():
+            return
         if self.thread is None:
             self.thread = Thread(
                 target=self.run, name="manufacturing-stager", daemon=True
