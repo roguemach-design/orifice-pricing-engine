@@ -15,6 +15,7 @@ from psycopg2.extras import DictCursor
 from itsdangerous import URLSafeSerializer
 
 from .repository import Repository, WorkflowError
+from .transport import RepositoryPool, VerifiedArtifactCache, ProviderUnavailable
 
 PROJECT_URL = "https://ixhnanttetuhpzvrnvdc.supabase.co"
 API_ORIGIN = "https://oplates-pricing-api-staging.onrender.com"
@@ -25,6 +26,7 @@ class Connection:
 
     def __init__(self, raw):
         self.raw = raw
+        self.cursors = []
 
     def execute(self, query, args=()):
         if query == "BEGIN":
@@ -33,8 +35,14 @@ class Connection:
             query = query.replace("INSERT OR IGNORE INTO", "INSERT INTO")
             query += " ON CONFLICT (revision_id,route) DO NOTHING"
         cursor = self.raw.cursor(cursor_factory=DictCursor)
+        self.cursors.append(cursor)
         cursor.execute(query.replace("?", "%s"), args)
         return cursor
+
+    def close_cursors(self):
+        for cursor in self.cursors:
+            cursor.close()
+        self.cursors.clear()
 
     def commit(self):
         self.raw.commit()
@@ -66,10 +74,10 @@ class PrivateStorage:
         try:
             response = self.client.request(method, path, **kwargs)
         except httpx.HTTPError:
-            raise WorkflowError("private storage unavailable") from None
+            raise ProviderUnavailable(message="private storage unavailable") from None
         if not response.is_success:
             # Never propagate response bodies, request headers or credentials.
-            raise WorkflowError("private storage operation failed")
+            raise ProviderUnavailable(response.status_code,message="private storage operation failed")
         return response
 
     def put(self, key, data):
@@ -90,7 +98,7 @@ class PrivateStorage:
         try:
             response = self.client.get("/object/" + self.bucket + "/" + self.safe_key(key))
         except httpx.HTTPError:
-            raise WorkflowError("private storage unavailable") from None
+            raise ProviderUnavailable(message="private storage unavailable") from None
         if response.status_code == 404:
             return None
         if response.status_code == 400:
@@ -100,7 +108,7 @@ class PrivateStorage:
             except ValueError:
                 pass
         if not response.is_success:
-            raise WorkflowError("private storage operation failed")
+            raise ProviderUnavailable(response.status_code,message="private storage operation failed")
         return response.content
 
     def remove(self, keys):
@@ -127,6 +135,8 @@ class StagingRepository(Repository):
         if len(key) < 64:
             raise ValueError("dedicated strong staging signing key required")
         self._database_url = url
+        self._connections = RepositoryPool(url,"-c search_path=frozen_plate_prototype,pg_catalog")
+        self._artifact_cache = VerifiedArtifactCache()
         self.clock, self.ttl_seconds = clock, 30 * 86400
         self.delivery_origin = API_ORIGIN
         self.signer = URLSafeSerializer(
@@ -145,19 +155,12 @@ class StagingRepository(Repository):
 
     @contextmanager
     def connect(self):
-        try:
-            raw = psycopg2.connect(
-                self._database_url,
-                connect_timeout=15,
-                options="-c search_path=frozen_plate_prototype,pg_catalog",
-            )
-        except psycopg2.Error:
-            raise WorkflowError("staging database unavailable") from None
-        raw.autocommit = True
-        try:
-            yield Connection(raw)
-        finally:
-            raw.close()
+        with self._connections.connection() as raw:
+            adapter=Connection(raw)
+            try:
+                yield adapter
+            finally:
+                adapter.close_cursors()
 
     @contextmanager
     def transaction(self):

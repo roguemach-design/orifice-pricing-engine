@@ -81,3 +81,31 @@ def verify_repository(repo):
         if count != 3:
             raise WorkflowError("reviewed additive PostgreSQL migration required")
     return schema
+
+
+def retry_migration(schema):
+    """Review/apply separately; never install control state on application startup."""
+    if schema not in TARGETS:
+        raise ValueError("accepted private schema required")
+    from .retry import SCHEMA as RETRY_SCHEMA
+
+    role = TARGETS[schema]
+    return f"""BEGIN;
+SET LOCAL lock_timeout = '5s';
+SET LOCAL statement_timeout = '30s';
+SET LOCAL search_path = {schema}, pg_catalog;
+DO $guard$ BEGIN
+ IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='{role}' AND NOT rolsuper AND NOT rolbypassrls)
+ OR to_regclass('{schema}.frozen_plate_revisions') IS NULL THEN
+ RAISE EXCEPTION 'accepted restricted Frozen Plate architecture required'; END IF;
+END $guard$;
+{RETRY_SCHEMA.replace('IF NOT EXISTS ', '')}
+ALTER TABLE manufacturing_retry_control ENABLE ROW LEVEL SECURITY;
+ALTER TABLE manufacturing_retry_control FORCE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE manufacturing_retry_control FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE ON TABLE manufacturing_retry_control TO {role};
+CREATE POLICY retry_select ON manufacturing_retry_control FOR SELECT TO {role} USING (true);
+CREATE POLICY retry_insert ON manufacturing_retry_control FOR INSERT TO {role} WITH CHECK (true);
+CREATE POLICY retry_update ON manufacturing_retry_control FOR UPDATE TO {role} USING (true) WITH CHECK (true);
+COMMIT;
+"""

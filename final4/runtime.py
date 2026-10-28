@@ -53,6 +53,8 @@ def service():
 
 
 def configuration():
+    from .worker import automatic_enabled
+
     s = service()
     return dict(
         adapter="postgresql",
@@ -62,7 +64,7 @@ def configuration():
         machining_parameters=asdict(s.parameters),
         manufacturing_release_enabled=False,
         haas_status="SETUP VERIFICATION REQUIRED",
-        automatic_staging=True,
+        automatic_staging=automatic_enabled(),
         staging_profiles=automatic().profiles(),
         fixture_profile=asdict(automatic().fixture),
         packaging_status="PROTOTYPE",
@@ -93,4 +95,5 @@ def worker():
 
 def test_engineering():
     from .test_engineering import TestEngineering
+
     return TestEngineering(automatic())

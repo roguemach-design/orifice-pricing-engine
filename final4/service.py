@@ -56,6 +56,8 @@ class DerivedService:
             )
         with self.repo.connect() as db:
             db.executescript(SCHEMA)
+            from .retry import SCHEMA as RETRY_SCHEMA
+            db.executescript(RETRY_SCHEMA)
             for table in (
                 "manufacturing_bundles",
                 "manufacturing_bundle_files",

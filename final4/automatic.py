@@ -1,6 +1,7 @@
 """Idempotent automatic staging in the existing immutable bundle repository."""
 
 from dataclasses import asdict
+from .retry import ProfileBlocked
 import json
 from datetime import datetime, timezone
 from frozen_plate.repository import canonical, digest, WorkflowError
@@ -61,7 +62,8 @@ class AutomaticStager:
                 WHERE a.pdf_sha256=f.sha256 AND a.spec_sha256=r.spec_sha256
                 AND a.order_id=p.order_id AND a.customer_id=p.customer_id
                 ORDER BY p.id""")
-                if json.loads(r["source_json"]).get("_payment", {}).get("mode") != "owner_test"
+                if json.loads(r["source_json"]).get("_payment", {}).get("mode")
+                != "owner_test"
             ]
 
     def ensure(self, family, association):
@@ -114,13 +116,18 @@ class AutomaticStager:
             if historical_packaging:
                 if previous_packaging:
                     return previous_packaging
-                raise ValueError(
+                raise ProfileBlocked(
                     "historical packaging requires explicit owner generation; automatic upgrade disabled"
                 )
             r, spec, _, _ = s._parent(db, association, require_current=True)
             parent = {**association, "revision": f"R{r['number']}"}
             if family == "HAAS":
-                files = haas(spec, s.profile, self.fixture, s.parameters, parent)
+                try:
+                    files = haas(spec, s.profile, self.fixture, s.parameters, parent)
+                except WorkflowError:
+                    raise
+                except ValueError as error:
+                    raise ProfileBlocked(str(error)) from error
                 inputs = json.loads(files["inputs.json"])
                 refs = dict(
                     machine_profile=dict(
@@ -135,7 +142,14 @@ class AutomaticStager:
                     ),
                 )
             else:
-                files = packaging(spec, s.packaging_config, parent)
+                try:
+                    files = packaging(spec, s.packaging_config, parent)
+                except WorkflowError:
+                    raise
+                except ValueError as error:
+                    raise ProfileBlocked(
+                        "controlled packaging profile rejected"
+                    ) from error
                 inputs = json.loads(files["inputs.json"])
                 refs = {}
             return s._store(
