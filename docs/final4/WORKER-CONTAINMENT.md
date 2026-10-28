@@ -4,7 +4,7 @@ The pinned staging release 64d3b70fcb6cabf280c0851f74c038dd8b7d99fe has only FIN
 
 This branch adds only FINAL4_AUTOMATIC_STAGING_ENABLED. An absent value preserves existing behavior; literal true enables the worker; false (or any other explicit value) disables its startup, sweeps and approval wake-ups. The owner configuration/status reports the disabled worker accurately. FINAL4_ENABLED and manual engineering routes stay unchanged.
 
-This isolated patch is based on the exact deployed staging commit, not the newer staging branch head. It contains no pricing, authentication, storage, database migration, pooling or retry-ledger changes. Production must not be deployed or configured from this branch.
+This isolated patch is based on the exact deployed staging commit, not the newer staging branch head. The PR targets an isolated review baseline at that same commit so unrelated staging work is excluded. It contains no pricing, authentication, storage, database migration, pooling or retry-ledger changes. Production must not be deployed or configured from this branch.
 
 No live setting was changed during preparation. Deployment of this small code patch requires separate owner approval because the current authorization permits configuration-only containment and forbids deployment of the code correction.
 
