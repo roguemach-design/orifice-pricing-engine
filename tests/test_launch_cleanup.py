@@ -3,6 +3,7 @@ import io
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 from typing import Any, Dict, List
 import os
 
@@ -80,19 +81,11 @@ def test_cart_quote_pdf_preserves_ui_values(quantity, lead):
         Dict=Dict,
         Any=Any,
         List=List,
-        SUPPLIER_LOGOS=[],
-        QUOTE_VALID_DAYS=30,
-        SUPPLIER=dict(
-            name="Rogue Machine LLC",
-            addr1="736 Stone and Shannon Rd",
-            city_state_zip="Wheeling WV 26003",
-            country="United States",
-            phone="+1 304-639-0595",
-        ),
-        _ensure_quote_meta=lambda: dict(
-            quote_id="Q-SYNTHETIC",
-            created_at=datetime(2026, 10, 19, tzinfo=timezone.utc),
-        ),
+        st=SimpleNamespace(session_state=SimpleNamespace()),
+        cart_pricing_config_version="version-current",
+        new_quote_meta=lambda: dict(quote_id="Q-SYNTHETIC", created_at=datetime(2026,10,19,tzinfo=ZoneInfo("America/New_York"))),
+        document_from_cart=__import__('quote_document').document_from_cart,
+        render_quote_pdf=__import__('quote_document').render_quote_pdf,
     )
     exec(
         compile(ast.Module(body=functions, type_ignores=[]), "actual-cart-pdf", "exec"),
@@ -106,12 +99,29 @@ def test_cart_quote_pdf_preserves_ui_values(quantity, lead):
     pdf = ns["_make_pdf_quote"](lines, customer={})
     text = "\n".join(p.extract_text() for p in PdfReader(io.BytesIO(pdf)).pages)
     assert "$140.39" in text and f"${140.39*quantity:,.2f}" in text
-    assert f"ships={lead}d" in text and "Subtotal:" in text
+    assert f"{lead} calendar days (est.)" in text and "Quoted subtotal" in text
     assert (
-        "Prices shown exclude tax" in text
-        and "Shipping is selected at checkout" in text
+        "Calculated at checkout, if applicable" in text
+        and "Selected at checkout" in text
     )
-    assert "Valid until: 2026-11-18" in text
+    assert "Oct 19, 2026" in text and "Nov 18, 2026" in text
+    normalized = " ".join(text.split())
+    for specification in (
+        "Material 304 Stainless Steel",
+        "Thickness 0.125 in",
+        "Plate outside diameter 3.000 in",
+        "Bore diameter 1.000 in",
+        "Bore tolerance ± 0.005 in",
+        "Handle width 1.500 in",
+        "Handle length from bore center 9.000 in",
+        "Chamfer 0.062 in",
+        "Handle marking “UPSTREAM”",
+        f"TOTAL QUANTITY {quantity} plate" + ("s" if quantity > 1 else ""),
+    ):
+        assert specification in normalized
+    assert "Rogue Machine LLC" in text and "400 Public Rd" in text
+    assert "Yorkville, OH 43971" in text
+    assert "Q-SYNTHETIC" in text
     assert all(term not in text.lower() for term in ["staging", "sandbox", "debug"])
 
 

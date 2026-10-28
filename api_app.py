@@ -2122,6 +2122,7 @@ async def _complete_stripe_webhook(request: Request, *, owner_test):
                 <p><b>Order #:</b> {order_display}</p>
                 <p><b>Total Paid:</b> ${((amount_total or 0) / 100):.2f}</p>
                 <p>We’ll email your approval drawing next.</p>
+                <p>Rogue Machine LLC, 400 Public Rd, Yorkville, OH 43971, United States</p>
                 """,
             )
         except Exception:

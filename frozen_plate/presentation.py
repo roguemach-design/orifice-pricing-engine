@@ -22,7 +22,7 @@ footer{border-top:1px solid #e1e6eb;padding:20px 36px;font-size:12px;color:#6070
 
 
 def page(body, title="O-Plates | Rogue Machine"):
-    return f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{e(title)}</title><style>{CSS}</style></head><body><main><header>O-PLATES<small>ROGUE MACHINE LLC</small></header><article>{body}</article><footer>Precision orifice plates • Rogue Machine LLC</footer></main></body></html>'
+    return f'<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{e(title)}</title><style>{CSS}</style></head><body><main><header>O-PLATES<small>ROGUE MACHINE LLC</small></header><article>{body}</article><footer>Precision orifice plates • Rogue Machine LLC<br>400 Public Rd, Yorkville, OH 43971, United States</footer></main></body></html>'
 
 
 def details(context):
