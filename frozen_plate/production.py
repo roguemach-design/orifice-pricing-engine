@@ -15,6 +15,7 @@ import psycopg2
 from itsdangerous import URLSafeSerializer
 
 from .repository import Repository, WorkflowError
+from .transport import RepositoryPool, VerifiedArtifactCache
 from .runtime import PRODUCTION_API, PRODUCTION_PROJECT
 from .staging import Connection, PrivateStorage, StagingRepository
 
@@ -83,6 +84,8 @@ class ProductionRepository(Repository):
         if len(key) < 64:
             raise ValueError("dedicated strong production signing key required")
         self._database_url = url
+        self._connections = RepositoryPool(url,"-c search_path="+SCHEMA+",pg_catalog")
+        self._artifact_cache = VerifiedArtifactCache()
         self.clock, self.ttl_seconds = clock, 30 * 86400
         self.delivery_origin = PRODUCTION_API
         self.signer = URLSafeSerializer(
@@ -101,19 +104,12 @@ class ProductionRepository(Repository):
 
     @contextmanager
     def connect(self):
-        try:
-            raw = psycopg2.connect(
-                self._database_url,
-                connect_timeout=15,
-                options="-c search_path=" + SCHEMA + ",pg_catalog",
-            )
-        except psycopg2.Error:
-            raise WorkflowError("production database unavailable") from None
-        raw.autocommit = True
-        try:
-            yield Connection(raw)
-        finally:
-            raw.close()
+        with self._connections.connection() as raw:
+            adapter=Connection(raw)
+            try:
+                yield adapter
+            finally:
+                adapter.close_cursors()
 
     def create_delivery(self, revision_id, *, base_url=PRODUCTION_API):
         delivery = Repository.create_delivery(self, revision_id, base_url=base_url)

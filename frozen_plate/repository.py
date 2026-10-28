@@ -354,7 +354,9 @@ class Repository:
             raise WorkflowError("incomplete frozen artifacts")
         contents = {}
         for kind, artifact in artifacts.items():
-            content = self._read_object(artifact["object_key"])
+            cache = getattr(self,"_artifact_cache",None)
+            content = (cache.read(artifact["object_key"],artifact["sha256"],artifact["size"],self._read_object)
+                       if cache is not None else self._read_object(artifact["object_key"]))
             if (
                 digest(content) != artifact["sha256"]
                 or len(content) != artifact["size"]
