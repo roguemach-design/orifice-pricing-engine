@@ -1,3 +1,4 @@
+from customer_safety import customer_product_details
 # pages/2_My_Orders.py
 from datetime import datetime
 from typing import Any, Dict, Optional, List
@@ -85,7 +86,7 @@ with top[1]:
     if st.button("🧾 View Quote Cart"):
         st.switch_page("pages/3_Quote_Cart.py")
 
-st.caption("View past orders tied to your login. Reorder coming next.")
+st.caption("View orders associated with your account.")
 
 top_cols = st.columns([1, 1, 2])
 with top_cols[0]:
@@ -102,8 +103,7 @@ with st.spinner("Loading your orders..."):
         st.error("Unauthorized. Log out and log in again.")
         st.stop()
     if r.status_code != 200:
-        st.error(f"API error: {r.status_code}")
-        st.code(r.text)
+        st.error("Your orders could not be loaded. Please try again shortly.")
         st.stop()
 
     data = r.json()
@@ -115,8 +115,7 @@ with st.spinner("Loading your orders..."):
 if not orders:
     st.warning("No orders found for this account yet.")
     st.info(
-        "Next step: if you have older orders from before login existed, "
-        "we can add a **Claim past orders** button to attach them by email."
+        "Looking for an older order? Contact sales@o-plates.com with your order number."
     )
     st.stop()
 
@@ -126,6 +125,7 @@ for o in orders:
         {
             "Order #": o.get("order_number_display") or "(finalizing...)",
             "_order_id": o.get("id", ""),
+            "Mode": "TEST / NOT A REAL SALE" if o.get("payment_mode") in {"TEST", "OWNER TEST"} else o.get("payment_mode", "Unknown"),
             "Created": _dt(o.get("created_at", "")),
             "Email": o.get("customer_email", ""),
             "Total": _usd(o.get("amount_total_usd")),
@@ -169,13 +169,17 @@ with st.spinner("Loading order details..."):
         st.error("Unauthorized. Log out and log in again.")
         st.stop()
     if r2.status_code != 200:
-        st.error(f"API error: {r2.status_code}")
-        st.code(r2.text)
+        st.error("Order details could not be loaded. Please try again shortly.")
         st.stop()
 
     detail = r2.json()
 
+is_test_order = detail.get("payment_mode") in {"TEST", "OWNER TEST"}
+if is_test_order:
+    st.warning("TEST / NOT A REAL SALE — no manufacturing or shipment.")
+
 summary = {
+    "Mode": "TEST / NOT A REAL SALE" if is_test_order else detail.get("payment_mode", "Unknown"),
     "Order #": detail.get("order_number_display") or "",
     "Created": _dt(detail.get("created_at", "")),
     "Email": detail.get("customer_email", ""),
@@ -190,41 +194,24 @@ st.subheader("Order summary")
 st.dataframe(_kv_table(summary), use_container_width=True, hide_index=True)
 
 qp = _safe_dict(detail.get("quote_payload"))
+product_lines = qp.get("cart_items") if isinstance(qp.get("cart_items"), list) else [qp]
 if qp:
-    qp["handle_label"] = (qp.get("handle_label") or "").strip() or "No label"
-    if not qp.get("chamfer"):
-        qp["chamfer_width"] = None
-
     st.subheader("Configured inputs")
-    st.dataframe(_kv_table(qp), use_container_width=True, hide_index=True)
-    if qp.get("chamfer") and any(
-        qp.get(k) is None
-        for k in (
-            "chamfer_width",
-            "chamfer_angle_degrees",
-            "chamfer_side",
-            "flow_orientation",
-            "chamfer_width_definition",
-        )
-    ):
-        st.warning(
-            "HOLD: chamfer angle, side, flow direction and width convention require review before a drawing can be approved."
-        )
+    for line_index, product in enumerate(product_lines, 1):
+        product = _safe_dict(product)
+        if len(product_lines) > 1:
+            st.caption(f"Plate {line_index}")
+        st.dataframe(_kv_table(customer_product_details(product)), use_container_width=True, hide_index=True)
+        if product.get("chamfer") and any(
+            product.get(k) is None for k in (
+                "chamfer_width", "chamfer_angle_degrees", "chamfer_side",
+                "flow_orientation", "chamfer_width_definition",
+            )
+        ):
+            st.warning("The chamfer details require review before this drawing can be approved. Contact sales@o-plates.com.")
 
 st.divider()
 
-
-# ----------------------------
-# Reorder (next step)
-# ----------------------------
-st.subheader("Reorder")
-st.info(
-    "Next: a **Reorder** button will push this order’s `quote_payload` back into the configurator "
-    "(or create a saved cart/quote)."
-)
-
-with st.expander("Show full order JSON"):
-    st.json(detail)
 
 # The staging backend advertises this integration. Production has no such route.
 from auth import api_post
@@ -237,7 +224,7 @@ if frozen_response.status_code == 200:
             continue
         st.subheader(f"Drawing approval — {plate['line_id']}")
         if plate["lifecycle"] in ("CUSTOMER_APPROVED", "READY_FOR_RELEASE"):
-            st.success("YOUR ORDER IS IN PRODUCTION")
+            st.success("TEST DRAWING APPROVED — NOT A REAL SALE" if is_test_order else "YOUR ORDER IS IN PRODUCTION")
             continue
         session_key = "frozen-confirmation-" + plate["current_revision"]
         if st.button("Review attached drawing", key="review-" + plate["id"]):
@@ -277,7 +264,7 @@ if frozen_response.status_code == 200:
                 )
                 if response.status_code == 200:
                     st.session_state.pop(session_key, None)
-                    st.success("YOUR ORDER IS IN PRODUCTION")
+                    st.success("TEST DRAWING APPROVED — NOT A REAL SALE" if is_test_order else "YOUR ORDER IS IN PRODUCTION")
                 else:
                     st.error(
                         "Approval was not recorded. Refresh to review the current drawing."

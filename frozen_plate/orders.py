@@ -6,6 +6,16 @@ from .order_adapter import specification_from_order
 from .repository import WorkflowError, canonical
 
 
+def _same_source(current, source):
+    if current["source_sha256"] == sha256(canonical(source).encode()).hexdigest():
+        return True
+    marker = source.get("_payment", {})
+    if marker.get("mode") == "owner_test" and not marker.get("recipient"):
+        legacy_source = {k: v for k, v in source.items() if k != "_payment"}
+        return current["source_sha256"] == sha256(canonical(legacy_source).encode()).hexdigest()
+    return False
+
+
 def freeze_line(
     repo,
     snapshot,
@@ -34,7 +44,7 @@ def freeze_line(
     plate = repo.plate(plate_id)
     if not revision and plate["current_revision"]:
         current = repo.revision(plate["current_revision"])
-        if current["source_sha256"] != sha256(canonical(source).encode()).hexdigest():
+        if not _same_source(current, source):
             raise WorkflowError("HOLD: changed order requires explicit revision review")
         return current
     try:
@@ -55,7 +65,7 @@ def freeze_line(
         if not current_id:
             raise
         current = repo.revision(current_id)
-        if current["source_sha256"] != sha256(canonical(source).encode()).hexdigest():
+        if not _same_source(current, source):
             raise
         return current
 

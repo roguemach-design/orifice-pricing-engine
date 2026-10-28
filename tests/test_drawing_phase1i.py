@@ -394,7 +394,7 @@ def test_pricing_api_failure_preserves_confirmed_form_and_hides_price(
         button for button in app.button if button.label == "Continue to secure checkout"
     ).disabled
     assert any(
-        "temporarily unavailable" in item.value or "rejected" in item.value
+        "temporarily unavailable" in item.value or "could not be priced" in item.value
         for item in app.error
     )
 

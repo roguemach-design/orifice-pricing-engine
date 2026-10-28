@@ -82,15 +82,15 @@ def test_checkout_denies_unverified_or_disabled_owner(sandbox, monkeypatch, user
     auth = headers(user) if user else {"x-api-key": "test-ui-key", "x-oplates-checkout-mode": "owner_test"}
     body = {"items": [checkout_body()["inputs"]]} if cart else checkout_body()
     result = sandbox.client.post("/checkout/cart/create" if cart else "/checkout/create", json=body, headers=auth)
-    assert result.status_code == (401 if cart and user is None else status)
+    assert result.status_code == (401 if user is None else 503 if not flag else status)
     assert not sandbox.calls
 
 
 @pytest.mark.parametrize("user", ["owner", "customer"])
-def test_normal_production_checkout_stays_closed(sandbox, user):
+def test_server_mode_allows_only_owner_without_client_mode_header(sandbox, user):
     result = sandbox.client.post("/checkout/create", json=checkout_body(), headers=headers(user, mode=False))
-    assert result.status_code == 503
-    assert not sandbox.calls
+    assert result.status_code == (200 if user == "owner" else 403)
+    assert len(sandbox.calls) == (1 if user == "owner" else 0)
 
 
 @pytest.mark.parametrize("setting,value", [("STRIPE_TEST_SECRET_KEY", ""), ("STRIPE_TEST_SECRET_KEY", "rk_live_wrong"),
@@ -120,7 +120,7 @@ def test_owner_checkout_persists_test_identity(sandbox, database, cart):
         order = db.query(api_app.Order).one()
         assert api_app._is_owner_test_order(order)
         assert order.status == "pending"
-        assert order.quote_payload["_payment"] == {"mode": "owner_test", "owner_id": "owner"}
+        assert order.quote_payload["_payment"] == {"mode": "owner_test", "owner_id": "owner", "recipient": "owner@example.test"}
 
 
 def event_payload(session, live=False):
@@ -199,6 +199,7 @@ def test_test_webhook_cannot_complete_unmarked_order(sandbox, database):
     session = completed_session(sid, "owner")
     session.update(livemode=False)
     session["metadata"]["oplates_payment_mode"] = "owner_test"
+    session["metadata"]["test_recipient"] = "owner@example.test"
     sandbox.sessions[sid] = session
     with database() as db:
         db.add(api_app.Order(id="unmarked", stripe_session_id=sid, customer_id="owner",
@@ -258,8 +259,9 @@ def test_validation_window_blocks_live_even_if_live_readiness_is_enabled(sandbox
     monkeypatch.setenv("FROZEN_PLATE_LIVE_CHECKOUT_READY", "true")
     body = {"items": [checkout_body()["inputs"]]} if cart else checkout_body()
     result = sandbox.client.post("/checkout/cart/create" if cart else "/checkout/create", json=body, headers=headers(mode=False))
-    assert result.status_code == 503
-    assert not sandbox.calls
+    assert result.status_code == 200
+    assert sandbox.calls[0]["api_key"] == "rk_test_separate"
+    assert sandbox.calls[0]["metadata"]["oplates_payment_mode"] == "owner_test"
     result = sandbox.client.post("/checkout/cart/create" if cart else "/checkout/create", json=body, headers=headers())
     assert result.status_code == 200, result.text
     assert sandbox.calls[0]["api_key"] == "rk_test_separate"

@@ -2,6 +2,7 @@ from drawing_intake.checkout_context import verify_context
 from frozen_plate.runtime import enabled as frozen_plate_enabled
 # api_app.py
 import os
+import logging
 import hashlib
 import hmac
 import uuid
@@ -17,7 +18,9 @@ from typing import Optional, List, Dict, Any, Literal
 import stripe
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import model_validator, BaseModel, ConfigDict, Field, ValidationError, field_validator
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from pydantic import StrictBool, model_validator, BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from pricing_engine import QuoteInputs, calculate_quote
 
@@ -43,7 +46,48 @@ from jwt import PyJWKClient
 # ----------------------------
 # App + config
 # ----------------------------
-app = FastAPI(title="Orifice Pricing API", version="1.0.0")
+from final4.worker import lifespan as manufacturing_lifespan
+from contextlib import asynccontextmanager
+from journey import runtime as journey_runtime
+
+@asynccontextmanager
+async def platform_lifespan(app):
+    journey_runtime.start()
+    try:
+        async with manufacturing_lifespan(app):
+            yield
+    finally:
+        journey_runtime.stop()
+
+app = FastAPI(
+    title="Orifice Pricing API", version="1.0.0", lifespan=platform_lifespan,
+    docs_url=None, redoc_url=None, openapi_url=None,
+)
+logger = logging.getLogger(__name__)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def safe_http_error(request: Request, exc: StarletteHTTPException):
+    detail = exc.detail
+    if request.url.path in ("/quote", "/checkout/create", "/checkout/cart/create"):
+        restriction = exc.status_code in (401, 403, 429) or detail in (
+            "Only authorized sandbox checkout is available during validation.",
+            "Production checkout is awaiting activation.", "Live Checkout is disabled during validation.",
+        ) if isinstance(detail, str) else exc.status_code in (401, 403, 429)
+        category = ("system_restriction" if restriction else "invalid_input" if exc.status_code in (400, 422)
+                    else "api_failure")
+        journey_runtime.observe_error(request.headers.get("x-oplates-journey"),
+            "quote" if request.url.path == "/quote" else "checkout", category)
+    if exc.status_code >= 500 and not request.url.path.startswith(("/admin/", "/internal/", "/debug/")):
+        logger.error("Customer service request failed: route=%s status=%s", request.scope.get("route").path if request.scope.get("route") else "unmatched", exc.status_code)
+        detail = "Service temporarily unavailable. Please try again."
+    return JSONResponse({"detail": detail}, status_code=exc.status_code, headers=exc.headers)
+
+
+@app.exception_handler(Exception)
+async def safe_unhandled_error(request: Request, exc: Exception):
+    logger.exception("Unhandled service error", exc_info=exc)
+    return JSONResponse({"detail": "Service temporarily unavailable. Please try again."}, status_code=500)
 
 ALLOWED_ORIGINS = [
     "https://quote.o-plates.com",
@@ -84,6 +128,14 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "")
 Base = declarative_base()
 engine = create_engine(DATABASE_URL, pool_pre_ping=True) if DATABASE_URL else None
 SessionLocal = sessionmaker(bind=engine) if engine else None
+# Reuse the existing restricted Frozen Plate Postgres identity. No new secret,
+# service or customer-facing DB permission. UI only calls the authenticated API.
+_mode_database_url = os.environ.get("FROZEN_PLATE_DATABASE_URL", "")
+checkout_mode_engine = create_engine(_mode_database_url.replace("postgres://", "postgresql://", 1), pool_pre_ping=True, connect_args={"connect_timeout": 10}) if _mode_database_url else None
+
+
+def _checkout_mode_database():
+    return checkout_mode_engine if APP_ENV == "production" else engine
 
 # Email config
 SENDGRID_API_KEY = os.environ.get("SENDGRID_API_KEY", "")
@@ -131,12 +183,15 @@ class _InMemoryRateLimiter:
 
 _RATE_LIMITER = _InMemoryRateLimiter()
 
+from pricing_configuration import PROCESS_KEYS, project as project_config, version as config_version, validate as validate_config
+
 # Snapshot of file-based defaults so we can restore after applying DB overrides
 _CFG_BASELINE = {
     "PRICE_PER_SQ_IN": copy.deepcopy(getattr(cfg, "PRICE_PER_SQ_IN", {})),
     "MATERIAL_ENABLED": copy.deepcopy(getattr(cfg, "MATERIAL_ENABLED", {})),
     "THICKNESS_ENABLED_BY_MATERIAL": copy.deepcopy(getattr(cfg, "THICKNESS_ENABLED_BY_MATERIAL", {})),
     "LEAD_TIME_MULTIPLIER": copy.deepcopy(getattr(cfg, "LEAD_TIME_MULTIPLIER", {})),
+    "LEAD_TIME_MULTIPLIER_MASTER": copy.deepcopy(cfg.LEAD_TIME_MULTIPLIER_MASTER),
     "LEAD_TIME_ENABLED": copy.deepcopy(getattr(cfg, "LEAD_TIME_ENABLED", {})),
     "DEFAULT_LEAD_TIME_DAYS": getattr(cfg, "DEFAULT_LEAD_TIME_DAYS", 21),
     "WEIGHT_MULTIPLIER_BY_MATERIAL": copy.deepcopy(getattr(cfg, "WEIGHT_MULTIPLIER_BY_MATERIAL", {})),
@@ -145,6 +200,7 @@ _CFG_BASELINE = {
     "MAX_BORE_DIA_IN": getattr(cfg, "MAX_BORE_DIA_IN", 19.0),
     "MAX_HANDLE_LABEL_CHARS": getattr(cfg, "MAX_HANDLE_LABEL_CHARS", 40),
 }
+_CFG_BASELINE.update({key.upper(): copy.deepcopy(getattr(cfg, key.upper())) for key in PROCESS_KEYS})
 
 
 # ----------------------------
@@ -166,6 +222,7 @@ class Order(Base):
     stripe_payment_intent = Column(String, nullable=True)
     status = Column(String, default="pending", nullable=False, index=True)
     paid_at = Column(DateTime, nullable=True)
+    owner_archived_at = Column(DateTime, nullable=True)
     last_stripe_event_id = Column(String, nullable=True, unique=True)
 
     customer_email = Column(String, nullable=True)
@@ -208,6 +265,7 @@ def init_db() -> None:
         conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS status VARCHAR NOT NULL DEFAULT 'pending'"))
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_status ON orders(status)"))
         conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS paid_at TIMESTAMP WITH TIME ZONE"))
+        conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS owner_archived_at TIMESTAMP WITH TIME ZONE"))
         conn.execute(text("ALTER TABLE orders ADD COLUMN IF NOT EXISTS last_stripe_event_id VARCHAR"))
         conn.execute(
             text(
@@ -273,7 +331,7 @@ def _owner_test_configuration_required() -> None:
         raise HTTPException(503, "Production confirmation configuration unavailable.") from None
 
 
-def _stripe_checkout_required(customer_id=None, checkout_mode=None) -> bool:
+def _legacy_stripe_checkout_required(customer_id=None, checkout_mode=None) -> bool:
     if checkout_mode == "owner_test":
         if not _owner_test_authorized(customer_id):
             raise HTTPException(403, "Owner sandbox checkout unavailable.")
@@ -315,12 +373,78 @@ def _stripe_checkout_required(customer_id=None, checkout_mode=None) -> bool:
             or not os.environ.get("SENDGRID_API_KEY")
             or not ADMIN_API_KEY):
             raise HTTPException(503, "Production checkout is awaiting activation.")
+        if not WEBHOOK_SECRET or WEBHOOK_SECRET == STRIPE_TEST_WEBHOOK_SECRET:
+            raise HTTPException(503, "Independent live webhook configuration required.")
+        # Existing owner-acceptance mode is the supervised-purchase boundary.
+        # Missing configuration stays closed to the public.
+        if os.environ.get("OPLATES_OWNER_ACCEPTANCE_MODE", "true") != "false":
+            if not customer_id or customer_id not in _drawing_assisted_allowed_user_ids():
+                raise HTTPException(403, "Checkout is currently closed.")
         try:
             from frozen_plate.api import repository as frozen_repository
             frozen_repository()
         except Exception:
             raise HTTPException(503, "Production confirmation configuration unavailable.") from None
     return False
+
+
+def _checkout_control_readiness():
+    test_blockers = []
+    if APP_ENV == "production":
+        checks = (
+            (STRIPE_TEST_SECRET_KEY.startswith(("sk_test_", "rk_test_")), "Stripe TEST credential is missing or is not a TEST key."),
+            (bool(STRIPE_TEST_WEBHOOK_SECRET) and STRIPE_TEST_WEBHOOK_SECRET != WEBHOOK_SECRET, "Independent TEST webhook signing secret is missing."),
+            (APP_BASE_URL.startswith("https://"), "HTTPS checkout return origin is missing."),
+            (frozen_plate_enabled(app_env=APP_ENV), "Frozen Plate production workflow is disabled."),
+            (os.environ.get("FROZEN_PLATE_EMAIL_MODE") == "send", "Confirmation email delivery mode is not send."),
+            (bool(SENDGRID_API_KEY), "Confirmation email provider credential is missing."),
+            (bool(ADMIN_API_KEY), "Owner API authorization binding is missing."),
+            (os.environ.get("OPLATES_OWNER_TEST_CHECKOUT_ENABLED") == "true", "Hard environment TEST permission is disabled."),
+            (_drawing_assisted_feature_enabled() and bool(_drawing_assisted_allowed_user_ids()), "Existing server-authorized tester allowlist is disabled or empty."),
+        )
+        test_blockers.extend(message for passed, message in checks if not passed)
+        try:
+            from frozen_plate.api import repository as frozen_repository
+            frozen_repository()
+        except Exception:
+            test_blockers.append("Frozen Plate private database/storage/signing binding failed validation.")
+    else:
+        try:
+            _legacy_stripe_checkout_required()
+        except HTTPException as error:
+            test_blockers.append(str(error.detail))
+    if not _jwk_client or not SUPABASE_JWT_ISSUER:
+        test_blockers.append("Verified customer authentication is unavailable.")
+    return {
+        "stripe_test_credentials_configured": STRIPE_TEST_SECRET_KEY.startswith(("sk_test_", "rk_test_")),
+        "stripe_live_credentials_configured": str(stripe.api_key or "").startswith(("sk_live_", "rk_live_")),
+        "test_webhook_configured": bool(STRIPE_TEST_WEBHOOK_SECRET and STRIPE_TEST_WEBHOOK_SECRET != WEBHOOK_SECRET),
+        "live_webhook_configured": bool(WEBHOOK_SECRET and WEBHOOK_SECRET != STRIPE_TEST_WEBHOOK_SECRET),
+        "frozen_plate_and_email_configuration_ready": not test_blockers,
+        "stripe_live_readiness": "Separate supervised activation required" if os.environ.get("FROZEN_PLATE_LIVE_CHECKOUT_READY") == "true" else "Existing LIVE readiness gate is closed",
+        "provider_readiness": "Requires recorded supervised acceptance; configured values alone are not verification.",
+        "test_blockers": test_blockers,
+    }
+
+
+def _checkout_control_status():
+    from checkout_control import status
+    return status(_checkout_mode_database(), _checkout_control_readiness())
+
+
+def _stripe_checkout_required(customer_id=None, checkout_mode=None) -> bool:
+    # The compatibility header is never authority: derive mode from protected DB.
+    state = _checkout_control_status()
+    if state["effective_mode"] != "TEST":
+        raise HTTPException(503, "Checkout is currently closed.")
+    from checkout_control import tester
+    if not tester(_checkout_mode_database(), customer_id):
+        raise HTTPException(403, "Purchasing is unavailable for this account.")
+    if APP_ENV == "production":
+        return _legacy_stripe_checkout_required(customer_id, "owner_test")
+    _legacy_stripe_checkout_required(customer_id)
+    return False
+
 
 
 def _is_owner_test_order(order) -> bool:
@@ -341,9 +465,27 @@ def _create_checkout_session(checkout_args, owner_test, customer_id):
         checkout_args["metadata"]["oplates_payment_mode"] = "owner_test"
         if "idempotency_key" in checkout_args:
             checkout_args["idempotency_key"] = "owner-test:" + customer_id + ":" + checkout_args["idempotency_key"]
-    session = stripe.checkout.Session.create(**checkout_args)
+    from checkout_control import locked, tester
+    with locked(_checkout_mode_database()) as (mode_connection, state):
+        if state["requested_mode"] != "TEST" or not state["test_binding_verified_at"]:
+            raise HTTPException(503, "Checkout is currently closed.")
+        if _checkout_control_readiness()["test_blockers"]:
+            raise HTTPException(503, "TEST readiness is unavailable; checkout is CLOSED.")
+        recipient = tester(_checkout_mode_database(), customer_id, connection=mode_connection)
+        if not recipient:
+            raise HTTPException(403, "Verified TEST recipient unavailable.")
+        checkout_args["customer_email"] = recipient
+        checkout_args["metadata"]["test_recipient"] = recipient
+        for item in checkout_args.get("line_items", []):
+            product = item.get("price_data", {}).get("product_data", {})
+            product["name"] = "TEST / NOT A REAL SALE — " + product.get("name", "O-Plates")
+        session = stripe.checkout.Session.create(**checkout_args)
     if owner_test and (session.livemode is not False or not session.id.startswith("cs_test_")):
         raise HTTPException(502, "Sandbox Checkout session verification failed.")
+    if not owner_test:
+        live = APP_ENV == "production"
+        if session.livemode is not live or not session.id.startswith("cs_live_" if live else "cs_test_"):
+            raise HTTPException(502, "Checkout session mode verification failed.")
     return session
 
 
@@ -482,6 +624,8 @@ def _decode_supabase_user_id_from_bearer(authorization: Optional[str]) -> Option
             options={"verify_exp": True},
         )
 
+        if decoded.get("is_anonymous") is True:
+            return None
         return decoded.get("sub")
 
     except Exception:
@@ -657,6 +801,8 @@ def _get_or_seed_active_config(db) -> dict:
 
 
 def _restore_cfg_baseline() -> None:
+    for key in PROCESS_KEYS:
+        setattr(cfg, key.upper(), copy.deepcopy(_CFG_BASELINE[key.upper()]))
     cfg.PRICE_PER_SQ_IN = copy.deepcopy(_CFG_BASELINE["PRICE_PER_SQ_IN"])
     cfg.MATERIAL_ENABLED = copy.deepcopy(_CFG_BASELINE["MATERIAL_ENABLED"])
     cfg.THICKNESS_ENABLED_BY_MATERIAL = copy.deepcopy(_CFG_BASELINE["THICKNESS_ENABLED_BY_MATERIAL"])
@@ -678,6 +824,11 @@ def _apply_cfg_from_db_config(config_json: dict) -> None:
     - If DB is missing/empty price_per_sq_in, we fall back to baseline price table
       so /quote doesn't 500 from an empty cfg.PRICE_PER_SQ_IN.
     """
+    for key in PROCESS_KEYS:
+        value = copy.deepcopy(config_json.get(key, _CFG_BASELINE[key.upper()]))
+        if key == "inspection_mins_by_tol":
+            value = {float(k): v for k, v in value.items()}
+        setattr(cfg, key.upper(), value)
     material_enabled = config_json.get("material_enabled") or {}
     th_enabled_by_mat = config_json.get("thickness_enabled_by_material") or {}
     lt_enabled = config_json.get("lead_time_enabled") or {}
@@ -769,7 +920,7 @@ def _apply_cfg_from_db_config(config_json: dict) -> None:
     cfg.PRICE_PER_SQ_IN = final_ppsi
 
     # Lead time multiplier: filter baseline master by enabled keys
-    master_lt = copy.deepcopy(_CFG_BASELINE.get("LEAD_TIME_MULTIPLIER") or getattr(cfg, "LEAD_TIME_MULTIPLIER", {}))
+    master_lt = {int(k): v for k, v in config_json.get("lead_time_multipliers", _CFG_BASELINE["LEAD_TIME_MULTIPLIER_MASTER"]).items()}
     cfg.LEAD_TIME_MULTIPLIER = {
         int(d): float(master_lt[int(d)])
         for d, enabled in cfg.LEAD_TIME_ENABLED.items()
@@ -796,7 +947,8 @@ def _calculate_quote_with_db_knobs(inputs: QuoteInputs) -> dict:
         finally:
             _restore_cfg_baseline()
 
-    result["pricing_config_version"] = version
+    from pricing_calibration import MODEL_VERSION
+    result["pricing_config_version"] = f"{version}:{MODEL_VERSION}"
     return result
 
 # ----------------------------
@@ -959,93 +1111,106 @@ async def quote(request: Request):
 
     except Exception as e:
         # unexpected
-        raise HTTPException(status_code=500, detail=f"Unhandled quote error: {type(e).__name__}: {e}")
+        logger.exception("Quote calculation failed")
+        raise HTTPException(status_code=500, detail="Pricing is temporarily unavailable.") from None
 
 
 # ----------------------------
 # Admin config endpoints
 # ----------------------------
+def _config_snapshot(db):
+    active = _get_or_seed_active_config(db)
+    row = db.query(AppConfig).filter(AppConfig.id == "active").first()
+    return row, project_config(active, _CFG_BASELINE)
+
+
 @app.get("/admin/config", dependencies=[Depends(_rate_limit_admin)])
 def admin_get_config():
     _db_required()
-    db = SessionLocal()
+    with SessionLocal() as db:
+        row, active = _config_snapshot(db)
+        return {**active, "_version": config_version(row)}
+
+
+@app.get("/admin/config/editor", dependencies=[Depends(_rate_limit_admin)])
+def admin_config_editor():
+    _db_required()
+    with SessionLocal() as db:
+        row, active = _config_snapshot(db)
+        history = db.query(AppConfig).filter(AppConfig.id.like("pricing-history-%")).order_by(AppConfig.updated_at.desc()).limit(50).all()
+        return {"config": active, "version": config_version(row),
+                "defaults": project_config(_default_knobs_config(), _CFG_BASELINE),
+                "history": [{"id": item.id, "saved_at": item.updated_at.isoformat(),
+                             "config": project_config(item.config_json, _CFG_BASELINE)} for item in history]}
+
+
+async def _write_config(request, action):
+    _db_required()
     try:
-        active = _get_or_seed_active_config(db)
-        return active
-    finally:
-        db.close()
+        payload = await request.json()
+    except ValueError:
+        raise HTTPException(422, "Malformed JSON.") from None
+    if not isinstance(payload, dict):
+        raise HTTPException(422, "Configuration must be an object.")
+    expected = payload.pop("_version", None)
+    confirmation = payload.pop("_confirmation", None)
+    required_confirmation = {"save": "SAVE CHANGES", "reset": "RESET DEFAULTS", "restore": "RESTORE CONFIGURATION"}[action]
+    if not expected:
+        raise HTTPException(428, "Reload configuration before saving; a version is required.")
+    if confirmation != required_confirmation:
+        raise HTTPException(422, "Explicit change confirmation is required.")
+    with SessionLocal() as db:
+        row, active = _config_snapshot(db)
+        if config_version(row) != expected:
+            raise HTTPException(409, "Configuration changed in another session. Reload and review your changes.")
+        defaults = project_config(_default_knobs_config(), _CFG_BASELINE)
+        if action == "reset":
+            candidate = defaults
+        elif action == "restore":
+            prior_id = payload.get("history_id", "")
+            if not isinstance(prior_id, str) or not prior_id.startswith("pricing-history-"):
+                raise HTTPException(422, "Select a saved configuration.")
+            prior = db.query(AppConfig).filter(AppConfig.id == prior_id).first()
+            if not prior:
+                raise HTTPException(404, "Saved configuration not found.")
+            candidate = project_config(prior.config_json, _CFG_BASELINE)
+        else:
+            candidate = payload
+        try:
+            candidate = validate_config(candidate, defaults)
+        except (ValueError, TypeError, OverflowError) as exc:
+            raise HTTPException(422, str(exc)) from None
+        candidate["updated_by"] = "owner"
+        now = datetime.now(timezone.utc)
+        candidate["updated_at"] = now.isoformat()
+        previous = copy.deepcopy(row.config_json)
+        old_timestamp = row.updated_at
+        # Atomic compare-and-swap: works across API processes, not just threads.
+        count = db.query(AppConfig).filter(AppConfig.id == "active", AppConfig.updated_at == old_timestamp).update(
+            {AppConfig.config_json: candidate, AppConfig.updated_at: now}, synchronize_session=False)
+        if count != 1:
+            db.rollback()
+            raise HTTPException(409, "Configuration changed in another session. Reload and review your changes.")
+        db.add(AppConfig(id="pricing-history-" + str(uuid.uuid4()), config_json=previous, updated_at=now))
+        db.commit()
+        db.expire_all()
+        saved = db.query(AppConfig).filter(AppConfig.id == "active").first()
+        return {"ok": True, "config": saved.config_json, "version": config_version(saved)}
 
 
 @app.put("/admin/config", dependencies=[Depends(_rate_limit_admin)])
 async def admin_put_config(request: Request):
-    _db_required()
-    payload = await request.json()
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=400, detail="Config must be a JSON object")
-
-    # Light validation
-    for k in ("material_enabled", "lead_time_enabled", "thickness_enabled_by_material", "price_per_sq_in"):
-        if k in payload and payload[k] is not None and not isinstance(payload[k], dict):
-            raise HTTPException(status_code=400, detail=f"{k} must be an object")
-
-    if "default_lead_time_days" in payload:
-        try:
-            payload["default_lead_time_days"] = int(payload["default_lead_time_days"])
-        except Exception:
-            raise HTTPException(status_code=400, detail="default_lead_time_days must be an integer")
-
-    for key in ("max_paddle_dia_in", "max_bore_dia_in"):
-        if key in payload:
-            try:
-                payload[key] = float(payload[key])
-            except Exception:
-                raise HTTPException(status_code=400, detail=f"{key} must be numeric")
-    if "max_handle_label_chars" in payload:
-        try:
-            payload["max_handle_label_chars"] = int(payload["max_handle_label_chars"])
-        except Exception:
-            raise HTTPException(status_code=400, detail="max_handle_label_chars must be an integer")
-
-    payload["updated_at"] = datetime.now(timezone.utc).isoformat()
-
-    db = SessionLocal()
-    try:
-        row = db.query(AppConfig).filter(AppConfig.id == "active").first()
-        if not row:
-            row = AppConfig(id="active", config_json=payload)
-            db.add(row)
-        else:
-            row.config_json = payload
-            row.updated_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(row)
-        return {"ok": True, "config": row.config_json}
-    finally:
-        db.close()
+    return await _write_config(request, "save")
 
 
 @app.post("/admin/config/reset", dependencies=[Depends(_rate_limit_admin)])
-def admin_reset_config():
-    """
-    Reset the DB 'active' config to the current file defaults (tuning_knobs.py baseline).
-    This is the escape hatch when DB config gets out of sync / missing price tables.
-    """
-    _db_required()
-    db = SessionLocal()
-    try:
-        fresh = _default_knobs_config()
-        row = db.query(AppConfig).filter(AppConfig.id == "active").first()
-        if not row:
-            row = AppConfig(id="active", config_json=fresh)
-            db.add(row)
-        else:
-            row.config_json = fresh
-            row.updated_at = datetime.now(timezone.utc)
-        db.commit()
-        db.refresh(row)
-        return {"ok": True, "config": row.config_json}
-    finally:
-        db.close()
+async def admin_reset_config(request: Request):
+    return await _write_config(request, "reset")
+
+
+@app.post("/admin/config/restore", dependencies=[Depends(_rate_limit_admin)])
+async def admin_restore_config(request: Request):
+    return await _write_config(request, "restore")
 
 
 def _checkout_recovery_reference(customer_id, idempotency_key, kind, *, owner_test=False):
@@ -1107,13 +1272,54 @@ def checkout_recovery(
 # ----------------------------
 # Checkout endpoints
 # ----------------------------
+def _distinct_checkout_owner_key():
+    if not ADMIN_API_KEY or ADMIN_API_KEY == API_KEY:
+        raise HTTPException(503, "A separate owner credential is required for Checkout Control.")
+
+
+class CheckoutModeChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    requested_mode: Literal["CLOSED", "TEST", "LIVE"]
+    expected_version: int = Field(ge=1, strict=True)
+    confirmation: str
+
+
+@app.get("/admin/checkout-control", dependencies=[Depends(_rate_limit_admin)])
+def admin_checkout_control():
+    _distinct_checkout_owner_key()
+    return _checkout_control_status()
+
+
+@app.put("/admin/checkout-control", dependencies=[Depends(_rate_limit_admin)])
+def admin_apply_checkout_control(change: CheckoutModeChange):
+    _distinct_checkout_owner_key()
+    from checkout_control import apply
+    return apply(_checkout_mode_database(), readiness=_checkout_control_readiness(), **change.model_dump())
+
+
+@app.get("/checkout/availability")
+def checkout_availability(
+    authorization: Optional[str] = Header(default=None, alias="authorization"),
+):
+    """Presentation readiness only; creation repeats every authoritative gate."""
+    customer_id = _decode_supabase_user_id_from_bearer(authorization)
+    if authorization and not customer_id:
+        raise HTTPException(401, "Unauthorized")
+    try:
+        owner_test = _stripe_checkout_required(customer_id)
+        return {"available": True, "mode": "owner_test" if owner_test else "test"}
+    except HTTPException:
+        return {"available": False, "mode": None}
+
+
 @app.post("/checkout/create")
 def checkout_create(
     req: CheckoutCreateRequest,
-    customer_user_id: Optional[str] = Depends(_api_key_or_customer_user_id),
+    customer_user_id: str = Depends(_require_customer_user_id),
     checkout_mode: Optional[str] = Header(default=None, alias="x-oplates-checkout-mode"),
+    journey_session: Optional[str] = Header(default=None, alias="x-oplates-journey"),
 ):
-    principal = f"customer:{customer_user_id}" if customer_user_id else "verified-ui-key"
+    principal = f"customer:{customer_user_id}"
     _RATE_LIMITER.check(
         f"checkout:{principal}",
         CHECKOUT_RATE_LIMIT_REQUESTS,
@@ -1123,7 +1329,10 @@ def checkout_create(
     _db_required()
 
     inputs = QuoteInputs(**req.inputs.model_dump())
-    result = _calculate_quote_with_db_knobs(inputs)
+    try:
+        result = _calculate_quote_with_db_knobs(inputs)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from None
 
     if req.pricing_config_version and req.pricing_config_version != result.get("pricing_config_version"):
         raise HTTPException(
@@ -1229,7 +1438,7 @@ def checkout_create(
         stripe_session_id=session.id,
         quote_payload={
             **req.inputs.model_dump(),
-            **({"_payment": {"mode": "owner_test", "owner_id": customer_user_id}} if owner_test else {}),
+            **({"_payment": {"mode": "owner_test", "owner_id": customer_user_id, "recipient": checkout_args["customer_email"]}} if owner_test else {}),
             **(
                 {
                     "_checkout_recovery": {
@@ -1245,6 +1454,9 @@ def checkout_create(
         customer_user_id=customer_user_id,
     )
 
+    if isinstance(journey_session, str):
+        journey_runtime.submit("bind", journey_session, session.id,
+                               internal=owner_test or _owner_test_authorized(customer_user_id))
     return {"checkout_url": session.url, "session_id": session.id}
 
 
@@ -1253,6 +1465,7 @@ def checkout_cart_create(
     req: CartCheckoutCreateRequest,
     customer_user_id: str = Depends(_require_customer_user_id),
     checkout_mode: Optional[str] = Header(default=None, alias="x-oplates-checkout-mode"),
+    journey_session: Optional[str] = Header(default=None, alias="x-oplates-journey"),
 ):
     owner_test = _stripe_checkout_required(customer_user_id, checkout_mode)
     _db_required()
@@ -1266,10 +1479,17 @@ def checkout_cart_create(
     ship_nextday_cents = 0
 
     normalized_items = []
+    cart_config_version = None
 
     for it in req.items:
         inputs = QuoteInputs(**it.model_dump())
-        res = _calculate_quote_with_db_knobs(inputs)
+        try:
+            res = _calculate_quote_with_db_knobs(inputs)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None
+        if cart_config_version is not None and res.get("pricing_config_version") != cart_config_version:
+            raise HTTPException(409, "Pricing changed while calculating the cart. Review updated prices.")
+        cart_config_version = res.get("pricing_config_version")
 
         if (
             req.pricing_config_version
@@ -1385,7 +1605,7 @@ def checkout_cart_create(
         stripe_session_id=session.id,
         quote_payload={
             "cart_items": normalized_items,
-            **({"_payment": {"mode": "owner_test", "owner_id": customer_user_id}} if owner_test else {}),
+            **({"_payment": {"mode": "owner_test", "owner_id": customer_user_id, "recipient": checkout_args["customer_email"]}} if owner_test else {}),
             **(
                 {
                     "_checkout_recovery": {
@@ -1401,6 +1621,9 @@ def checkout_cart_create(
         customer_user_id=customer_user_id,
     )
 
+    if isinstance(journey_session, str):
+        journey_runtime.submit("bind", journey_session, session.id,
+                               internal=owner_test or _owner_test_authorized(customer_user_id))
     return {"checkout_url": session.url, "session_id": session.id}
 
 
@@ -1422,6 +1645,7 @@ def get_order_by_session(
         response = {
             "id": o.id,
             "status": o.status,
+            "payment_mode": _admin_payment_mode(o),
             "order_number": o.order_number,
             "order_number_display": _format_order_number(o.order_number),
             "amount_total_usd": (o.amount_total_cents or 0) / 100.0,
@@ -1521,8 +1745,47 @@ def me_order_detail(order_id: str, customer_user_id: str = Depends(_require_cust
         db.close()
 
 
+def _admin_payment_mode(order):
+    session = order.stripe_session_id or ""
+    if not isinstance(session, str):
+        return "UNKNOWN"
+    if re.fullmatch(r"cs_test_[A-Za-z0-9_]+", session):
+        try:
+            return "OWNER TEST" if _is_owner_test_order(order) else "TEST"
+        except (AttributeError, TypeError):
+            return "TEST"
+    if re.fullmatch(r"cs_live_[A-Za-z0-9_]+", session):
+        return "LIVE"
+    return "UNKNOWN"
+
+
+@app.get("/admin/manufacturing-summary", dependencies=[Depends(_rate_limit_admin)])
+def admin_manufacturing_summary(archive_view: Literal["Active", "Archived", "All"] = "Active", q: Optional[str] = None):
+    if not frozen_plate_enabled(app_env=APP_ENV):
+        raise HTTPException(503, "Manufacturing records unavailable")
+    from frozen_plate.api import repository
+    from frozen_plate.control_data import bounded_summary
+    from frozen_plate.repository import WorkflowError
+    try:
+        return bounded_summary(admin_list_orders(q=q, limit=200, archive_view=archive_view), repository(), archive_view=archive_view, search=q)
+    except (WorkflowError, ValueError, KeyError):
+        raise HTTPException(503, "Manufacturing records unavailable") from None
+
+
+@app.get("/admin/sales", dependencies=[Depends(_rate_limit_admin)])
+def admin_sales(period: Literal["1y", "6m", "3m", "1m"] = "1y"):
+    """Full-history aggregate; no writes or Stripe requests."""
+    from owner_sales import aggregate_sales
+    _db_required()
+    db = SessionLocal()
+    try:
+        return aggregate_sales(db, Order, period)
+    finally:
+        db.close()
+
+
 @app.get("/admin/orders", dependencies=[Depends(_rate_limit_admin)])
-def admin_list_orders(q: Optional[str] = None, limit: int = 50):
+def admin_list_orders(q: Optional[str] = None, limit: int = 50, archive_view: Literal["Active", "Archived", "All"] = "Active", offset: int = 0):
     _db_required()
     limit = max(1, min(int(limit), 200))
 
@@ -1530,24 +1793,19 @@ def admin_list_orders(q: Optional[str] = None, limit: int = 50):
     try:
         query = db.query(Order).order_by(Order.created_at.desc())
 
-        if q and q.strip():
-            qq = q.strip()
-            query = query.filter(
-                or_(
-                    Order.id.ilike(f"%{qq}%"),
-                    Order.customer_email.ilike(f"%{qq}%"),
-                    Order.stripe_session_id.ilike(f"%{qq}%"),
-                )
-            )
+        from owner_order_archive import filter_orders
+        query = filter_orders(query, Order, archive_view=archive_view, search=q)
 
-        orders = query.limit(limit).all()
+        orders = query.offset(max(0, int(offset))).limit(limit).all()
         return [
             {
                 "id": o.id,
                 "status": o.status,
-                "payment_mode": "OWNER TEST" if _is_owner_test_order(o) else ("TEST" if (o.stripe_session_id or "").startswith("cs_test_") else "LIVE"),
+                "owner_archived_at": o.owner_archived_at.isoformat() if o.owner_archived_at else None,
+                "payment_mode": _admin_payment_mode(o),
                 "order_number_display": _format_order_number(o.order_number),
                 "created_at": o.created_at.isoformat() if o.created_at else None,
+                "paid_at": o.paid_at.isoformat() if o.paid_at else None,
                 "customer_email": o.customer_email,
                 "amount_total_usd": (o.amount_total_cents or 0) / 100.0,
                 "amount_shipping_usd": (o.amount_shipping_cents or 0) / 100.0,
@@ -1577,6 +1835,22 @@ def debug_whoami(
     }
 
 
+class OrderArchiveRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    archived: StrictBool
+
+
+@app.put("/admin/orders/{order_id}/archive", dependencies=[Depends(_rate_limit_admin)])
+def admin_archive_order(order_id: str, body: OrderArchiveRequest):
+    _db_required()
+    from owner_order_archive import set_archived
+    db = SessionLocal()
+    try:
+        return set_archived(db, Order, order_id, body.archived)
+    finally:
+        db.close()
+
+
 @app.get("/admin/orders/{order_id}", dependencies=[Depends(_rate_limit_admin)])
 def admin_get_order(order_id: str):
     _db_required()
@@ -1589,9 +1863,11 @@ def admin_get_order(order_id: str):
         return {
             "id": o.id,
             "status": o.status,
-            "payment_mode": "OWNER TEST" if _is_owner_test_order(o) else ("TEST" if (o.stripe_session_id or "").startswith("cs_test_") else "LIVE"),
+            "owner_archived_at": o.owner_archived_at.isoformat() if o.owner_archived_at else None,
+            "payment_mode": _admin_payment_mode(o),
             "order_number_display": _format_order_number(o.order_number),
             "created_at": o.created_at.isoformat() if o.created_at else None,
+            "paid_at": o.paid_at.isoformat() if o.paid_at else None,
             "stripe_session_id": o.stripe_session_id,
             "stripe_payment_intent": o.stripe_payment_intent,
             "customer_email": o.customer_email,
@@ -1707,6 +1983,8 @@ async def _complete_stripe_webhook(request: Request, *, owner_test):
     payment_intent = session.get("payment_intent")
     customer_details = session.get("customer_details") or {}
     customer_email = customer_details.get("email")
+    if owner_test:
+        customer_email = (session.get("metadata") or {}).get("test_recipient")
     amount_total = session.get("amount_total")
     amount_subtotal = session.get("amount_subtotal")
     amount_shipping = (session.get("shipping_cost") or {}).get("amount_total")
@@ -1751,8 +2029,23 @@ async def _complete_stripe_webhook(request: Request, *, owner_test):
                 detail="Pending order is not available yet; retry this webhook.",
             )
 
+        if order.customer_id and order.customer_id != customer_id:
+            raise HTTPException(400, "Payment identity does not match the server-owned order.")
         if owner_test and (not _is_owner_test_order(order) or order.customer_id != customer_id):
             raise HTTPException(400, "Sandbox payment does not match the server-owned order.")
+        if owner_test:
+            expected_recipient = ((order.quote_payload or {}).get("_payment") or {}).get("recipient")
+            if expected_recipient:
+                if customer_email != expected_recipient:
+                    raise HTTPException(400, "Sandbox recipient does not match the server-owned order.")
+            else:
+                # Pre-selector pending/completed owner TEST sessions have no
+                # recipient marker. Resolve only their confirmed registry address;
+                # never trust the Stripe contact email or rewrite frozen provenance.
+                from checkout_control import tester
+                customer_email = tester(_checkout_mode_database(), order.customer_id)
+                if not customer_email:
+                    raise HTTPException(503, "Verified legacy TEST recipient unavailable; retry webhook.")
         if not owner_test and _is_owner_test_order(order):
             raise HTTPException(400, "Live payment cannot complete a sandbox order.")
 
@@ -1798,6 +2091,10 @@ async def _complete_stripe_webhook(request: Request, *, owner_test):
         ) from exc
     finally:
         db.close()
+
+    # Observe only the committed, server-verified transition. No client proof.
+    journey_runtime.submit("paid", stripe_session_id,
+                           live=APP_ENV == "production" and not owner_test)
 
     # Retry-safe environment-isolated integration after the order has committed.
     if frozen_plate_enabled(app_env=APP_ENV):
@@ -1847,8 +2144,14 @@ def _frozen_plate_order_snapshot(order_id):
             (order.stripe_session_id or "").startswith("cs_live_") or _is_owner_test_order(order)
         ):
             raise HTTPException(404, "Completed live customer order not found")
+        legacy_recipient = None
+        if _is_owner_test_order(order) and not order.quote_payload["_payment"].get("recipient"):
+            from checkout_control import tester
+            legacy_recipient = tester(_checkout_mode_database(), order.customer_id)
         return {"id": order.id, "customer_id": order.customer_id,
-                "customer_email": order.customer_email,
+                **({"verified_test_recipient": legacy_recipient} if legacy_recipient else {}),
+                "customer_email": legacy_recipient or order.customer_email,
+                "order_number_display": _format_order_number(order.order_number),
                 "quote_payload": copy.deepcopy(order.quote_payload)}
     finally:
         db.close()
@@ -1857,5 +2160,41 @@ def _frozen_plate_order_snapshot(order_id):
 # Explicit production opt-in; production and staging retain separate bindings.
 if frozen_plate_enabled(app_env=APP_ENV):
     from frozen_plate.api import router as frozen_plate_router
+    def notify_manufacturing_approval():
+        from final4.runtime import enabled
+        if enabled():
+            from final4.worker import request_scan
+            request_scan()
+
     app.include_router(frozen_plate_router(_require_customer_user_id, _rate_limit_admin,
-                                          _frozen_plate_order_snapshot))
+                                          _frozen_plate_order_snapshot,
+                                          approval_committed=notify_manufacturing_approval))
+
+# Additive owner-only tooling. Existing customer/checkout routes remain untouched.
+if frozen_plate_enabled(app_env=APP_ENV):
+    from final4.runtime import enabled as final4_enabled
+    if final4_enabled():
+        from final4.api import router as final4_router
+        from final4.runtime import service as derived_service, configuration as derived_configuration, test_engineering as derived_test_engineering
+        app.include_router(final4_router(_rate_limit_admin, derived_service,
+                           server_actor="owner-manufacturing-review",
+                           get_test_engineering=derived_test_engineering))
+
+        @app.get("/admin/manufacturing/configuration", dependencies=[Depends(_rate_limit_admin)])
+        def manufacturing_configuration():
+            from frozen_plate.repository import WorkflowError
+            try:
+                return derived_configuration()
+            except (WorkflowError, ValueError, TypeError, OSError):
+                raise HTTPException(503, "Manufacturing PostgreSQL configuration unavailable") from None
+
+        from final4.runtime import worker as staging_worker
+        app.state.manufacturing_stager = staging_worker()
+
+        @app.get("/admin/manufacturing/staging/{revision_id}", dependencies=[Depends(_rate_limit_admin)])
+        def manufacturing_staging_status(revision_id: str):
+            return staging_worker().status(revision_id)
+
+
+from journey.api import install as install_journey
+install_journey(app, _rate_limit_admin)

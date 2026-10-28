@@ -1,7 +1,11 @@
+from journey.ui import emit as journey_event, headers as journey_headers
+
+from customer_safety import service_message
 # pages/1_Quote.py
 import os
 import copy
 import hashlib
+import html
 import json
 import time
 from typing import Any, Dict, Optional
@@ -59,8 +63,9 @@ from drawing_intake.owner_acceptance import (
     update_run,
 )
 from plate_preview import render_plate_svg
-from customer_controls import choice_buttons, material_cards
+from customer_controls import choice_buttons, lead_time_choices, material_cards
 from bore_edge_control import bore_edge_choice
+from quote_field_validation import field_errors
 
 # -----------------------------
 # Page setup (MUST be first Streamlit call)
@@ -148,6 +153,10 @@ st.markdown(
 
     /* Hide the source feedback only after the trusted landing host enables its sticky copy. */
     html.oplates-parent-preview .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {{visibility:hidden;pointer-events:none}}
+
+    /* Markdown explicitly restores visibility. Keep only the host's SVG copy visible. */
+    html.oplates-parent-preview .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child svg,
+    html.oplates-parent-preview .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child svg * {{visibility:hidden!important}}
 
     /* Streamlit captions explicitly set visibility; suppress the source copy only on the landing host. */
     html.oplates-parent-preview .st-key-configurator_start > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child [data-testid="stCaptionContainer"],
@@ -271,7 +280,7 @@ _FORM_KEYS = {
 }
 
 if not API_BASE:
-    st.error("The O-Plates pricing service is not configured.")
+    st.error("Pricing is temporarily unavailable. Please try again shortly.")
     st.stop()
 
 
@@ -363,7 +372,15 @@ def _render_product_image() -> None:
 # Checkout
 # -----------------------------
 def start_checkout(payload_inputs: dict, priced_configuration: dict) -> None:
-    customer_context = st.session_state.auth.get("email") if is_logged_in() else "guest"
+    if not is_logged_in():
+        st.session_state["pending_checkout_sign_in"] = {
+            "inputs": copy.deepcopy(payload_inputs),
+            "price_context": copy.deepcopy(priced_configuration),
+        }
+        _starter_sign_in()
+        return
+    journey_event("checkout", "attempted")
+    customer_context = current_user_id_hint()
     fingerprint = hashlib.sha256(
         json.dumps(
             {
@@ -404,17 +421,13 @@ def start_checkout(payload_inputs: dict, priced_configuration: dict) -> None:
             current_user_id_hint(),
             API_KEY,
         )
-    headers: Dict[str, str] = {}
+    headers: Dict[str, str] = journey_headers()
 
     # Logged-in customers: use Bearer token so API saves customer_id on the order
     if is_logged_in():
         headers.update(auth_headers())
-        if owner_test_checkout_allowed and os.environ.get("APP_ENV") == "production":
+        if purchasing_access["mode"] == "owner_test":
             headers["x-oplates-checkout-mode"] = "owner_test"
-    else:
-        # Guest flow (existing behavior)
-        if API_KEY:
-            headers["x-api-key"] = API_KEY
 
     try:
         r = requests.post(
@@ -424,26 +437,20 @@ def start_checkout(payload_inputs: dict, priced_configuration: dict) -> None:
             timeout=30,
         )
     except requests.RequestException:
+        journey_event("checkout", "error", "api_failure")
         st.error("Checkout is temporarily unavailable. Please try again.")
         st.stop()
 
     if r.status_code != 200:
-        try:
-            detail = r.json().get("detail")
-        except Exception:
-            detail = None
-        if isinstance(detail, dict):
-            message = detail.get("message")
-        else:
-            message = str(detail or "")
-        st.error(message or "Checkout couldn’t be started. Please try again.")
+        journey_event("checkout", "blocked" if r.status_code in (401,403) else "error",
+                      "system_restriction" if r.status_code in (401,403) else "api_failure")
+        st.error(service_message(r.status_code))
         st.stop()
 
     resp = r.json()
     checkout_url = resp.get("checkout_url")
     if not checkout_url:
-        st.error("Checkout API did not return checkout_url.")
-        st.json(resp)
+        st.error("Checkout couldn’t be started. Please try again.")
         st.stop()
 
     from customer_navigation import render_integrated_checkout
@@ -467,7 +474,7 @@ def load_active_config() -> dict:
 def request_authoritative_price(
     payload_inputs: dict,
 ) -> tuple[Optional[dict], Optional[str]]:
-    headers = {"x-api-key": API_KEY} if API_KEY else {}
+    headers = {**({"x-api-key": API_KEY} if API_KEY else {}), **journey_headers()}
     try:
         response = requests.post(
             f"{API_BASE}/quote",
@@ -476,6 +483,7 @@ def request_authoritative_price(
             timeout=20,
         )
     except requests.RequestException:
+        journey_event("quote", "error", "api_failure")
         return (
             None,
             "Live pricing is temporarily unavailable. Your entries are preserved; please try again.",
@@ -484,22 +492,15 @@ def request_authoritative_price(
     if response.status_code == 200:
         return response.json(), None
 
-    try:
-        detail = response.json().get("detail")
-    except Exception:
-        detail = None
-    if isinstance(detail, dict):
-        message = detail.get("message") or "This configuration could not be priced."
-    elif isinstance(detail, list):
-        message = "; ".join(str(item.get("msg") or item) for item in detail)
-    else:
-        message = str(detail or "Live pricing is temporarily unavailable.")
-    return None, message
+    journey_event("quote", "error", "unsupported" if response.status_code == 400 else
+                  "invalid_input" if response.status_code == 422 else "api_failure")
+    return None, service_message(response.status_code, pricing=True)
 
 
 try:
     active_config = load_active_config()
 except requests.RequestException:
+    journey_event("configurator", "error", "api_failure")
     st.error(
         "The configurator cannot load current product availability. Please try again shortly."
     )
@@ -763,9 +764,18 @@ owner_test_checkout_allowed = bool(
     )
 )
 
+from checkout_access import checkout_access
+purchasing_access = checkout_access(
+    API_BASE, auth_headers() if is_logged_in() else {},
+    owner_test_allowed=owner_test_checkout_allowed, owner_acceptance=OWNER_ACCEPTANCE_MODE,
+)
+if purchasing_access.get("available") and purchasing_access.get("mode") in {"test", "owner_test"}:
+    st.warning("TEST / NOT A REAL SALE — simulated purchase; no manufacturing or shipment.")
+
+
 @st.dialog("Sign in")
 def _starter_sign_in():
-    st.caption("Sign in to analyze a print or save your quotes and orders.")
+    st.caption("Sign in to analyze a print, build a quote cart, or view your orders.")
     render_auth_sidebar(show_debug=False, placement="inline")
 
 
@@ -776,24 +786,25 @@ with st.container(key="configurator_starter", border=False):
             '<div class="starter-upload-title"><span aria-hidden="true">↥</span>'
             '<strong>Upload a drawing</strong></div>', unsafe_allow_html=True
         )
-        st.caption("PDF, PNG, JPG · analyzed locally · not stored")
+        st.caption("PDF, PNG, JPG · processed for this session")
     with starter_analysis:
-        starter_status = st.empty()
+        # A persistent block retains its children until this rerun supplies the
+        # current status. st.empty() first clears them and visibly flashes.
+        starter_status = st.container(key="starter_status")
     with starter_account:
         if is_logged_in():
             render_auth_sidebar(show_debug=False, placement="inline")
         else:
-            st.caption("Save your quotes and orders")
+            st.caption("Manage your orders and quote cart")
             if st.button("Sign in", key="starter_sign_in", type="secondary"):
                 _starter_sign_in()
 
-starter_notice_shown = False
+starter_notice = None
 
 
 def _starter_notice(kind, message):
-    global starter_notice_shown
-    starter_notice_shown = True
-    getattr(starter_status, kind)(message)
+    global starter_notice
+    starter_notice = (kind, message)
 
 
 if not drawing_access_allowed:
@@ -821,6 +832,7 @@ if drawing_access_allowed:
         if uploaded_drawing is not None and analyze_column.button(
             "Analyze drawing", key="phase1g_analyze_drawing",
         ):
+            journey_event("analyzer", "attempted")
             try:
                 limits = upload_limits_from_environment()
                 validated_upload = validate_drawing_upload(
@@ -838,7 +850,7 @@ if drawing_access_allowed:
                 st.session_state[_OWNER_ACCEPTANCE_RUN_KEY] = owner_run
                 st.session_state.pop(_OWNER_ACCEPTANCE_NOTES_KEY, None)
                 inspection_started = time.perf_counter()
-                with st.spinner("Analyzing the drawing locally..."):
+                with st.spinner("Analyzing your drawing..."):
                     processed_upload = inspect_validated_upload(
                         validated_upload,
                         timeout_seconds=limits.processing_timeout_seconds,
@@ -849,6 +861,8 @@ if drawing_access_allowed:
                     candidate_count=len(processed_upload.review.candidates),
                     inspection_seconds=time.perf_counter() - inspection_started,
                 )
+                journey_event("analyzer", "success" if processed_upload.review.quote_specific else "blocked",
+                              "none" if processed_upload.review.quote_specific else "unsupported")
                 st.session_state[_DRAWING_UPLOAD_KEY] = processed_upload
                 st.session_state.pop(_DRAWING_PENDING_KEY, None)
                 st.session_state.pop("phase1g_candidate_label", None)
@@ -866,16 +880,20 @@ if drawing_access_allowed:
                         st.session_state[_DRAWING_PENDING_KEY] = recognized
                 st.rerun()
             except DrawingUploadValidationError as exc:
+                journey_event("analyzer", "error", "invalid_input")
                 _starter_notice("error", str(exc))
             except DrawingProcessingBusyError:
+                journey_event("analyzer", "blocked", "system_restriction")
                 _starter_notice("error",
                     "Another drawing is processing. Try again when it finishes; your form is unchanged."
                 )
             except DrawingProcessingTimeoutError:
+                journey_event("analyzer", "error", "technical_failure")
                 _starter_notice("error",
                     "The drawing took too long to process. Your current configuration was preserved."
                 )
             except DrawingProcessingError:
+                journey_event("analyzer", "error", "technical_failure")
                 _starter_notice("error",
                     "We couldn't process that drawing safely. You can continue with manual entry."
                 )
@@ -1049,24 +1067,43 @@ left, right = configurator_start.columns([1.12, 1.38], gap="medium")
 # -----------------------------
 with left:
     st.subheader("Configuration Drawing")
-    st.caption("Entered dimensions are reflected below. Drawing is not to scale (NTS).")
+    st.caption("Entered dimensions are reflected below. Configuration preview only.")
 
 # -----------------------------
 # RIGHT: inputs (narrowed) + Pay button bottom-center
 # -----------------------------
 drawing_mode = _DRAWING_SESSION_KEY in st.session_state
+field_error_slots = {}
+number_bounds = {}
+
+# Keep customer edits while conditional widgets are hidden by Streamlit.
+for field in ("chamfer_width", "handle_hole_diameter", "handle_hole_center_from_handle_end"):
+    for key in (_FORM_KEYS[field], _FORM_KEYS[field] + "_text"):
+        if key in st.session_state:
+            st.session_state[key] = st.session_state[key]
+
+
+def _field_error_slot(field):
+    field_error_slots[field] = st.empty()
 
 
 def _number_field(label: str, field: str, **kwargs):
     key = _FORM_KEYS[field]
+    # Validate on the server so invalid edits cannot silently retain an old quote.
+    number_bounds[field] = (kwargs.pop("min_value", None), kwargs.pop("max_value", None))
     if st.session_state.get(key) is not None:
-        return st.number_input(label, key=key, **kwargs)
-    return st.number_input(label, value=None, key=key, **kwargs)
+        value = st.number_input(label, key=key, **kwargs)
+    else:
+        value = st.number_input(label, value=None, key=key, **kwargs)
+    _field_error_slot(field)
+    return value
 
 
 def _select_field(label: str, field: str, options, **kwargs):
     # Keep canonical values and unresolved analyzer fields; only selection UX changes.
-    return choice_buttons(label, options, key=_FORM_KEYS[field], **kwargs)
+    value = choice_buttons(label, options, key=_FORM_KEYS[field], **kwargs)
+    _field_error_slot(field)
+    return value
 
 
 with right:
@@ -1078,6 +1115,7 @@ with right:
         st.caption("PRODUCT")
         quantity = _number_field("Quantity", "quantity", min_value=1, step=1)
         material = material_cards(material_options, key=_FORM_KEYS["material"])
+        _field_error_slot("material")
 
         thickness_options = _thickness_options(material)
         existing_thickness = st.session_state.get(_FORM_KEYS["thickness"])
@@ -1146,17 +1184,27 @@ with right:
         handle_hole_center_from_handle_end = None
         if handle_hole_enabled:
             from drawing_intake.value_normalization import parse_number
+            if not st.session_state[_FORM_SNAPSHOT_KEY].get("handle_hole_enabled"):
+                for field, default in (("handle_hole_diameter", 0.375), ("handle_hole_center_from_handle_end", 0.750)):
+                    key = _FORM_KEYS[field]
+                    if st.session_state.get(key) is None and not str(st.session_state.get(key + "_text", "")).strip():
+                        st.session_state[key] = default
+                        st.session_state[key + "_text"] = f"{default:.3f}"
             for field, label, help_text in (
                 ("handle_hole_diameter", "Handle Hole Diameter (in.)", "Finished diameter of the laser/waterjet-cut hole in the handle."),
                 ("handle_hole_center_from_handle_end", "Handle End to Hole Center (in.)", "Distance from the end edge of the handle to the centerline of the hole."),
             ):
-                raw = st.text_input(label, value=str(st.session_state.get(_FORM_KEYS[field]) or ""),
-                                    key=_FORM_KEYS[field] + "_text", help=help_text)
+                text_key = _FORM_KEYS[field] + "_text"
+                if text_key not in st.session_state:
+                    current = st.session_state.get(_FORM_KEYS[field])
+                    st.session_state[text_key] = "" if current is None else str(current)
+                raw = st.text_input(label, key=text_key, help=help_text)
                 try:
                     value = parse_number(raw) if raw.strip() else None
                 except (ValueError, ZeroDivisionError):
                     value = None
                 st.session_state[_FORM_KEYS[field]] = value
+                _field_error_slot(field)
             handle_hole_diameter = st.session_state.get(_FORM_KEYS["handle_hole_diameter"])
             handle_hole_center_from_handle_end = st.session_state.get(_FORM_KEYS["handle_hole_center_from_handle_end"])
 
@@ -1173,15 +1221,19 @@ with right:
         handle_label = st.text_input(
             "Handle marking (optional)",
             key=_FORM_KEYS["handle_label"],
-            placeholder="UPSTREAM x.xxx BORE x.xxx BETA",
+            placeholder="Optional text for your plate handle",
             max_chars=max_handle_label_chars,
             help=f"Maximum {max_handle_label_chars} characters. Letters, numbers, spaces, and standard shop-marking punctuation only.",
         )
+        _field_error_slot("handle_label")
 
         chamfer = bore_edge_choice(key=_FORM_KEYS["chamfer"])
+        _field_error_slot("chamfer")
         chamfer_width = None
         chamfer_details = {}
         if chamfer is True:
+            if not st.session_state[_FORM_SNAPSHOT_KEY].get("chamfer") and st.session_state.get(_FORM_KEYS["chamfer_width"]) is None:
+                st.session_state[_FORM_KEYS["chamfer_width"]] = 0.062
             chamfer_width = _number_field(
                 "Chamfer Width (in.)",
                 "chamfer_width",
@@ -1189,7 +1241,7 @@ with right:
                 step=0.0001,
                 format="%.4f",
                 placeholder="Enter width",
-                help="No width is assumed. Enter the required chamfer width.",
+                help="Starts at 0.062 in. when enabled with an empty field. Edit to your required chamfer width.",
             )
             if chamfer_width is None:
                 st.caption(
@@ -1210,14 +1262,13 @@ with right:
 
         st.caption("DELIVERY")
         st.caption("Lead-time selection updates the verified quote total below.")
-        ships_in_days = _select_field(
+        ships_in_days = lead_time_choices(
             "Lead time",
-            "ships_in_days",
             ships_options,
-            placeholder="Select lead time",
-            format_func=lambda days: f"{days} calendar days",
+            key=_FORM_KEYS["ships_in_days"],
             help="Timing is estimated and subject to material availability and order-specific review.",
         )
+        _field_error_slot("ships_in_days")
 
 
 current_form_values = {
@@ -1418,44 +1469,14 @@ if active_assisted_session is not None:
             else:
                 attention_prompt.empty()
 
-            owner_run = st.session_state.get(_OWNER_ACCEPTANCE_RUN_KEY)
-            if isinstance(owner_run, OwnerAcceptanceRun) and st.query_params.get("debug") == "1":
-                with st.expander("Internal test feedback"):
-                    st.caption(
-                        "This summary stays in this browser session unless you download it. "
-                        "It excludes the file name, drawing content, OCR text, dimensions, and customer data."
-                    )
-                    owner_notes = st.text_area(
-                        "Optional owner notes",
-                        key=_OWNER_ACCEPTANCE_NOTES_KEY,
-                        placeholder="Describe confusing steps or recognition behavior without copying proprietary drawing content.",
-                    )
-                    summary = summarize_owner_acceptance(
-                        owner_run,
-                        optional_owner_notes=owner_notes,
-                    )
-                    st.write(
-                        f"**Measured:** {summary.processing_wait_seconds:.1f}s processing · "
-                        f"{summary.distinct_auto_populated_fields} prefilled fields · "
-                        f"{summary.distinct_manual_field_entries} manually completed · "
-                        f"{summary.distinct_corrected_fields} corrected"
-                    )
-                    st.caption(
-                        "Click = an explicit app button or confirmation activation. "
-                        "A candidate choice and each changed field are separate customer actions, not clicks. "
-                        "Typing in one field counts as one distinct manual field entry. "
-                        "This single-page workflow records zero page transitions."
-                    )
-                    st.download_button(
-                        "Download test feedback (JSON)",
-                        data=feedback_json(summary),
-                        file_name=f"oplates-owner-feedback-{summary.run_id[:8]}.json",
-                        mime="application/json",
-                    )
 
 
-if not starter_notice_shown:
-    with starter_status.container():
+
+with starter_status:
+    if starter_notice is not None:
+        kind, message = starter_notice
+        getattr(st, kind)(message)
+    else:
         if active_assisted_session is not None and assisted_review is not None:
             required = canonical_required_fields(chamfer=current_form_values.get("chamfer"))
             if current_form_values.get("handle_hole_enabled"):
@@ -1487,40 +1508,35 @@ if not starter_notice_shown:
 # -----------------------------
 # Validation
 # -----------------------------
-errors = []
-if bore_dia is not None and paddle_dia is not None and bore_dia >= paddle_dia:
-    errors.append("Bore diameter must be smaller than the plate outside diameter.")
-if (
-    handle_length is not None
-    and paddle_dia is not None
-    and handle_length <= (paddle_dia / 2)
-):
-    errors.append("Handle length from bore center must extend beyond the plate radius.")
-if handle_width is not None and handle_width <= 0:
-    errors.append("Handle width must be greater than zero.")
-
+errors = field_errors(current_form_values, form_availability)
 if handle_hole_enabled:
-    from plate_geometry import validate_handle_hole
-    if all(v is not None for v in (paddle_dia, handle_width, handle_length)):
-        try:
-            validate_handle_hole(paddle_dia, handle_width, handle_length, True,
-                                 handle_hole_diameter, handle_hole_center_from_handle_end)
-        except ValueError as exc:
-            errors.append("Drawing HOLD: " + str(exc))
-
+    for field in ("handle_hole_diameter", "handle_hole_center_from_handle_end"):
+        if current_form_values[field] is None and st.session_state.get(_FORM_KEYS[field] + "_text", "").strip():
+            errors[field] = "Enter a valid number, such as 0.375 or 3/8."
+for field, (minimum, maximum) in number_bounds.items():
+    value = current_form_values.get(field)
+    if value is not None:
+        if minimum is not None and value < minimum:
+            errors.setdefault(field, f"Enter {minimum:g} or greater.")
+        if maximum is not None and value > maximum:
+            errors.setdefault(field, f"Enter {maximum:g} or less.")
+for field, slot in field_error_slots.items():
+    if field in errors:
+        slot.markdown(
+            f'<p role="alert" data-field-error="{field}" style="color:#ff6b6b;font-size:.875rem;margin:0">'
+            + html.escape(errors[field]) + '</p>', unsafe_allow_html=True,
+        )
 if errors:
-    with right:
-        st.divider()
-        for e in errors:
-            st.error(e)
-    if active_assisted_session is None:
-        st.stop()
+    selectors = [f'.st-key-{_FORM_KEYS[field]}{("_text" if field.startswith("handle_hole_") and field != "handle_hole_enabled" else "")}' for field in errors]
+    st.markdown('<style>' + ','.join(selectors)
+                + ' {outline:2px solid #e02424;outline-offset:2px;border-radius:.5rem;background:rgba(224,36,36,.10)}'
+                + '</style>', unsafe_allow_html=True)
 
 # -----------------------------
 # Pricing (authoritative API)
 # -----------------------------
 payload_inputs = None
-if all(
+if not errors and all(
     value is not None
     for field, value in current_form_values.items()
     if field not in {"chamfer_width", "handle_hole_diameter", "handle_hole_center_from_handle_end"}
@@ -1546,6 +1562,15 @@ if all(
         } if handle_hole_enabled else {}),
     }
 
+if os.environ.get("APP_ENV") == "production" and is_logged_in() and owner_test_checkout_allowed:
+    from journey.ui import mark_internal
+    mark_internal()
+journey_event("configurator")
+if errors:
+    journey_event("configuration", "error", "invalid_input")
+if active_assisted_session is not None and assisted_review is not None and assisted_review.attention:
+    if any(a.kind == FieldAttentionKind.UNSUPPORTED for a in assisted_review.attention):
+        journey_event("configuration", "blocked", "unsupported")
 result = None
 pricing_error = None
 pricing_payload = None
@@ -1568,7 +1593,11 @@ if payload_inputs is not None and not errors:
             pricing_error = "The current configuration needs review and confirmation before pricing."
 
 if pricing_payload is not None:
+    journey_event("configuration", "success")
     result, pricing_error = request_authoritative_price(pricing_payload)
+    if result:
+        journey_event("quote", "success")
+
     if pricing_error:
         with right:
             st.error(pricing_error)
@@ -1589,10 +1618,9 @@ pkg = result.get("estimated_package_in") if result else None
 with left:
     preview_ready = payload_inputs is not None and not errors
     if preview_ready:
-        components.html(
-            "<style>html,body{margin:0;height:100%}"
-            "svg{width:100%!important;height:100%!important}</style>"
-            + render_plate_svg(
+        # Streamlit 1.64 st.html uses an HTML-only sanitizer that removes SVG.
+        # Render only our generated, escaped SVG through the inline Markdown path.
+        preview_svg = render_plate_svg(
                 handle_hole_enabled=handle_hole_enabled,
                 handle_hole_diameter=handle_hole_diameter,
                 handle_hole_center_from_handle_end=handle_hole_center_from_handle_end,
@@ -1608,10 +1636,12 @@ with left:
                 chamfer_width=(
                     float(chamfer_width) if chamfer_width is not None else None
                 ),
-            ),
-            height=300,
-            scrolling=False,
         )
+        st.session_state["quote_last_valid_svg"] = preview_svg
+        st.markdown(preview_svg, unsafe_allow_html=True)
+    elif st.session_state.get("quote_last_valid_svg"):
+        st.warning("Last valid configuration shown. Correct the highlighted fields to update the drawing.")
+        st.markdown(st.session_state["quote_last_valid_svg"], unsafe_allow_html=True)
     else:
         st.info("Complete the required dimensions to update the plate preview.")
     with st.container(border=True):
@@ -1619,6 +1649,10 @@ with left:
             c1, c2 = st.columns(2)
             c1.metric("Unit price", f"${result['unit_price']:,.2f}")
             c2.metric("Total price", f"${result['total_price']:,.2f}")
+        elif errors:
+            st.info("Last valid configuration shown — pricing and purchasing are unavailable until the highlighted fields are corrected."
+                    if st.session_state.get("quote_last_valid_svg") else
+                    "Correct the highlighted fields to see a drawing and verified price.")
         elif active_assisted_session is not None and pricing_error:
             st.warning(
                 "A verified price is not currently available. Your configuration is preserved."
@@ -1693,13 +1727,12 @@ with right:
             st.success("You’re logged in — this order will be saved to your account.")
         else:
             st.info(
-                "Checkout as guest — open Account to save orders to your account."
+                "Sign in at checkout. Your configuration and cart will be preserved."
             )
 
-        if (OWNER_ACCEPTANCE_MODE or os.environ.get("APP_ENV") == "production") and not owner_test_checkout_allowed:
+        if not purchasing_access["available"]:
             st.caption(
-                "Checkout is currently closed." if os.environ.get("APP_ENV") == "production"
-                else "Checkout is disabled in this controlled owner-acceptance environment."
+                "Purchasing is currently unavailable."
             )
         elif active_assisted_session is not None and not owner_test_checkout_allowed:
             st.caption("Checkout remains disabled for drawing-assisted configurations.")
@@ -1714,13 +1747,20 @@ with right:
         with btn_cols[1]:
             checkout_disabled = (
                 result is None
-                or ((OWNER_ACCEPTANCE_MODE or os.environ.get("APP_ENV") == "production") and not owner_test_checkout_allowed)
+                or (not purchasing_access["available"])
                 or (
                     active_assisted_session is not None
                     and not owner_test_checkout_allowed
                 )
             )
-            if st.button("Continue to secure checkout", disabled=checkout_disabled):
+            if checkout_disabled and result is not None:
+                journey_event("checkout", "blocked", "system_restriction")
+            pending_sign_in = st.session_state.get("pending_checkout_sign_in")
+            resume_checkout = bool(pending_sign_in and is_logged_in())
+            if resume_checkout:
+                st.session_state.pop("pending_checkout_sign_in", None)
+                resume_checkout = not checkout_disabled and pending_sign_in["inputs"] == pricing_payload
+            if st.button("Continue to secure checkout", disabled=checkout_disabled) or resume_checkout:
                 if active_assisted_session is not None:
                     try:
                         verified_assisted_cart_inputs(
@@ -1743,7 +1783,6 @@ with right:
             add_disabled = (
                 not is_logged_in()
                 or result is None
-                or ((OWNER_ACCEPTANCE_MODE or os.environ.get("APP_ENV") == "production") and not owner_test_checkout_allowed)
                 or (
                     active_assisted_session is not None
                     and not owner_test_checkout_allowed
@@ -1767,6 +1806,7 @@ with right:
                         st.stop()
                 else:
                     cart_inputs = pricing_payload
+                journey_event("cart", "success")
                 _add_to_cart(
                     cart_inputs, result, assisted=active_assisted_session is not None
                 )

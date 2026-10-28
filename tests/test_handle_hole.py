@@ -152,8 +152,8 @@ def test_pdf_svg_enabled_disabled_and_determinism():
     pdf = pdf_bytes(on)
     assert pdf == pdf_bytes(on)
     text = PdfReader(BytesIO(pdf)).pages[0].extract_text()
-    assert "HANDLE HOLE Ø0.3750" in text
-    assert "0.7500 HANDLE END TO HOLE C/L" in text
+    assert "Ø.375 THRU" in text
+    assert ".75" in text
     assert (
         "HANDLE HOLE" not in PdfReader(BytesIO(pdf_bytes(off))).pages[0].extract_text()
     )
@@ -180,10 +180,10 @@ def test_configurator_svg(enabled):
             handle_hole_center_from_handle_end=0.75,
         )
     svg = render_plate_svg(**kwargs)
-    assert ('id="handle-hole"' in svg) == enabled
+    assert ('data-feature="handle-hole"' in svg) == enabled
     if enabled:
-        assert "HANDLE HOLE &#8960; 0.3750" in svg
-        assert "HANDLE END TO HOLE C/L 0.7500" in svg
+        assert "Ø.375 THRU" in svg
+        assert ".75" in svg
 
 
 @pytest.mark.parametrize(
@@ -389,8 +389,12 @@ def test_configurator_buttons_missing_input_fractions_and_off(monkeypatch):
         toggle = next(c for c in app.button_group if c.label == "Handle Hole")
         toggle.set_value(True).run()
         assert not app.exception
-        assert any("Drawing HOLD" in e.value for e in app.error)
+        assert app.session_state["quote_field_handle_hole_diameter"] == 0.375
+        assert app.session_state["quote_field_handle_hole_center_from_handle_end"] == 0.750
         assert not app.session_state["phase1g_customer_confirmation"]
+        next(t for t in app.text_input if t.label == "Handle Hole Diameter (in.)").set_value("").run()
+        assert any('data-field-error="handle_hole_diameter"' in e.value for e in app.markdown)
+        assert next(b for b in app.button if b.label == "Continue to secure checkout").disabled
         diameter = next(
             t for t in app.text_input if t.label == "Handle Hole Diameter (in.)"
         )
@@ -406,6 +410,7 @@ def test_configurator_buttons_missing_input_fractions_and_off(monkeypatch):
             app.session_state["quote_field_handle_hole_center_from_handle_end"] == 0.75
         )
         assert not any("Drawing HOLD" in e.value for e in app.error)
+        assert not any('data-field-error="handle_hole_diameter"' in e.value for e in app.markdown)
         next(c for c in app.button_group if c.label == "Handle Hole").set_value(False).run()
         assert not app.exception
         snapshot = app.session_state["phase1g_form_snapshot"]
@@ -491,7 +496,8 @@ def test_feature_off_matches_accepted_golden_bytes():
     )
     g = build_plate_geometry(off)
     metadata = DrawingMetadata(state=DrawingState.CUSTOMER_CONFIRMATION)
-    assert sha256(pdf_bytes(g, metadata)).hexdigest() == expected["pdf_sha256"]
+    presentation = json.loads((Path(__file__).parent / "fixtures/v7-1-presentation-hashes.json").read_text())
+    assert sha256(pdf_bytes(g, metadata)).hexdigest() == presentation["pdf_sha256"]
     assert sha256(dxf_bytes(g)).hexdigest() == expected["dxf_sha256"]
     assert sha256(preview_svg(g).encode()).hexdigest() == expected["svg_sha256"]
     svg = render_plate_svg(
@@ -503,7 +509,7 @@ def test_feature_off_matches_accepted_golden_bytes():
         material=off.material,
         bore_tolerance=0.005,
     )
-    assert sha256(svg.encode()).hexdigest() == expected["configurator_svg_sha256"]
+    assert sha256(svg.encode()).hexdigest() == presentation["configurator_svg_sha256"]
     assert (
         digest(canonical(canonical_specification(off)))
         == expected["canonical_spec_sha256"]

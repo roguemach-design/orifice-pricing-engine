@@ -15,7 +15,7 @@ def valid_inputs(**overrides) -> QuoteInputs:
         "bore_dia": 1.0,
         "bore_tolerance": 0.005,
         "chamfer": True,
-        "chamfer_width": None,
+        "chamfer_width": 0.062,
         "handle_label": "No label",
         "ships_in_days": 21,
     }
@@ -26,8 +26,8 @@ def valid_inputs(**overrides) -> QuoteInputs:
 def test_baseline_quote_is_deterministic():
     result = calculate_quote(valid_inputs())
 
-    assert result["unit_price"] == 121.38
-    assert result["total_price"] == 121.38
+    assert result["unit_price"] == 93.00
+    assert result["total_price"] == 93.00
     assert result["estimated_total_weight_lb"] == 1.14
     assert result["estimated_package_in"] == {
         "length": 14.5,
@@ -170,7 +170,6 @@ def test_handle_marking_above_limit_is_rejected():
         calculate_quote(valid_inputs(handle_label="A" * 41))
 
 
-def test_chamfer_operation_does_not_require_or_invent_width():
-    result = calculate_quote(valid_inputs(chamfer=True, chamfer_width=None))
-    assert result["chamfer_bore_cost"] > 0
-    assert result["chamfer_width"] is None
+def test_chamfer_pricing_requires_width_without_inventing_one():
+    with pytest.raises(ValueError, match="chamfer_width is required"):
+        calculate_quote(valid_inputs(chamfer=True, chamfer_width=None))

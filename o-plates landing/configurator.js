@@ -88,7 +88,7 @@ window.addEventListener("message", (event) => {
   if (event.data?.type === 'oplates:checkout') {
     try {
       const target = new URL(event.data.url);
-      if (target.origin === 'https://checkout.stripe.com' && !target.username && !target.password && target.pathname.startsWith('/c/pay/cs_test_')) window.location.assign(target.href);
+      if (target.origin === 'https://checkout.stripe.com' && !target.username && !target.password && /^\/c\/pay\/cs_(test|live)_[A-Za-z0-9_]+$/.test(target.pathname)) window.location.assign(target.href);
     } catch (_) { /* Ignore malformed navigation from the embedded frame. */ }
     return;
   }

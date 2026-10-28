@@ -28,9 +28,11 @@ if review.get("historical"):
     )
     st.stop()
 if review["state"] == "approved":
-    st.title("YOUR ORDER IS IN PRODUCTION")
+    st.title("TEST DRAWING APPROVED — NOT A REAL SALE" if review["context"].get("test_order") else "YOUR ORDER IS IN PRODUCTION")
     st.stop()
 context = review["context"]
+if context.get("test_order"):
+    st.warning("TEST / NOT A REAL SALE — approval cannot release manufacturing.")
 st.title("Review your attached drawing")
 st.write(
     f"Drawing {context['drawing']} · {context['revision']} · Quantity {context['quantity']}"
@@ -49,6 +51,6 @@ st.write(APPROVAL_COPY)
 if st.button(BUTTON):
     approved = api_post("/me/frozen-plates/approve", payload={"token": token})
     if approved.status_code == 200:
-        st.title("YOUR ORDER IS IN PRODUCTION")
+        st.title("TEST DRAWING APPROVED — NOT A REAL SALE" if review["context"].get("test_order") else "YOUR ORDER IS IN PRODUCTION")
     else:
         st.error("Approval was not recorded. Refresh and review the current drawing.")

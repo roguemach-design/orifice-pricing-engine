@@ -111,7 +111,9 @@ cfg_load_error: Optional[str] = None
 try:
     r_cfg = api_get("/admin/config")
     if r_cfg.status_code == 200:
-        cfg_data = r_cfg.json() if isinstance(r_cfg.json(), dict) else None
+        if "legacy_config_snapshot" not in st.session_state:
+            st.session_state["legacy_config_snapshot"] = r_cfg.json() if isinstance(r_cfg.json(), dict) else None
+        cfg_data = st.session_state["legacy_config_snapshot"]
         if cfg_data is None:
             cfg_load_error = "Config response was not a JSON object."
     elif r_cfg.status_code == 404:
@@ -123,17 +125,23 @@ try:
 except Exception as e:
     cfg_load_error = f"Failed to load config: {e}"
 
+if st.button("Reload configuration (discards unsaved changes)"):
+    st.session_state.clear()
+    st.rerun()
+
 if cfg_load_error:
     st.warning(cfg_load_error)
 
 # ---- Reset button (escape hatch) ----
 r1, r2 = st.columns([1, 3])
 with r1:
-    if st.button("♻️ Reset knobs to defaults", use_container_width=True):
+    reset_confirmation = st.text_input("Type RESET DEFAULTS to reset active pricing")
+    if st.button("♻️ Reset knobs to defaults", use_container_width=True, disabled=reset_confirmation != "RESET DEFAULTS" or not cfg_data):
         try:
-            rr = api_post("/admin/config/reset")
+            rr = api_post("/admin/config/reset", json_body={"_version": cfg_data.get("_version"), "_confirmation": "RESET DEFAULTS"})
             if rr.status_code == 200:
                 st.success("Reset complete. Reloading…")
+                st.session_state.pop("legacy_config_snapshot", None)
                 st.rerun()
             elif rr.status_code == 404:
                 st.error("API missing /admin/config/reset. Deploy the updated api_app.py.")
@@ -294,12 +302,14 @@ if cfg_data:
     # ---- Save ----
     c1, c2 = st.columns([1, 2])
     with c1:
-        save_cfg = st.button("💾 Save pricing knobs", type="primary", use_container_width=True)
+        save_confirmed = st.checkbox("I confirm these changes affect future pricing and availability")
+        save_cfg = st.button("💾 Save pricing knobs", type="primary", use_container_width=True, disabled=not save_confirmed)
     with c2:
         st.caption("Tip: uncheck a lead time to remove it from quoting immediately (no redeploy).")
 
     if save_cfg:
         payload = dict(cfg_data)
+        payload["_confirmation"] = "SAVE CHANGES"
 
         if mats:
             payload["material_enabled"] = new_material_enabled
@@ -317,6 +327,8 @@ if cfg_data:
             r_save = api_put("/admin/config", json_body=payload)
             if r_save.status_code == 200:
                 st.success("Saved. New settings apply immediately for pricing/checkout.")
+                st.session_state.pop("legacy_config_snapshot", None)
+                st.rerun()
             elif r_save.status_code == 401:
                 st.error("Unauthorized (401) saving config. Check ADMIN_API_KEY.")
                 if debug:

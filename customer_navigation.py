@@ -1,5 +1,7 @@
 """Customer routes; internal tools retain their own authorization and URLs."""
 
+import os
+import re
 from pathlib import Path
 import json
 from urllib.parse import urlsplit
@@ -9,13 +11,13 @@ import streamlit.components.v1 as components
 
 
 def render_integrated_checkout(checkout_url: str) -> bool:
-    """Let the trusted landing host open the existing sandbox session outside the iframe."""
+    """Let the trusted landing host open the verified Stripe session outside the iframe."""
     if not st.session_state.get("integrated_landing"):
         return False
     target = urlsplit(checkout_url)
     if (target.scheme != "https" or target.netloc != "checkout.stripe.com"
-            or not target.path.startswith("/c/pay/cs_test_")):
-        st.error("The embedded validation checkout requires a Stripe TEST session.")
+            or not re.fullmatch(r"/c/pay/cs_(?:test|live)_[A-Za-z0-9_]+", target.path)):
+        st.error("Checkout is currently unavailable. Please contact sales@o-plates.com.")
         return True
     payload = json.dumps({"type": "oplates:checkout", "url": checkout_url}).replace("<", "\\u003c")
     components.html(
@@ -55,10 +57,32 @@ def run_customer_app():
                 url_path="Internal_Sourcing",
                 visibility="hidden",
             ),
-        ],
+        ] + ([st.Page("journey/stage_owner.py", title="Journey owner review", url_path="JourneyOwner", visibility="hidden")]
+             if os.environ.get("APP_ENV") != "production" and os.environ.get("JOURNEY_UI_ENABLED") == "true" else []),
         position="hidden",
     )
-    selected.run()
+    if selected.url_path == "Internal_Sourcing":
+        selected.run()
+        return
+    # Enqueue the footer before a page can request st.stop(). The earlier
+    # content container keeps it visually below the page, including early exits.
+    content = st.container()
+    render_customer_footer()
+    with content:
+        selected.run()
+
+
+def render_customer_footer():
+    from datetime import datetime, timezone
+
+    st.markdown(
+        f'<footer class="customer-footer">© {datetime.now(timezone.utc).year} O-Plates'
+        ' · Operated by Rogue Machine LLC · '
+        '<a href="mailto:sales@o-plates.com">Contact</a> · '
+        '<a href="https://www.o-plates.com/terms.html" target="_blank" rel="noopener">Terms of Sale</a> · '
+        '<a href="https://www.o-plates.com/privacy.html" target="_blank" rel="noopener">Privacy Policy</a></footer>',
+        unsafe_allow_html=True,
+    )
 
 
 def render_customer_shell():
@@ -68,6 +92,9 @@ def render_customer_shell():
         [data-testid="stMainBlockContainer"]{max-width:1500px}
         [data-testid="stButtonGroup"] button{min-height:44px;white-space:normal}
         [data-testid="stButtonGroup"] button[aria-pressed="true"]{font-weight:800;border-width:2px}
+        .customer-footer{margin-top:2rem;padding:1rem 0;border-top:1px solid #303846;
+          font-size:.8rem;color:#b2bed3;line-height:1.8;overflow-wrap:anywhere}
+        .customer-footer a{color:inherit}
         @media(max-width:700px){
           [data-testid="stMainBlockContainer"]{padding-left:1rem;padding-right:1rem}
           [data-testid="stHorizontalBlock"]{flex-wrap:wrap}
@@ -84,6 +111,8 @@ def render_customer_shell():
             "<script>" + (Path(__file__).resolve().parent / "assets" / "configurator-layout-bridge.js").read_text() + "</script>",
             height=0,
         )
+    from journey.ui import mount
+    mount("embed" if st.session_state.get("integrated_landing") else "direct")
     with st.container(horizontal=True):
         st.page_link(
             Path(__file__).resolve().parent / "pages/1_Quote.py",

@@ -1,0 +1,10 @@
+{
+  "version": "synthetic-fixture-conventions-1",
+  "fixture_id": "SYNTHETIC-UNVERIFIED-FIXTURE",
+  "fixture_revision": "SYNTHETIC-1",
+  "machine_profile_revision": "SYNTHETIC-MACHINE-1",
+  "orientation_reference": "SYNTHETIC - approved chamfer side up - verify physical setup",
+  "top_face_policy": "APPROVED_CHAMFER_SIDE_UP",
+  "nominal_blank_radial_uncertainty": 0.005,
+  "program_number": 1001
+}

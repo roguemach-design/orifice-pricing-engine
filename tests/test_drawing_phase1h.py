@@ -176,5 +176,5 @@ def test_owner_acceptance_environment_disables_manual_checkout(monkeypatch):
     )
     assert checkout.disabled is True
     assert any(
-        "controlled owner-acceptance" in caption.value for caption in app.caption
+        "Purchasing is currently unavailable." in caption.value for caption in app.caption
     )

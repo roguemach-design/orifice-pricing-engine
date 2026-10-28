@@ -61,6 +61,10 @@ def database(monkeypatch):
         poolclass=StaticPool,
     )
     api_app.Base.metadata.create_all(bind=engine)
+    from checkout_control_fixture import install_control
+    install_control(engine)
+    monkeypatch.setattr(api_app, "engine", engine)
+    monkeypatch.setattr(api_app, "checkout_mode_engine", engine)
     factory = sessionmaker(bind=engine)
     monkeypatch.setattr(api_app, "SessionLocal", factory)
     yield factory
@@ -70,6 +74,8 @@ def database(monkeypatch):
 
 @pytest.fixture
 def checkout_client(monkeypatch, database):
+    # Each test owns its request budget; production rate limits are unchanged.
+    api_app._RATE_LIMITER.clear()
     monkeypatch.setattr(api_app, "API_KEY", "test-ui-key")
     monkeypatch.setattr(api_app, "APP_ENV", "test")
     monkeypatch.setattr(api_app, "APP_BASE_URL", "https://quote.staging.example.test")
@@ -79,6 +85,11 @@ def checkout_client(monkeypatch, database):
         "_calculate_quote_with_db_knobs",
         authoritative_result,
     )
+    monkeypatch.setattr(api_app, "_jwk_client", object())
+    monkeypatch.setattr(api_app, "SUPABASE_JWT_ISSUER", "synthetic-issuer")
+    original_decode = api_app._decode_supabase_user_id_from_bearer
+    monkeypatch.setattr(api_app, "_decode_supabase_user_id_from_bearer",
+                        lambda value: "signed-customer" if value == "Bearer synthetic" else original_decode(value))
     return TestClient(api_app.app)
 
 
@@ -91,7 +102,7 @@ def install_idempotent_stripe(monkeypatch):
         key = kwargs.get("idempotency_key") or f"call-{len(calls)}"
         if key not in sessions:
             sessions[key] = SimpleNamespace(
-                id=f"cs_test_{len(sessions) + 1}",
+                id=f"cs_test_{len(sessions) + 1}", livemode=False,
                 url=f"https://checkout.stripe.test/{len(sessions) + 1}",
             )
         return sessions[key]
@@ -146,7 +157,7 @@ def test_width_only_checkout_preserves_incomplete_chamfer_hold(monkeypatch, chec
     assert "HOLD" in build_section_geometry(spec).status
 
 
-def completed_session(session_id="cs_test_1", customer_id=""):
+def completed_session(session_id="cs_test_1", customer_id="signed-customer"):
     return {
         "id": session_id,
         "payment_status": "paid",
@@ -176,10 +187,10 @@ def completed_session(session_id="cs_test_1", customer_id=""):
     }
 
 
-def install_completed_webhook(monkeypatch, session):
+def install_completed_webhook(monkeypatch, session, event_type="checkout.session.completed"):
     event = {
         "id": "evt_test_completed_1",
-        "type": "checkout.session.completed",
+        "type": event_type,
         "data": {"object": {"id": session["id"]}},
     }
     monkeypatch.setattr(api_app, "WEBHOOK_SECRET", "whsec_test")
@@ -195,11 +206,11 @@ def install_completed_webhook(monkeypatch, session):
     )
 
 
-def test_guest_checkout_reprices_persists_pending_and_is_idempotent(
+def test_authenticated_checkout_reprices_persists_pending_and_is_idempotent(
     monkeypatch, checkout_client, database
 ):
     calls = install_idempotent_stripe(monkeypatch)
-    headers = {"x-api-key": "test-ui-key"}
+    headers = {"Authorization": "Bearer synthetic", "x-api-key": "test-ui-key"}
 
     first = checkout_client.post(
         "/checkout/create", json=checkout_body(), headers=headers
@@ -221,7 +232,7 @@ def test_guest_checkout_reprices_persists_pending_and_is_idempotent(
         orders = db.query(api_app.Order).all()
         assert len(orders) == 1
         assert orders[0].status == "pending"
-        assert orders[0].customer_id is None
+        assert orders[0].customer_id == "signed-customer"
         assert orders[0].quote_payload["chamfer_width"] == 0.062
     finally:
         db.close()
@@ -233,7 +244,7 @@ def test_checkout_rate_limit_allows_requests_below_limit_then_enforces(
     install_idempotent_stripe(monkeypatch)
     monkeypatch.setattr(api_app, "CHECKOUT_RATE_LIMIT_REQUESTS", 2)
     api_app._RATE_LIMITER.clear()
-    headers = {"x-api-key": "test-ui-key"}
+    headers = {"Authorization": "Bearer synthetic", "x-api-key": "test-ui-key"}
 
     try:
         first = checkout_client.post(
@@ -342,7 +353,7 @@ def test_checkout_rejects_stale_pricing_before_stripe(monkeypatch, checkout_clie
     response = checkout_client.post(
         "/checkout/create",
         json=checkout_body(pricing_config_version="version-stale"),
-        headers={"x-api-key": "test-ui-key"},
+        headers={"Authorization": "Bearer synthetic", "x-api-key": "test-ui-key"},
     )
 
     assert response.status_code == 409
@@ -356,7 +367,7 @@ def test_customer_identity_cannot_be_supplied_in_checkout_body(
     response = checkout_client.post(
         "/checkout/create",
         json=checkout_body(customer_id="attacker-controlled"),
-        headers={"x-api-key": "test-ui-key"},
+        headers={"Authorization": "Bearer synthetic", "x-api-key": "test-ui-key"},
     )
 
     assert response.status_code == 422
@@ -618,11 +629,11 @@ def test_staging_rejects_live_stripe_key(monkeypatch, checkout_client):
     response = checkout_client.post(
         "/checkout/create",
         json=checkout_body(),
-        headers={"x-api-key": "test-ui-key"},
+        headers={"Authorization": "Bearer synthetic", "x-api-key": "test-ui-key"},
     )
 
-    assert response.status_code == 500
-    assert response.json()["detail"] == "Staging checkout requires Stripe test mode."
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Service temporarily unavailable. Please try again."
 
 
 def test_checkout_fails_closed_when_app_environment_is_not_explicit(
@@ -633,12 +644,12 @@ def test_checkout_fails_closed_when_app_environment_is_not_explicit(
     response = checkout_client.post(
         "/checkout/create",
         json=checkout_body(),
-        headers={"x-api-key": "test-ui-key"},
+        headers={"Authorization": "Bearer synthetic", "x-api-key": "test-ui-key"},
     )
 
-    assert response.status_code == 500
+    assert response.status_code == 503
     assert response.json()["detail"] == (
-        "Checkout environment is not configured (set APP_ENV)."
+        "Service temporarily unavailable. Please try again."
     )
 
 
@@ -650,12 +661,12 @@ def test_checkout_fails_closed_when_return_url_is_not_explicit(
     response = checkout_client.post(
         "/checkout/create",
         json=checkout_body(),
-        headers={"x-api-key": "test-ui-key"},
+        headers={"Authorization": "Bearer synthetic", "x-api-key": "test-ui-key"},
     )
 
-    assert response.status_code == 500
+    assert response.status_code == 503
     assert response.json()["detail"] == (
-        "Checkout return URL is not configured (set APP_BASE_URL to an HTTPS URL)."
+        "Service temporarily unavailable. Please try again."
     )
 
 
@@ -678,12 +689,12 @@ def test_checkout_database_failure_returns_retryable_error(
     response = checkout_client.post(
         "/checkout/create",
         json=checkout_body(),
-        headers={"x-api-key": "test-ui-key"},
+        headers={"Authorization": "Bearer synthetic", "x-api-key": "test-ui-key"},
     )
 
     assert response.status_code == 503
     assert response.json()["detail"] == (
-        "Checkout could not be initialized. Please try again."
+        "Service temporarily unavailable. Please try again."
     )
 
 
@@ -711,7 +722,7 @@ def test_checkout_retry_reuses_stripe_session_after_transient_database_failure(
         return database()
 
     monkeypatch.setattr(api_app, "SessionLocal", flaky_session_factory)
-    headers = {"x-api-key": "test-ui-key"}
+    headers = {"Authorization": "Bearer synthetic", "x-api-key": "test-ui-key"}
 
     failed = checkout_client.post(
         "/checkout/create", json=checkout_body(), headers=headers
@@ -740,7 +751,7 @@ def test_completed_webhook_updates_once_and_replay_does_not_duplicate(
     checkout_response = checkout_client.post(
         "/checkout/create",
         json=checkout_body(),
-        headers={"x-api-key": "test-ui-key"},
+        headers={"Authorization": "Bearer synthetic", "x-api-key": "test-ui-key"},
     )
     assert checkout_response.status_code == 200
     assert calls
@@ -787,7 +798,7 @@ def test_completed_webhook_updates_once_and_replay_does_not_duplicate(
 
 def test_signed_replay_repairs_only_missing_shipping_service(monkeypatch, checkout_client, database):
     install_idempotent_stripe(monkeypatch)
-    result = checkout_client.post('/checkout/create', json=checkout_body(), headers={'x-api-key': 'test-ui-key'})
+    result = checkout_client.post('/checkout/create', json=checkout_body(), headers={'Authorization': 'Bearer synthetic', 'x-api-key': 'test-ui-key'})
     session = completed_session(result.json()['session_id'])
     install_completed_webhook(monkeypatch, session)
     emails = []
@@ -821,7 +832,7 @@ def test_completed_webhook_accepts_stripe_session_objects(
     checkout_response = checkout_client.post(
         "/checkout/create",
         json=checkout_body(),
-        headers={"x-api-key": "test-ui-key"},
+        headers={"Authorization": "Bearer synthetic", "x-api-key": "test-ui-key"},
     )
     session_id = checkout_response.json()["session_id"]
 
@@ -900,7 +911,7 @@ def test_delayed_webhook_leaves_visible_pending_then_completes(
     checkout_response = checkout_client.post(
         "/checkout/create",
         json=checkout_body(),
-        headers={"x-api-key": "test-ui-key"},
+        headers={"Authorization": "Bearer synthetic", "x-api-key": "test-ui-key"},
     )
     session_id = checkout_response.json()["session_id"]
 
@@ -1046,7 +1057,7 @@ def test_webhook_database_failure_returns_retryable_status(
 
     assert response.status_code == 503
     assert response.json()["detail"] == (
-        "Order completion is temporarily unavailable; Stripe will retry."
+        "Service temporarily unavailable. Please try again."
     )
 
 
@@ -1322,8 +1333,9 @@ def test_selected_part_attestation_cannot_be_forged(
 
 
 @pytest.mark.parametrize("cart", [False, True])
+@pytest.mark.parametrize("event_type", ["checkout.session.completed", "checkout.session.async_payment_succeeded"])
 def test_unified_completed_order_captures_exact_independent_lines(
-    monkeypatch, recovery_client, database, tmp_path, cart
+    monkeypatch, recovery_client, database, tmp_path, cart, event_type
 ):
     from hashlib import sha256
     from email.parser import BytesParser
@@ -1356,7 +1368,7 @@ def test_unified_completed_order_captures_exact_independent_lines(
     response = recovery_client.post("/checkout/cart/create" if cart else "/checkout/create",
                                     json=body, headers={"Authorization": "Bearer owner"})
     assert response.status_code == 200, response.text
-    install_completed_webhook(monkeypatch, completed_session(response.json()["session_id"], customer_id="owner"))
+    install_completed_webhook(monkeypatch, completed_session(response.json()["session_id"], customer_id="owner"), event_type=event_type)
     for expected in ("completed", "already_completed"):
         result = recovery_client.post("/stripe/webhook", content=b"{}", headers={"stripe-signature": "valid"})
         assert result.status_code == 200, result.text
@@ -1387,9 +1399,9 @@ def test_unified_completed_order_captures_exact_independent_lines(
 def test_production_checkout_rejects_test_key_before_creating_session(monkeypatch, checkout_client):
     monkeypatch.setattr(api_app, "APP_ENV", "production")
     calls = install_idempotent_stripe(monkeypatch)
-    response = checkout_client.post("/checkout/create", json=checkout_body(), headers={"x-api-key": "test-ui-key"})
-    assert response.status_code == 500
-    assert response.json()["detail"] == "Production checkout requires Stripe live mode."
+    response = checkout_client.post("/checkout/create", json=checkout_body(), headers={"Authorization": "Bearer synthetic", "x-api-key": "test-ui-key"})
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Service temporarily unavailable. Please try again."
     assert not calls
 
 
@@ -1398,7 +1410,7 @@ def test_live_key_alone_cannot_open_unverified_production_checkout(monkeypatch, 
     monkeypatch.setattr(api_app.stripe, "api_key", "rk_live_synthetic")
     monkeypatch.delenv("FROZEN_PLATE_LIVE_CHECKOUT_READY", raising=False)
     calls = install_idempotent_stripe(monkeypatch)
-    response = checkout_client.post("/checkout/create", json=checkout_body(), headers={"x-api-key": "test-ui-key"})
+    response = checkout_client.post("/checkout/create", json=checkout_body(), headers={"Authorization": "Bearer synthetic", "x-api-key": "test-ui-key"})
     assert response.status_code == 503
     assert not calls
 

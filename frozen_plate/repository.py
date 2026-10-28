@@ -354,7 +354,9 @@ class Repository:
             raise WorkflowError("incomplete frozen artifacts")
         contents = {}
         for kind, artifact in artifacts.items():
-            content = self._read_object(artifact["object_key"])
+            cache = getattr(self,"_artifact_cache",None)
+            content = (cache.read(artifact["object_key"],artifact["sha256"],artifact["size"],self._read_object)
+                       if cache is not None else self._read_object(artifact["object_key"]))
             if (
                 digest(content) != artifact["sha256"]
                 or len(content) != artifact["size"]
@@ -374,6 +376,7 @@ class Repository:
             (revision["id"],),
         )
         return dict(
+            **({"test_order": True} if json.loads(revision["source_json"]).get("_payment", {}).get("mode") == "owner_test" else {}),
             order_id=plate["order_id"],
             line_id=plate["line_id"],
             drawing="OP-" + spec["part_identifier"],
@@ -553,6 +556,8 @@ class Repository:
             raise WorkflowError("invalid source or actor")
         with self.transaction() as db:
             revision, artifacts, _ = self._verified(db, revision_id)
+            if json.loads(revision["source_json"]).get("_payment", {}).get("mode") == "owner_test":
+                raise WorkflowError("TEST / NOT A REAL SALE: sourcing is prohibited")
             plate = self._one(
                 db, "SELECT * FROM frozen_plates WHERE id=?", (revision["plate_id"],)
             )
