@@ -1254,18 +1254,8 @@ with right:
                 st.caption(
                     "Enter a chamfer width and press Enter or click outside the field to apply it."
                 )
-            saved_standard = all(st.session_state.get(_FORM_KEYS[k]) == v for k, v in STANDARD_CHAMFER.items())
-            specification = st.radio(
-                "Chamfer specification",
-                ["Standard 45° Chamfer", "Custom / drawing review"],
-                index=0 if saved_standard else None,
-                key="quote_chamfer_specification",
-            )
+            chamfer_details = dict(STANDARD_CHAMFER)
             st.caption(STANDARD_DESCRIPTION)
-            if specification == "Standard 45° Chamfer":
-                chamfer_details = dict(STANDARD_CHAMFER)
-            else:
-                st.info("Select the standard specification for instant checkout. Custom or undefined chamfers remain quote/review-only.")
         for field in STANDARD_CHAMFER:
             st.session_state[_FORM_KEYS[field]] = chamfer_details.get(field)
 

@@ -33,23 +33,59 @@ def test_existing_positive_land_and_wall_constraints_are_not_bypassed(change):
     assert checkout_geometry_error(quote_inputs(**change))
 
 
-def test_standard_selection_is_explicit_and_custom_stays_review_only(quote_page):
+def test_only_bore_edge_choice_sets_standard_geometry_and_clears_inactive_fields(quote_page):
     app, calls = quote_page
     select(app, "quote_field_chamfer", True)
     app.run()
     assert not app.exception
-    assert app.radio(key="quote_chamfer_specification").value is None
-    assert next(b for b in app.button if b.label == "Continue to secure checkout").disabled
-    width = app.number_input(key="quote_field_chamfer_width").value
-    app.radio(key="quote_chamfer_specification").set_value("Standard 45° Chamfer").run()
-    assert not app.exception
+    assert not any(r.label == "Chamfer specification" for r in app.radio)
     assert all(calls[-1][key] == value for key, value in STANDARD_CHAMFER.items())
     assert checkout_geometry_error(calls[-1]) is None
-    app.radio(key="quote_chamfer_specification").set_value("Custom / drawing review").run()
-    assert not app.exception
-    assert app.number_input(key="quote_field_chamfer_width").value == width
-    assert next(b for b in app.button if b.label == "Continue to secure checkout").disabled
+    app.number_input(key="quote_field_chamfer_width").set_value(0.04).run()
+    assert calls[-1]["chamfer_width"] == 0.04
+    select(app, "quote_field_chamfer", False)
+    app.run()
+    assert calls[-1]["chamfer"] is False
+    assert calls[-1]["chamfer_width"] is None
     assert all(key not in calls[-1] for key in STANDARD_CHAMFER)
+    assert all(app.session_state["quote_field_" + key] is None for key in STANDARD_CHAMFER)
+    select(app, "quote_field_chamfer", True)
+    app.run()
+    assert not app.exception
+    assert calls[-1]["chamfer_width"] == 0.04
+    assert all(calls[-1][key] == value for key, value in STANDARD_CHAMFER.items())
+    assert checkout_geometry_error(calls[-1]) is None
+
+
+@pytest.mark.parametrize("cart", [False, True])
+def test_automatic_customer_specification_survives_single_and_cart_checkout(
+    monkeypatch, quote_page, checkout_client, database, cart
+):
+    from test_checkout_workflow import install_idempotent_stripe
+    from frozen_plate.order_adapter import specification_from_order
+    from plate_geometry import canonical_specification
+
+    app, calls = quote_page
+    select(app, "quote_field_chamfer", True)
+    app.run()
+    app.number_input(key="quote_field_chamfer_width").set_value(0.04).run()
+    values = copy.deepcopy(calls[-1])
+    assert all(values[key] == value for key, value in STANDARD_CHAMFER.items())
+    monkeypatch.setattr(api_app, "_decode_supabase_user_id_from_bearer", lambda _: "owner-test")
+    stripe_calls = install_idempotent_stripe(monkeypatch)
+    response = checkout_client.post(
+        "/checkout/cart/create" if cart else "/checkout/create",
+        json={"items": [values]} if cart else {"inputs": values},
+        headers={"Authorization": "Bearer synthetic"},
+    )
+    assert response.status_code == 200 and len(stripe_calls) == 1
+    with database() as db:
+        order = db.query(api_app.Order).one()
+        snapshot = {"id": order.id, "customer_id": order.customer_id, "quote_payload": order.quote_payload}
+        spec, _ = specification_from_order(snapshot, line_index=0, part_identifier="TEST")
+    canonical = canonical_specification(spec)
+    assert canonical["chamfer_width"] == 0.04
+    assert all(canonical[key] == value for key, value in STANDARD_CHAMFER.items())
 
 
 def test_non_chamfer_payload_and_geometry_are_unchanged():

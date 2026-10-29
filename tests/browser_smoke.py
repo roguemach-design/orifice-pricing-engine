@@ -34,7 +34,7 @@ CONFIG = dict(
 
 
 @pytest.mark.parametrize("route", ["/Quote", "/Quote?embed=true&integrated=1"])
-def test_standard_chamfer_is_deliberate_and_infeasible_edits_block(configurator, route, tmp_path):
+def test_standard_chamfer_is_automatic_and_infeasible_edits_block(configurator, route, tmp_path):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": 1280, "height": 1200})
@@ -43,11 +43,9 @@ def test_standard_chamfer_is_deliberate_and_infeasible_edits_block(configurator,
         try:
             page.goto(configurator + route)
             page.get_by_role("radio", name=re.compile("^CHAMFERED BORE")).click()
-            standard = page.get_by_role("radio", name="Standard 45° Chamfer", exact=True)
-            expect(standard).to_be_visible(timeout=15000)
-            expect(standard).not_to_be_checked()
-            expect(page.get_by_text("Select the standard specification for instant checkout.", exact=False)).to_be_visible()
-            standard.press("Space")
+            expect(page.get_by_text("Chamfer specification", exact=True)).to_have_count(0)
+            expect(page.get_by_role("radio", name="Standard 45° Chamfer", exact=True)).to_have_count(0)
+            expect(page.get_by_role("radio", name="Custom / drawing review", exact=True)).to_have_count(0)
             expect(page.get_by_text("Standard 45° Chamfer: downstream face;", exact=False)).to_be_visible()
             width = page.get_by_role("spinbutton", name="Chamfer Width (in.)", exact=True)
             expect(width).to_have_value("0.0620")
@@ -56,9 +54,14 @@ def test_standard_chamfer_is_deliberate_and_infeasible_edits_block(configurator,
             expect(page.get_by_text("positive land and wall", exact=False)).to_be_visible(timeout=15000)
             expect(page.get_by_role("button", name="Continue to secure checkout", exact=True)).to_be_disabled()
             expect(width).to_have_value("0.1250")
-            page.get_by_role("radio", name="Custom / drawing review", exact=True).press("Space")
+            page.get_by_role("radio", name=re.compile("^NO CHAMFER")).press("Space")
+            expect(width).to_have_count(0)
+            page.get_by_role("radio", name=re.compile("^CHAMFERED BORE")).press("Space")
             expect(width).to_have_value("0.1250")
-            expect(page.get_by_role("button", name="Continue to secure checkout", exact=True)).to_be_disabled()
+            width.fill("0.04")
+            width.press("Tab")
+            expect(page.locator('[data-field-error]')).to_have_count(0)
+            expect(page.get_by_role("radio", name="Custom / drawing review", exact=True)).to_have_count(0)
             expect(page.get_by_test_id("stException")).to_have_count(0)
             page.screenshot(path=str(tmp_path / "standard-chamfer.png"), full_page=True)
         finally:
@@ -276,7 +279,7 @@ def test_actual_landing_host_renders_one_visible_drawing(configurator, width, tm
             child.get_by_role("radio", name=re.compile("^CHAMFERED BORE")).press("Space")
             chamfer = child.get_by_role("spinbutton", name="Chamfer Width (in.)", exact=True)
             expect(chamfer).to_have_value("0.0620")
-            child.get_by_role("radio", name="Standard 45° Chamfer", exact=True).press("Space")
+            expect(child.get_by_role("radio", name="Standard 45° Chamfer", exact=True)).to_have_count(0)
             child.get_by_role("radio", name="HANDLE HOLE", exact=True).press("Space")
             diameter = child.get_by_role("textbox", name="Handle Hole Diameter (in.)", exact=True)
             distance = child.get_by_role("textbox", name="Handle End to Hole Center (in.)", exact=True)
