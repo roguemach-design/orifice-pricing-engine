@@ -499,3 +499,17 @@ def test_session_expiration_removes_late_children_without_erasing_daily_counts(s
     with store.engine.connect() as db:
         assert db.scalar(select(func.count()).select_from(events)) == 0
     assert store.report(2160)["funnel"]["quote"] == 1
+
+
+def test_browser_ack_retry_and_privacy_cancellation():
+    import subprocess
+
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        ["node", "tests/journey_retry_browser.cjs"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

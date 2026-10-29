@@ -14,11 +14,11 @@ function environment({component=false,gpc=false,source='direct',serverSession=nu
   }});
   const token='a'.repeat(32)+'.'+Math.floor(Date.now()/1000+86400)+'.'+'b'.repeat(64);
   const app={document,navigator:{globalPrivacyControl:gpc},crypto:{randomUUID},location:{origin:component?'https://quote.o-plates.com':'https://www.o-plates.com',href:'https://www.o-plates.com/'},sessionStorage:storage(),localStorage:storage(),
-    addEventListener:(k,fn)=>(appListeners[k]??=[]).push(fn),fetch:async(url,opts)=>{calls.push({url,opts});return {ok:true,json:async()=>({session:token})}},postMessage:(data,origin)=>messages.push({data,origin,target:'app'})};
+    addEventListener:(k,fn)=>(appListeners[k]??=[]).push(fn),fetch:async(url,opts)=>{calls.push({url,opts});return {ok:true,status:url.endsWith('/journey/session')?200:204,json:async()=>({session:token})}},postMessage:(data,origin)=>messages.push({data,origin,target:'app'})};
   app.parent=component?{postMessage:(data,origin)=>messages.push({data,origin,target:'host'})}:app;
   const window=component?{parent:app,document,location:app.location,addEventListener:(k,fn)=>(listeners[k]??=[]).push(fn)}:app;
   if(!component)window.OPLATES_JOURNEY={enabled:true,endpoint:'https://orifice-pricing-api.onrender.com'};
-  const context={window,document,Date,JSON,URL,Object,Set,Number,Boolean,String,AbortController,setTimeout,clearTimeout,IntersectionObserver:class {observe(){} disconnect(){}}};
+  const context={window,document,Date,JSON,URL,Object,Set,Number,Boolean,String,AbortController,setTimeout,clearTimeout,setInterval,clearInterval,IntersectionObserver:class {observe(){} disconnect(){}}};
   vm.runInNewContext(script,context);
   if(component)for(const fn of listeners.message||[])fn({source:app,data:{type:'streamlit:render',args:{endpoint:'https://orifice-pricing-api.onrender.com',source,entry:'configurator',session:serverSession}}});
   return {calls,messages,root,app,frameWindow,appListeners,token,cookies};
@@ -84,4 +84,5 @@ async function main(){
   assert.equal(host.messages.length,before+1,'Only a direct child of the configured quote frame is also trusted');
   console.log('Browser protocol: consent, withdrawal, GPC, deduplication, sensitive-field rejection and origin/source/nonce checks passed.');
 }
-main().catch(e=>{console.error(e);process.exitCode=1});
+module.exports={environment,tick};
+if(require.main===module)main().catch(e=>{console.error(e);process.exitCode=1});
