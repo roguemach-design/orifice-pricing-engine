@@ -948,7 +948,8 @@ def _calculate_quote_with_db_knobs(inputs: QuoteInputs) -> dict:
             _restore_cfg_baseline()
 
     from pricing_calibration import MODEL_VERSION
-    result["pricing_config_version"] = f"{version}:{MODEL_VERSION}"
+    from shipping_mass import MODEL_VERSION as SHIPPING_MODEL_VERSION
+    result["pricing_config_version"] = f"{version}:{SHIPPING_MODEL_VERSION}:{MODEL_VERSION}"
     return result
 
 # ----------------------------
