@@ -1,0 +1,34 @@
+{
+  "baseline": "48f6446820ef653c58819606eccd088fde8f3766",
+  "cases": 288,
+  "commercial_sha256": "040d797a93aab95d2a950d6be0480a581f32909b5a92a013521067059c34e09e",
+  "convergence_shipping": [
+    {
+      "estimated_unit_weight_lb": 1.22,
+      "estimated_total_weight_lb": 2.22,
+      "shipping": {
+        "ups_ground_cents": 1485,
+        "ups_2day_cents": 2747,
+        "ups_nextday_cents": 4232
+      }
+    },
+    {
+      "estimated_unit_weight_lb": 2.44,
+      "estimated_total_weight_lb": 3.44,
+      "shipping": {
+        "ups_ground_cents": 1580,
+        "ups_2day_cents": 2923,
+        "ups_nextday_cents": 4503
+      }
+    },
+    {
+      "estimated_unit_weight_lb": 3.58,
+      "estimated_total_weight_lb": 4.58,
+      "shipping": {
+        "ups_ground_cents": 1675,
+        "ups_2day_cents": 3099,
+        "ups_nextday_cents": 4774
+      }
+    }
+  ]
+}

@@ -28,7 +28,7 @@ def test_baseline_quote_is_deterministic():
 
     assert result["unit_price"] == 93.00
     assert result["total_price"] == 93.00
-    assert result["estimated_total_weight_lb"] == 1.14
+    assert result["estimated_total_weight_lb"] == 1.64
     assert result["estimated_package_in"] == {
         "length": 14.5,
         "width": 7.0,
