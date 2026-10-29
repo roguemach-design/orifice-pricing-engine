@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import time
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
 from urllib.parse import unquote
@@ -11,6 +12,8 @@ from urllib.parse import unquote
 import requests
 import streamlit as st
 from supabase import Client, create_client
+from supabase.lib.client_options import SyncClientOptions
+import httpx
 
 logger = logging.getLogger(__name__)
 
@@ -50,12 +53,15 @@ def _ensure_auth_state() -> None:
 
 
 def _clear_local_auth() -> None:
+    st.session_state["_auth_cookie_cleared"] = True
     st.session_state.auth = {
         "access_token": None,
         "refresh_token": None,
         "user": None,
         "email": None,
     }
+    st.session_state.pop("_auth_restore_check", None)
+    st.session_state.pop("_auth_refresh_retry_at", None)
     _cookie_clear()
 
 
@@ -66,7 +72,10 @@ def sb() -> Client:
     if not SUPABASE_URL or not SUPABASE_ANON_KEY:
         st.error("Account sign-in is temporarily unavailable.")
         st.stop()
-    return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+    # This module owns rotation and browser persistence. A disposable SDK client
+    # must never rotate tokens later in a background timer/private memory store.
+    return create_client(SUPABASE_URL, SUPABASE_ANON_KEY,
+                         options=SyncClientOptions(auto_refresh_token=False, persist_session=False))
 
 
 # ----------------------------
@@ -105,6 +114,24 @@ def _cookie_get() -> Optional[dict]:
             return None
         raw = cm.get(COOKIE_NAME)
 
+    if not context_available and not raw and not st.session_state.get("_auth_cookie_bootstrapped"):
+        # Compatibility fallback only when request cookies are unavailable.
+        # Current Streamlit supplies the quote-origin cookie synchronously;
+        # anonymous pages must not mount an unnecessary cookie component.
+        raw_cookies = _cookie_component(method="getAll", key="auth_cookie_restore", default=None)
+        if raw_cookies is None:
+            # No identity is available yet. Keep the anonymous configurator
+            # mounted while the component replies; protected routes still
+            # require is_logged_in()/backend authorization.
+            return None
+        st.session_state["_auth_cookie_bootstrapped"] = True
+        raw = raw_cookies.get(COOKIE_NAME)
+    return _decode_cookie(raw)
+
+
+def _decode_cookie(raw):
+    if isinstance(raw, dict):
+        return raw
     if not raw:
         return None
     try:
@@ -116,38 +143,114 @@ def _cookie_get() -> Optional[dict]:
             return None
 
 
-def _cookie_set(payload: dict) -> None:
+def _cookie_component(**args):
     cm = _cookie_mgr()
     if cm is None:
+        st.error("Session storage is unavailable. Please reload this page.")
+        st.stop()
+    # The pinned component exposes its transport; its set() method discards
+    # acknowledgments and updates a Python mirror before the browser writes.
+    return cm.cookie_manager(**args)
+
+
+def _cookie_set(payload: dict) -> None:
+    st.session_state.pop("_auth_cookie_cleared", None)
+    _queue_cookie(payload)
+    _sync_cookie()
+
+
+def _customer_inputs():
+    values = {k: st.session_state[k] for k in list(st.session_state)
+              if k.startswith("quote_field_")}
+    # A dialog rerun can post empty state for required native choices before
+    # they remount. These controls cannot be deliberately deselected. Numeric
+    # fields and their raw text still retain a customer's explicit clearing.
+    for field, value in st.session_state.get("phase1g_form_snapshot", {}).items():
+        key = "quote_field_" + field
+        if field in ("chamfer", "ships_in_days") and values.get(key) is None:
+            values[key] = value
+        else:
+            values.setdefault(key, value)
+    return values
+
+
+def remember_customer_inputs() -> None:
+    """Capture current edits before opening the sign-in dialog."""
+    st.session_state["_auth_signin_inputs"] = _customer_inputs()
+
+
+def _queue_cookie(payload):
+    # Keep values outside widget-owned state during component interruptions.
+    customer_inputs = st.session_state.pop("_auth_signin_inputs", None)
+    previous = st.session_state.get("_auth_cookie_pending")
+    if previous and previous.get("payload") == payload:
+        customer_inputs = previous.get("customer_inputs", customer_inputs)
+    if customer_inputs is None:
+        customer_inputs = _customer_inputs()
+    st.session_state["_auth_cookie_pending"] = {
+        "id": secrets.token_hex(12), "payload": payload, "customer_inputs": customer_inputs,
+        "expires": (datetime.now(timezone.utc) + timedelta(days=COOKIE_TTL_DAYS)).isoformat(),
+    }
+
+
+def _retain_customer_inputs():
+    # Streamlit removes unrendered widget state after an early stop. Preserve
+    # existing editor values while browser storage is synchronizing.
+    for key in list(st.session_state):
+        if key.startswith("quote_field_"):
+            st.session_state[key] = st.session_state[key]
+
+
+def _sync_cookie():
+    operation = st.session_state.get("_auth_cookie_pending")
+    if not operation:
         return
-
-    # ✅ CookieManager expects datetime (not float)
-    expires_dt = datetime.now(timezone.utc) + timedelta(days=COOKIE_TTL_DAYS)
-
-    try:
-        cm.set(
-            COOKIE_NAME,
-            json.dumps(payload),
-            expires_at=expires_dt,
-        )
-        st.session_state.pop("_auth_cookie_cleared", None)
-    except Exception:
-        pass
+    payload, ident = operation["payload"], operation["id"]
+    args = dict(cookie=COOKIE_NAME, key="auth_cookie_write_" + ident, default=None)
+    if payload is None:
+        args["method"] = "delete"
+    else:
+        args.update(method="set", value=json.dumps(payload), options={
+            "path": "/", "expires": operation["expires"],
+            "secure": True, "sameSite": "lax",
+        })
+    acknowledged = _cookie_component(**args)
+    observed = None
+    if acknowledged is True:
+        observed = _cookie_component(method="getAll", key="auth_cookie_verify_" + ident, default=None)
+    if observed is not None and _decode_cookie(observed.get(COOKIE_NAME)) == payload:
+        st.session_state["_auth_resume_inputs"] = operation.get("customer_inputs", {})
+        del st.session_state["_auth_cookie_pending"]
+        st.session_state["_auth_cookie_bootstrapped"] = True
+        # Component replies can rerun only the sign-in dialog fragment. Resume
+        # the complete app after persistence so its modal closes and prices /
+        # navigation are recomputed with the authenticated identity.
+        _retain_customer_inputs()
+        st.rerun()
+        return
+    if observed is not None:
+        st.warning("Your browser has not saved the session. Allow cookies for this site, then retry.")
+        if st.button("Retry saving session", key="auth_cookie_retry"):
+            _queue_cookie(payload)
+            st.rerun()
+    else:
+        st.info("Saving your session securely…")
+    # No checkout, protected navigation or success rerun until browser readback.
+    _retain_customer_inputs()
+    st.stop()
 
 
 def _cookie_clear() -> None:
     st.session_state["_auth_cookie_cleared"] = True
-    cm = _cookie_mgr()
-    if cm is None:
-        return
-    try:
-        cm.delete(COOKIE_NAME)
-    except Exception:
-        pass
+    _queue_cookie(None)
+    _sync_cookie()
 
 
 def _restore_auth_from_cookie_if_needed() -> None:
     _ensure_auth_state()
+    for key, value in st.session_state.pop("_auth_resume_inputs", {}).items():
+        st.session_state[key] = value
+    _sync_cookie()
 
     if st.session_state.auth.get("access_token"):
         return
@@ -164,6 +267,9 @@ def _restore_auth_from_cookie_if_needed() -> None:
         "user": None,
         "email": data.get("email"),
     }
+    # Revalidate a restored refresh token with Supabase before exposing any
+    # customer data, even when its cached access JWT has not expired yet.
+    st.session_state["_auth_restore_check"] = True
 
 
 # ----------------------------
@@ -219,7 +325,9 @@ def _refresh_session_if_needed() -> None:
             _clear_local_auth()
         return
 
-    if not _token_expires_soon(access_token):
+    if time.time() < st.session_state.get("_auth_refresh_retry_at", 0):
+        return
+    if not st.session_state.get("_auth_restore_check") and not _token_expires_soon(access_token):
         return
 
     try:
@@ -229,8 +337,7 @@ def _refresh_session_if_needed() -> None:
         )
 
         if not session:
-            if _token_is_expired(access_token):
-                _clear_local_auth()
+            _clear_local_auth()
             return
 
         new_access = _session_value(session, "access_token")
@@ -238,12 +345,13 @@ def _refresh_session_if_needed() -> None:
 
         if new_access:
             st.session_state.auth["access_token"] = new_access
-        elif _token_is_expired(access_token):
+        else:
             _clear_local_auth()
             return
         if new_refresh:
             st.session_state.auth["refresh_token"] = new_refresh
-
+        st.session_state.pop("_auth_restore_check", None)
+        st.session_state.pop("_auth_refresh_retry_at", None)
         _cookie_set(
             {
                 "access_token": st.session_state.auth.get("access_token"),
@@ -252,8 +360,16 @@ def _refresh_session_if_needed() -> None:
             }
         )
 
-    except Exception:
-        if _token_is_expired(access_token):
+    except Exception as exc:
+        status = getattr(exc, "status", None)
+        transient = (isinstance(exc, (requests.RequestException, httpx.TransportError))
+                     or type(exc).__name__ == "AuthRetryableError"
+                     or status == 429 or isinstance(status, int) and status >= 500)
+        if transient:
+            # Retain the refresh credential for a bounded retry, but never send
+            # an expired access token or grant an unvalidated restored session.
+            st.session_state["_auth_refresh_retry_at"] = time.time() + 10
+        else:
             _clear_local_auth()
 
 
@@ -264,11 +380,22 @@ def is_logged_in() -> bool:
     _restore_auth_from_cookie_if_needed()
     _refresh_session_if_needed()
     _ensure_auth_state()
-    return bool(st.session_state.auth.get("access_token"))
+    token = st.session_state.auth.get("access_token")
+    return bool(token and not _token_is_expired(token)
+                and not st.session_state.get("_auth_restore_check"))
 
 
 def logout() -> None:
     _ensure_auth_state()
+    access, refresh = (st.session_state.auth.get(k) for k in ("access_token", "refresh_token"))
+    if access and refresh:
+        try:
+            client = sb()
+            client.auth.set_session(access, refresh)
+            client.auth.sign_out({"scope": "local"})
+        except Exception:
+            # Local removal is mandatory even when provider logout is offline.
+            logger.warning("Provider sign-out unavailable; local session cleared")
     _clear_local_auth()
     st.rerun()
 
@@ -277,7 +404,8 @@ def auth_headers() -> Dict[str, str]:
     _restore_auth_from_cookie_if_needed()
     _refresh_session_if_needed()
     tok = st.session_state.auth.get("access_token")
-    return {"Authorization": f"Bearer {tok}"} if tok else {}
+    return ({"Authorization": f"Bearer {tok}"}
+            if tok and not _token_is_expired(tok) and not st.session_state.get("_auth_restore_check") else {})
 
 
 def current_user_id_hint() -> Optional[str]:
@@ -325,6 +453,8 @@ def _render_connection_debug() -> None:
 
 def render_auth_sidebar(*, show_debug: bool = False, placement: str = "default") -> None:
     from customer_navigation import render_customer_shell
+    if placement == "default":
+        st.session_state.pop("_auth_signin_inputs", None)
     if placement in ("default", "deferred"):
         render_customer_shell()
     # ✅ IMPORTANT: restore BEFORE widgets
@@ -333,6 +463,13 @@ def render_auth_sidebar(*, show_debug: bool = False, placement: str = "default")
     _refresh_session_if_needed()
 
     if placement == "deferred":
+        return
+
+    if st.session_state.auth.get("refresh_token") and not is_logged_in():
+        st.warning("Your session is temporarily unavailable. Retry without requesting another sign-in code.")
+        if st.button("Retry session", key="auth_refresh_retry"):
+            st.session_state.pop("_auth_refresh_retry_at", None)
+            st.rerun()
         return
 
     # Signed-in identity is a utility row on every customer page.

@@ -291,7 +291,7 @@ def test_signed_in_account_is_compact_and_logout_still_clears_session(monkeypatc
     monkeypatch.setattr(auth, "_refresh_session_if_needed", lambda: None)
     monkeypatch.setattr(auth, "_cookie_clear", lambda: None)
     app = customer_page_test("pages/1_Quote.py")
-    app.session_state["auth"] = dict(access_token="fixture", refresh_token=None, user=None, email="customer@example.test")
+    app.session_state["auth"] = dict(access_token=__import__("test_checkout_identity_gate")._jwt("fixture"), refresh_token=None, user=None, email="customer@example.test")
     app.run()
     assert not app.exception
     assert any(x.value == "Signed in as: customer@example.test" for x in app.caption)
