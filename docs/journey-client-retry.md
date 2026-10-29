@@ -22,7 +22,11 @@ suppressed until the existing session/consent reset, avoiding rerender retry sto
 The existing 16-item pre-session queue and 1.5-second request timeout are retained.
 
 Withdrawal immediately advances the consent generation, aborts active client
-requests and cancels backoff waits. Embedded parent withdrawal does the same.
+requests and cancels backoff waits. Refusal is saved/shared before waiting for the
+delete request, which retains only the previous session token. A subsequent opt-in
+does not cancel that previous-session deletion. Embedded parent
+withdrawal does the same. Late parent context and internal tagging cannot override
+a newer shared refusal or republish an identifier under a privacy restriction.
 Every attempt checks consent, shared-cookie refusal, DNT and GPC. While a request
 or wait is active, privacy restrictions are checked every 25 ms because browsers
 provide no standard GPC/DNT change event. There is no permanent background poll.

@@ -100,6 +100,30 @@ async function main(){
   pending.app.fetch=async(url,opts)=>{const r=await nativePending(url,opts);return url.endsWith('/journey/session')?new Promise(resolve=>{finishStart=()=>resolve(r);}):r;};
   const starting=allow(pending);await until(()=>finishStart);pending.app.navigator.doNotTrack='1';finishStart();await starting;
   assert.equal(events(pending).length,0);assert(!pending.cookies.has('oplates_journey_v1'));
+  // Refusal reaches other frames/cookies before a slow DELETE can finish.
+  const slowDelete=environment();await tick();await allow(slowDelete);
+  const nativeDelete=slowDelete.app.fetch;let finishDelete;
+  slowDelete.app.fetch=async(url,opts)=>{const r=await nativeDelete(url,opts);return opts.method==='DELETE'?new Promise(resolve=>{finishDelete=()=>resolve(r);}):r;};
+  await withdraw(slowDelete);await until(()=>finishDelete);
+  assert.equal(JSON.parse(decodeURIComponent(slowDelete.cookies.get('oplates_journey_choice'))).allow,false);
+  assert(!slowDelete.cookies.has('oplates_journey_v1'));
+  assert.equal(slowDelete.calls.find(c=>c.opts.method==='DELETE').opts.headers['X-Journey-Session'],slowDelete.token);
+  slowDelete.app.__oplatesJourneyInternal();
+  assert.equal(JSON.parse(decodeURIComponent(slowDelete.cookies.get('oplates_journey_choice'))).allow,false,'Internal tagging cannot override refusal');
+  await allow(slowDelete);
+  assert.equal(slowDelete.calls.find(c=>c.opts.method==='DELETE').opts.signal.aborted,false,'Re-opt-in must not cancel previous-session deletion');
+  finishDelete();await tick();
+  // An old parent context cannot override a newer shared-cookie refusal.
+  const refused=environment({component:true,source:'embed'});await tick();
+  const refusedNonce=refused.messages.find(m=>m.data.type==='oplates:journey-ready').data.nonce;
+  refused.cookies.set('oplates_journey_choice',encodeURIComponent(JSON.stringify({version:'journey-2026-10-v1',allow:false})));
+  refused.appListeners.message[0]({origin:'https://www.o-plates.com',source:refused.app.parent,data:{type:'oplates:journey-context',version:1,nonce:refusedNonce,session:refused.token,consent:true,internal:true}});
+  await tick();assert.equal(refused.calls.length,0);assert(!refused.cookies.has('oplates_journey_v1'));
+  // Privacy restriction prevents internal tagging from republishing an identifier.
+  const restricted=environment();await tick();await allow(restricted);
+  restricted.app.navigator.globalPrivacyControl=true;restricted.cookies.delete('oplates_journey_v1');
+  const beforeTag=restricted.calls.length;restricted.app.__oplatesJourneyInternal();await tick();
+  assert.equal(restricted.calls.length,beforeTag);assert(!restricted.cookies.has('oplates_journey_v1'));
   // Keep the existing 100-observation cap; bounded failures also consume slots.
   const capped=environment();await tick();await allow(capped);
   const combos=[['reached','none'],['success','none'],['blocked','system_restriction'],...['invalid_input','unsupported','api_failure','technical_failure'].map(c=>['error',c])];

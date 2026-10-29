@@ -58,15 +58,15 @@
       waits.add(cancel);
     });
   }
-  async function request(path,body,method='POST',useToken=true){
+  async function request(path,body,method='POST',useToken=true,session=token){
     const generation=epoch,observation=method!=='DELETE';
     if(observation&&!allowed(generation))return null;
-    const abort=new AbortController();requests.add(abort);
+    const abort=new AbortController();if(observation)requests.add(abort);
     const timer=setTimeout(()=>abort.abort(),1500);
     // There is no standard GPC/DNT change event. Check only while work is active.
     const privacy=observation?setInterval(()=>{if(!allowed(generation))abort.abort();},25):null;
     try{return await app.fetch(config.endpoint+path,{method,credentials:'omit',referrerPolicy:'no-referrer',signal:abort.signal,
-      headers:{'Content-Type':'application/json',...(useToken&&token?{'X-Journey-Session':token}:{})},...(body?{body:JSON.stringify(body)}:{})});}
+      headers:{'Content-Type':'application/json',...(useToken&&session?{'X-Journey-Session':session}:{})},...(body?{body:JSON.stringify(body)}:{})});}
     catch(_){return null;}finally{clearTimeout(timer);clearInterval(privacy);requests.delete(abort);}
   }
   function context(){return {type:'oplates:journey-context',version:1,nonce,session:token,consent,internal};}
@@ -107,7 +107,7 @@
   }
   async function emit(e){
     const choice=readCookie('oplates_journey_choice');
-    if(choice?.version===VERSION&&choice.allow===false){epoch++;consent=false;cancelPending();token=null;publish();render();return;}
+    if(choice?.version===VERSION&&choice.allow===false){epoch++;consent=false;cancelPending();token=null;write('oplates-journey-session',null,true);sharedCookie(null);publish();render();return;}
     if(!valid(e) || !allowed())return;
     if(!token){if(pendingEvents.length<16)pendingEvents.push({...e});return;}
     if(Date.now()-last>=1800000||Number(token.split('.')[1])*1000<=Date.now()){await begin();if(!token)return;}
@@ -123,12 +123,13 @@
   function event(step,outcome='reached',category='none'){return {version:1,event_id:app.crypto.randomUUID(),timestamp:new Date().toISOString(),step,outcome,category,source:config.source};}
   async function flush(){const events=pendingEvents.splice(0,16);for(const e of events)await emit(e);}
   async function choose(allow){
-    const previous=token;epoch++;consent=allow&&!protectedBrowser();cancelPending();
-    if(!allow && previous)await request('/journey/session',null,'DELETE');
+    const previous=token;epoch++;const generation=epoch;consent=allow&&!protectedBrowser();cancelPending();
     consent=allow&&!protectedBrowser();token=null;seen.clear();observations.clear();pendingEvents=[];
     write('oplates-journey-session',null,true);sharedCookie(null);const choice={allow:consent,internal,version:VERSION,at:Date.now()};write('oplates-journey-preference',choice);sharedChoice(choice);
     publish();share();render();
-    if(consent){await begin();await initial();await flush();}
+    // Share refusal before waiting for deletion, including across embedded frames.
+    if(!allow && previous)await request('/journey/session',null,'DELETE',true,previous);
+    if(allow&&allowed(generation)){await begin();await initial();await flush();}
   }
   function render(){
     const root=window.document.getElementById('journey-consent');if(!root)return;
@@ -156,7 +157,7 @@
       const allowed=app.location.origin===QUOTES[0]?PROD:STAGE;
       if(!allowed.includes(e.origin)||e.source!==app.parent||data?.type!=='oplates:journey-context'||data.version!==1||data.nonce!==nonce)return;
       if(Object.keys(data).some(k=>!['type','version','nonce','session','consent','internal'].includes(k)))return;
-      const previous=token;consent=data.consent===true&&!protectedBrowser();token=consent&&tokenOK(data.session)?data.session:null;internal=data.internal===true;
+      const previous=token;consent=data.consent===true&&!protectedBrowser()&&readCookie('oplates_journey_choice')?.allow!==false;token=consent&&tokenOK(data.session)?data.session:null;internal=data.internal===true;
       if(previous!==token||!consent){epoch++;cancelPending();seen.clear();observations.clear();}last=Date.now();if(token)saveSession();else sharedCookie(null);publish();initial().then(flush).catch(()=>{});
     } else {
       const frame=app.document.getElementById('plate-configurator');
@@ -182,7 +183,7 @@
     publish();
     app.addEventListener('message',receive);
     app.__oplatesJourneyEmit=emit;
-    app.__oplatesJourneyInternal=()=>{internal=true;if(token){request('/journey/internal',{}).catch(()=>{});saveSession();sharedChoice({allow:true,internal:true,version:VERSION,at:Date.now()});share();}};
+    app.__oplatesJourneyInternal=()=>{internal=true;if(token&&allowed()){request('/journey/internal',{}).catch(()=>{});saveSession();sharedChoice({allow:true,internal:true,version:VERSION,at:Date.now()});share();}};
     if(app.__oplatesJourneyOwnerTest===true)internal=true;
     render();
     if(config.source==='embed'){
