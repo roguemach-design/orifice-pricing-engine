@@ -11,6 +11,7 @@ class PortalError(Exception):
 
 
 ERRORS = {
+    "fixture": "Controlled fixture opening clearance is insufficient. A compatible reviewed profile is required; limits remain unchanged.",
     "authorization": "Owner authorization was not accepted. Lock and unlock with the current credential.",
     "missing": "Record unavailable. Your order and revision selection is kept.",
     "conflict": "This request is unavailable or the revision is no longer current. Refresh the record before trying again.",
@@ -148,6 +149,7 @@ class OwnerClient:
         if path not in (
             "/admin/manufacturing/bundles",
             "/admin/manufacturing/bundles/query",
+            "/admin/manufacturing/test-engineering",
         ):
             raise PortalError("missing")
         if not self.credential:
@@ -162,6 +164,13 @@ class OwnerClient:
             )
         except requests.RequestException:
             raise PortalError("service") from None
+        if response.status_code == 409 and path == "/admin/manufacturing/test-engineering":
+            try:
+                detail = response.json().get("detail")
+            except (ValueError, AttributeError):
+                detail = None
+            if detail == "Blocked: controlled fixture opening clearance is insufficient":
+                raise PortalError("fixture")
         if response.status_code != 200:
             raise PortalError(
                 {

@@ -89,3 +89,8 @@ def worker():
     from .worker import StagingWorker
 
     return StagingWorker(automatic)
+
+
+def test_engineering():
+    from .test_engineering import TestEngineering
+    return TestEngineering(automatic())

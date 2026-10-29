@@ -123,7 +123,7 @@ def calculate_quote(x: QuoteInputs) -> Dict[str, Any]:
         f"unsupported bore tolerance: {x.bore_tolerance}",
     )
     _require(
-        x.ships_in_days in cfg.LEAD_TIME_MULTIPLIER,
+        x.ships_in_days in (7, 14, 21) and x.ships_in_days in cfg.LEAD_TIME_MULTIPLIER,
         f"unsupported ships_in_days: {x.ships_in_days}",
     )
 
@@ -141,15 +141,10 @@ def calculate_quote(x: QuoteInputs) -> Dict[str, Any]:
     material_cost = area_sq_in * cfg.PRICE_PER_SQ_IN[x.material][x.thickness]
     laser_cost = linear_inches * cfg.LASER_PER_LINEAR_IN
 
-    machine_bore_cost = (
-        (3.14 * x.bore_dia) * (cfg.MILL_LABOR_PER_HR / cfg.MILL_SPEED_IPM)
-    ) * 2
-
-    chamfer_bore_cost = (
-        ((3.14 * x.bore_dia) * (cfg.MILL_LABOR_PER_HR / cfg.CHAMFER_SPEED_IPM)) * 2
-        if x.chamfer
-        else 0
-    )
+    from pricing_calibration import machining_costs
+    machining = machining_costs(x, cfg)
+    machine_bore_cost = machining["machine_bore_cost"]
+    chamfer_bore_cost = machining["chamfer_bore_cost"]
 
     load_cost = (cfg.MILL_LABOR_PER_HR / 60) * cfg.LOAD_TIME_MINS
     insp_mins = cfg.INSPECTION_MINS_BY_TOL[x.bore_tolerance]
@@ -198,6 +193,17 @@ def calculate_quote(x: QuoteInputs) -> Dict[str, Any]:
     # Final result
     # =========================
     return {
+        **machining,
+        # Full precision reconciliation; legacy display fields remain cents.
+        "manufacturing_cost_components": {
+            "material": material_cost, "laser": laser_cost,
+            "bore_time": machining["bore_time_cost"],
+            "precision_bore_allowance": machining["precision_bore_allowance"],
+            "chamfer_time": machining["chamfer_time_cost"],
+            "chamfer_allowance": machining["chamfer_diameter_allowance"],
+            "loading": load_cost, "inspection": inspection_cost,
+        },
+        "manufacturing_subtotal_unrounded": subtotal,
         "area_sq_in": round(area_sq_in, 4),
         "linear_inches": round(linear_inches, 4),
         "material_cost": round(material_cost, 2),
