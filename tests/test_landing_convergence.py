@@ -154,10 +154,11 @@ def test_choices_match_accepted_baseline(monkeypatch, index):
     actual=fingerprints(calls[-1])
     presentation=json.loads((ROOT / "tests/fixtures/v7-1-convergence-hashes.json").read_text())
     shipping = json.loads((ROOT / "tests/fixtures/shipping-mass-baseline.json").read_text())["convergence_shipping"][index]
+    hole_price = json.loads((ROOT / "tests/fixtures/handle-hole-price-overrides.json").read_text())[index]
     for key,value in actual.items():
         expected = presentation[index][key] if key in ("pdf_sha256", "svg_sha256") else golden["cases"][index][key]
         if key == "price":
-            expected = {**expected, **shipping}
+            expected = {**expected, **shipping, **hole_price}
         assert value == expected
 
 

@@ -335,7 +335,7 @@ def payload(**changes):
     return {**data, **changes}
 
 
-def test_neutral_pricing_and_configuration_passthrough():
+def test_fixed_base_pricing_and_configuration_passthrough():
     from api_app import QuoteRequest
 
     off = payload()
@@ -344,7 +344,10 @@ def test_neutral_pricing_and_configuration_passthrough():
         handle_hole_diameter=0.375,
         handle_hole_center_from_handle_end=0.75,
     )
-    assert calculate_quote(QuoteInputs(**off)) == calculate_quote(QuoteInputs(**on))
+    a, b = calculate_quote(QuoteInputs(**off)), calculate_quote(QuoteInputs(**on))
+    assert b["manufacturing_subtotal_unrounded"] - a["manufacturing_subtotal_unrounded"] == pytest.approx(15.06)
+    assert a["manufacturing_cost_components"]["handle_hole"] == 0
+    assert b["manufacturing_cost_components"]["handle_hole"] == 15.06
     normalized = QuoteRequest(**on).model_dump()
     assert PlateSpec.from_configuration(normalized).handle_hole_diameter == 0.375
     assert not any(

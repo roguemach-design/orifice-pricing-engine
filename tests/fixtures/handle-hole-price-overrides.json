@@ -1,0 +1,59 @@
+[
+  {
+    "pricing_model_version": "diameter-allowances-2026-10-v3-handle-hole",
+    "manufacturing_cost_components": {
+      "material": 8.463000000000001,
+      "laser": 25.4821,
+      "bore_time": 1.2675765358546671,
+      "precision_bore_allowance": 50.31,
+      "chamfer_time": 0.0,
+      "chamfer_allowance": 0.0,
+      "loading": 15.0,
+      "inspection": 15.0,
+      "handle_hole": 0
+    },
+    "manufacturing_subtotal_unrounded": 115.52267653585466,
+    "subtotal_pre_multiplier": 115.52,
+    "unit_price_pre_qty_discount": 115.52,
+    "unit_price": 115.52,
+    "total_price": 115.52
+  },
+  {
+    "pricing_model_version": "diameter-allowances-2026-10-v3-handle-hole",
+    "manufacturing_cost_components": {
+      "material": 24.459500000000002,
+      "laser": 25.4821,
+      "bore_time": 1.701789520475828,
+      "precision_bore_allowance": 50.31,
+      "chamfer_time": 0.0,
+      "chamfer_allowance": 0.0,
+      "loading": 15.0,
+      "inspection": 30.0,
+      "handle_hole": 15.06
+    },
+    "manufacturing_subtotal_unrounded": 162.01338952047584,
+    "subtotal_pre_multiplier": 162.01,
+    "unit_price_pre_qty_discount": 259.22,
+    "unit_price": 259.22,
+    "total_price": 259.22
+  },
+  {
+    "pricing_model_version": "diameter-allowances-2026-10-v3-handle-hole",
+    "manufacturing_cost_components": {
+      "material": 7.19225,
+      "laser": 25.4821,
+      "bore_time": 2.136002505096989,
+      "precision_bore_allowance": 50.31,
+      "chamfer_time": 0.8796459430051421,
+      "chamfer_allowance": 7.74,
+      "loading": 15.0,
+      "inspection": 45.0,
+      "handle_hole": 15.06
+    },
+    "manufacturing_subtotal_unrounded": 168.79999844810214,
+    "subtotal_pre_multiplier": 168.8,
+    "unit_price_pre_qty_discount": 168.8,
+    "unit_price": 168.8,
+    "total_price": 168.8
+  }
+]

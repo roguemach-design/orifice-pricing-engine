@@ -38,6 +38,11 @@ def representative_inputs():
 def commercial_digest(calculate=calculate_quote):
     results = [{k: v for k, v in calculate(QuoteInputs(**x)).items() if k not in SHIPPING_KEYS}
                for x in representative_inputs()]
+    # Preserve the original shipping-calibration fingerprint. These matrix
+    # cases have no hole: only a zero component and the model label are new.
+    for result in results:
+        assert result["manufacturing_cost_components"].pop("handle_hole") == 0
+        result["pricing_model_version"] = "diameter-allowances-2026-10-v2"
     return hashlib.sha256(json.dumps(results, sort_keys=True, allow_nan=False).encode()).hexdigest()
 
 
@@ -53,7 +58,7 @@ def test_op19_reproduces_old_weight_and_compares_measured_packed_weight():
         ups_ground_cents=3195, ups_2day_cents=5911, ups_nextday_cents=9106)
     assert q["shipping"] == dict(ups_ground_cents=2055, ups_2day_cents=3802, ups_nextday_cents=5857)
     assert q["area_sq_in"] == 288.5625  # rectangular material purchasing envelope
-    assert q["unit_price"] == 685.35
+    assert q["unit_price"] == 709.45  # $15.06 hole base cost × 1.6; shipping unchanged
 
 
 def test_contour_integral_matches_independent_dense_tessellation():

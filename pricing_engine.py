@@ -6,6 +6,9 @@ from pydantic import BaseModel, Field
 
 import tuning_knobs as cfg
 
+# Owner-approved fixed base manufacturing operation; not a diameter rate.
+HANDLE_HOLE_BASE_COST = 15.06
+
 
 class QuoteInputs(BaseModel):
     quantity: int
@@ -140,6 +143,7 @@ def calculate_quote(x: QuoteInputs) -> Dict[str, Any]:
     # ---- Costs ----
     material_cost = area_sq_in * cfg.PRICE_PER_SQ_IN[x.material][x.thickness]
     laser_cost = linear_inches * cfg.LASER_PER_LINEAR_IN
+    handle_hole_cost = HANDLE_HOLE_BASE_COST if x.handle_hole_enabled else 0.0
 
     from pricing_calibration import machining_costs
     machining = machining_costs(x, cfg)
@@ -157,6 +161,7 @@ def calculate_quote(x: QuoteInputs) -> Dict[str, Any]:
         + chamfer_bore_cost
         + load_cost
         + inspection_cost
+        + handle_hole_cost
     )
 
     multiplier = cfg.LEAD_TIME_MULTIPLIER[x.ships_in_days]
@@ -197,6 +202,7 @@ def calculate_quote(x: QuoteInputs) -> Dict[str, Any]:
         # Full precision reconciliation; legacy display fields remain cents.
         "manufacturing_cost_components": {
             "material": material_cost, "laser": laser_cost,
+            "handle_hole": handle_hole_cost,
             "bore_time": machining["bore_time_cost"],
             "precision_bore_allowance": machining["precision_bore_allowance"],
             "chamfer_time": machining["chamfer_time_cost"],
