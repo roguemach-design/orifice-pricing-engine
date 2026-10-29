@@ -3,7 +3,7 @@ from math import pi
 from types import SimpleNamespace
 from plate_geometry import rough_bore_diameter
 
-MODEL_VERSION = "diameter-allowances-2026-10-v2"
+MODEL_VERSION = "diameter-allowances-2026-10-v3-handle-hole"
 TODAY_2_DAY_ID = "today_2_day"
 TODAY_2_DAY_LABEL = "Today / 2-Day"
 SPRING_PASSES = {0.005: 0, 0.002: 1, 0.001: 2}
