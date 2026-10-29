@@ -1328,6 +1328,11 @@ def checkout_create(
     owner_test = _stripe_checkout_required(customer_user_id, checkout_mode)
     _db_required()
 
+    from checkout_geometry import checkout_geometry_error
+    geometry_error = checkout_geometry_error(req.inputs.model_dump())
+    if geometry_error:
+        raise HTTPException(422, {"code": "manufacturing_specification_required", "message": geometry_error})
+
     inputs = QuoteInputs(**req.inputs.model_dump())
     try:
         result = _calculate_quote_with_db_knobs(inputs)
@@ -1481,7 +1486,12 @@ def checkout_cart_create(
     normalized_items = []
     cart_config_version = None
 
-    for it in req.items:
+    from checkout_geometry import checkout_geometry_error
+    for line_number, it in enumerate(req.items, 1):
+        geometry_error = checkout_geometry_error(it.model_dump())
+        if geometry_error:
+            raise HTTPException(422, {"code": "manufacturing_specification_required", "line": line_number,
+                                      "message": geometry_error})
         inputs = QuoteInputs(**it.model_dump())
         try:
             res = _calculate_quote_with_db_knobs(inputs)

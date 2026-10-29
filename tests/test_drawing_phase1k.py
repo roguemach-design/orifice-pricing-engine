@@ -16,7 +16,12 @@ from drawing_intake.owner_access import verified_owner_access
 from pricing_engine import QuoteInputs
 from streamlit.testing.v1 import AppTest
 
-from test_drawing_phase1i import _jwt, _payload, _session
+from test_drawing_phase1i import _jwt, _payload as _base_payload, _session
+from checkout_geometry import STANDARD_CHAMFER
+
+def _payload(*args, **kwargs):
+    return {**_base_payload(*args, **kwargs), **STANDARD_CHAMFER}
+
 
 ROOT = Path(__file__).resolve().parents[1]
 ACTIVE = {

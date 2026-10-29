@@ -33,6 +33,38 @@ CONFIG = dict(
 )
 
 
+@pytest.mark.parametrize("route", ["/Quote", "/Quote?embed=true&integrated=1"])
+def test_standard_chamfer_is_deliberate_and_infeasible_edits_block(configurator, route, tmp_path):
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1280, "height": 1200})
+        page.route("**/*", lambda request: request.continue_()
+                   if request.request.url.startswith(configurator + "/") else request.abort())
+        try:
+            page.goto(configurator + route)
+            page.get_by_role("radio", name=re.compile("^CHAMFERED BORE")).click()
+            standard = page.get_by_role("radio", name="Standard 45° Chamfer", exact=True)
+            expect(standard).to_be_visible(timeout=15000)
+            expect(standard).not_to_be_checked()
+            expect(page.get_by_text("Select the standard specification for instant checkout.", exact=False)).to_be_visible()
+            standard.press("Space")
+            expect(page.get_by_text("Standard 45° Chamfer: downstream face;", exact=False)).to_be_visible()
+            width = page.get_by_role("spinbutton", name="Chamfer Width (in.)", exact=True)
+            expect(width).to_have_value("0.0620")
+            width.fill("0.125")
+            width.press("Tab")
+            expect(page.get_by_text("positive land and wall", exact=False)).to_be_visible(timeout=15000)
+            expect(page.get_by_role("button", name="Continue to secure checkout", exact=True)).to_be_disabled()
+            expect(width).to_have_value("0.1250")
+            page.get_by_role("radio", name="Custom / drawing review", exact=True).press("Space")
+            expect(width).to_have_value("0.1250")
+            expect(page.get_by_role("button", name="Continue to secure checkout", exact=True)).to_be_disabled()
+            expect(page.get_by_test_id("stException")).to_have_count(0)
+            page.screenshot(path=str(tmp_path / "standard-chamfer.png"), full_page=True)
+        finally:
+            browser.close()
+
+
 @pytest.fixture(scope="module")
 def configurator(tmp_path_factory, request):
     requests_seen = []
@@ -244,6 +276,7 @@ def test_actual_landing_host_renders_one_visible_drawing(configurator, width, tm
             child.get_by_role("radio", name=re.compile("^CHAMFERED BORE")).press("Space")
             chamfer = child.get_by_role("spinbutton", name="Chamfer Width (in.)", exact=True)
             expect(chamfer).to_have_value("0.0620")
+            child.get_by_role("radio", name="Standard 45° Chamfer", exact=True).press("Space")
             child.get_by_role("radio", name="HANDLE HOLE", exact=True).press("Space")
             diameter = child.get_by_role("textbox", name="Handle Hole Diameter (in.)", exact=True)
             distance = child.get_by_role("textbox", name="Handle End to Hole Center (in.)", exact=True)

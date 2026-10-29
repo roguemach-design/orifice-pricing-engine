@@ -21,10 +21,17 @@ def quote_inputs(**overrides):
         "bore_tolerance": 0.005,
         "chamfer": True,
         "chamfer_width": 0.062,
+        "chamfer_angle_degrees": 45.0,
+        "chamfer_side": "downstream",
+        "flow_orientation": "left-to-right",
+        "chamfer_width_definition": "radial-angle-from-face",
         "handle_label": "UPSTREAM",
         "ships_in_days": 14,
     }
     values.update(overrides)
+    if values["chamfer"] is False:
+        for field in ("chamfer_angle_degrees", "chamfer_side", "flow_orientation", "chamfer_width_definition"):
+            values.pop(field, None)
     return values
 
 
@@ -140,21 +147,22 @@ def test_complete_chamfer_survives_checkout_and_builds_finished_section(
     assert section.face == "right"
 
 
-def test_width_only_checkout_preserves_incomplete_chamfer_hold(monkeypatch, checkout_client, database):
-    from frozen_plate.order_adapter import specification_from_order
-    from section_geometry import build_section_geometry
-
-    install_idempotent_stripe(monkeypatch)
+@pytest.mark.parametrize("cart", [False, True])
+def test_width_only_checkout_cannot_create_stripe_session(monkeypatch, checkout_client, database, cart):
+    calls = []
     monkeypatch.setattr(api_app, "_decode_supabase_user_id_from_bearer", lambda _: "owner-test")
-    response = checkout_client.post("/checkout/create", json=checkout_body(), headers={"Authorization": "Bearer test"})
-    assert response.status_code == 200
+    monkeypatch.setattr(api_app.stripe.checkout.Session, "create", lambda **kw: calls.append(kw))
+    inputs = quote_inputs()
+    for field in ("chamfer_angle_degrees", "chamfer_side", "flow_orientation", "chamfer_width_definition"):
+        inputs.pop(field)
+    body = {"items": [inputs]} if cart else checkout_body(inputs=inputs)
+    response = checkout_client.post("/checkout/cart/create" if cart else "/checkout/create",
+                                    json=body, headers={"Authorization": "Bearer test"})
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "manufacturing_specification_required"
+    assert calls == []
     with database() as db:
-        order = db.query(api_app.Order).one()
-        spec, _ = specification_from_order(
-            {"id": order.id, "customer_id": order.customer_id, "quote_payload": order.quote_payload},
-            line_index=0, part_identifier="STAGING HOLD",
-        )
-    assert "HOLD" in build_section_geometry(spec).status
+        assert db.query(api_app.Order).count() == 0
 
 
 def completed_session(session_id="cs_test_1", customer_id="signed-customer"):

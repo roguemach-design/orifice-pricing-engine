@@ -1,3 +1,4 @@
+from test_checkout_workflow import quote_inputs
 """Database mode authority through the existing payment/drawing routes."""
 import json
 from types import SimpleNamespace
@@ -85,7 +86,7 @@ def test_close_between_pricing_and_provider_call_is_rechecked(sandbox, monkeypat
 
 @pytest.mark.parametrize('cart',[False,True])
 def test_paid_test_after_close_exact_drawing_approval_and_no_production(sandbox, database, cart):
-    values = {**checkout_body()['inputs'], 'chamfer':False,'chamfer_width':None}
+    values = quote_inputs(chamfer=False, chamfer_width=None)
     body = {'items':[values,{**values,'quantity':2}]} if cart else checkout_body(inputs=values)
     response = sandbox.client.post('/checkout/cart/create' if cart else '/checkout/create', json=body, headers=headers(mode=False))
     assert response.status_code == 200, response.text
@@ -126,7 +127,7 @@ def test_paid_test_after_close_exact_drawing_approval_and_no_production(sandbox,
 
 @pytest.mark.parametrize('historical_frozen',[False,True])
 def test_preselector_test_completion_and_replay_preserve_frozen_provenance(sandbox,database,monkeypatch,historical_frozen):
-    values = {**checkout_body()['inputs'],'chamfer':False,'chamfer_width':None}
+    values = quote_inputs(chamfer=False, chamfer_width=None)
     result = sandbox.client.post('/checkout/create',json=checkout_body(inputs=values),headers=headers())
     sid = result.json()['session_id']
     sandbox.sessions[sid]['metadata'].pop('test_recipient')

@@ -1,5 +1,5 @@
 # pricing_engine.py
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Literal
 import math
 
 from pydantic import BaseModel, Field
@@ -26,6 +26,12 @@ class QuoteInputs(BaseModel):
     # --- New fields ---
     handle_label: str = Field(default="No label")
     chamfer_width: Optional[float] = None
+    # Canonical geometry must survive assisted confirmation/recovery signing.
+    # These fields do not affect the existing pricing formula.
+    chamfer_angle_degrees: Optional[float] = Field(default=None, gt=0, lt=90, exclude_if=lambda v: v is None)
+    chamfer_side: Optional[Literal["upstream", "downstream"]] = Field(default=None, exclude_if=lambda v: v is None)
+    flow_orientation: Optional[Literal["left-to-right", "right-to-left"]] = Field(default=None, exclude_if=lambda v: v is None)
+    chamfer_width_definition: Optional[Literal["radial-angle-from-face", "axial-depth-angle-from-face"]] = Field(default=None, exclude_if=lambda v: v is None)
 
 
 def _require(cond: bool, msg: str) -> None:
