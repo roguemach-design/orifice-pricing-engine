@@ -955,9 +955,10 @@ def render_owner():
     if "mc_nav" not in st.session_state and st.query_params.get("plate"):
         st.session_state["mc_nav"] = "Frozen Plates"
         st.session_state["mc_plate"] = st.query_params["plate"]
-    # Preserve pricing widgets while another workspace is rendered.
+    # Preserve editable pricing controls and ordinary draft data across navigation.
+    # data_editor owns its read-only widget state; its rows are retained separately.
     for key in list(st.session_state):
-        if str(key).startswith("mc_price_"):
+        if str(key).startswith("mc_price_") and key != "mc_price_tiers":
             st.session_state[key] = st.session_state[key]
     with st.sidebar:
         st.caption("ROGUE MACHINE / O-PLATES")
