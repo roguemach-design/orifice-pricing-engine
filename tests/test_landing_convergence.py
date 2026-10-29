@@ -153,8 +153,12 @@ def test_choices_match_accepted_baseline(monkeypatch, index):
     golden = json.loads((ROOT / "tests/fixtures/convergence-baseline.json").read_text())
     actual=fingerprints(calls[-1])
     presentation=json.loads((ROOT / "tests/fixtures/v7-1-convergence-hashes.json").read_text())
+    shipping = json.loads((ROOT / "tests/fixtures/shipping-mass-baseline.json").read_text())["convergence_shipping"][index]
     for key,value in actual.items():
-        assert value == (presentation[index][key] if key in ("pdf_sha256","svg_sha256") else golden["cases"][index][key])
+        expected = presentation[index][key] if key in ("pdf_sha256", "svg_sha256") else golden["cases"][index][key]
+        if key == "price":
+            expected = {**expected, **shipping}
+        assert value == expected
 
 
 def test_dynamic_availability_keeps_unresolved_choices(monkeypatch):

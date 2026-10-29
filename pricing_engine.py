@@ -179,8 +179,8 @@ def calculate_quote(x: QuoteInputs) -> Dict[str, Any]:
     pkg_h_in = 1.0 + (max(x.quantity - 1, 0) * x.thickness)
 
     density = cfg.DENSITY_LB_PER_IN3[x.material]
-    unit_weight_lb = area_sq_in * x.thickness * density
-    total_weight_lb = unit_weight_lb * x.quantity
+    from shipping_mass import shipping_mass
+    unit_weight_lb, total_weight_lb = shipping_mass(x.model_dump(), density)
 
     shipping_rates = _ups_rule_shipping_cents(
         weight_lb=total_weight_lb,
