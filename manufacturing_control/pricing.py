@@ -157,9 +157,17 @@ def run(client):
         st.caption(
             "Start at quantity 1; quantities increase and multipliers decrease. A multiplier of 0.97 means 3% off."
         )
+        # Keep the editor's input stable while its row deltas are mounted. When
+        # navigation removes the widget, seed its next mount from ordinary draft
+        # rows, never by assigning to the read-only data_editor widget key.
+        if "mc_price_tiers" not in st.session_state:
+            st.session_state["mc_price_tiers_input"] = copy.deepcopy(
+                st.session_state.get("mc_price_tiers_draft", original["qty_discount_tiers"])
+            )
         draft["qty_discount_tiers"] = st.data_editor(
-            original["qty_discount_tiers"], num_rows="dynamic", key="mc_price_tiers"
+            st.session_state["mc_price_tiers_input"], num_rows="dynamic", key="mc_price_tiers"
         )
+        st.session_state["mc_price_tiers_draft"] = copy.deepcopy(draft["qty_discount_tiers"])
     with tabs[3]:
         draft["density_lb_per_in3"] = edit_map(
             LABELS["density_lb_per_in3"],
