@@ -19,6 +19,21 @@ class AttrDict(dict):
     __setattr__ = dict.__setitem__
 
 
+def test_signin_retains_committed_choices_over_transient_widget_state(monkeypatch):
+    state = AttrDict(quote_field_chamfer=None, quote_field_ships_in_days=None,
+                    quote_field_paddle_dia=4.0, quote_field_bore_dia_text="invalid",
+                    phase1g_form_snapshot={"chamfer": False, "ships_in_days": 14,
+                                          "paddle_dia": 4.0, "bore_dia": None})
+    monkeypatch.setattr(auth.st, "session_state", state)
+    auth.remember_customer_inputs()
+    saved = state["_auth_signin_inputs"]
+    assert saved["quote_field_chamfer"] is False
+    assert saved["quote_field_ships_in_days"] == 14
+    assert saved["quote_field_paddle_dia"] == 4.0
+    assert saved["quote_field_bore_dia"] is None
+    assert saved["quote_field_bore_dia_text"] == "invalid"
+
+
 def test_supabase_jwt_is_verified_with_key_issuer_audience_and_expiry(monkeypatch):
     calls = {}
 

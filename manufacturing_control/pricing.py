@@ -8,6 +8,9 @@ import streamlit as st
 from pricing_configuration import changes
 
 LABELS = {
+    "precision_bore_allowance_per_in": "Precision bore commercial allowance · $ / bore diameter inch",
+    "chamfer_allowance_per_in": "Chamfer commercial allowance · $ / bore diameter inch",
+    "today_2_day_multiplier": "Today / 2-Day · future multiplier (Coming Soon; unavailable)",
     "material_enabled": "Material availability",
     "thickness_enabled_by_material": "Thickness availability by material",
     "price_per_sq_in": "Material price · $ / square inch",
@@ -54,6 +57,15 @@ def edit_map(label, value, prefix, unsupported=()):
 
 def run(client):
     st.title("Pricing & Availability")
+    workspace = st.radio(
+        "Pricing workspace", ["Pricing settings", "Checkout Control"],
+        key="mc_pricing_workspace", horizontal=True,
+    )
+    if workspace == "Checkout Control":
+        # Independent control: no pricing fetch/save is required, even on outage.
+        from .checkout import run as checkout_control
+        checkout_control(client)
+        return
     st.caption(
         "One active configuration · Changes affect future calculations. Historical order and approval evidence stays unchanged."
     )
@@ -110,7 +122,9 @@ def run(client):
         rates, timing = st.columns(2, gap="large")
         with rates:
             st.subheader("Shop & cutting rates")
-            for key in ("mill_labor_per_hr", "laser_per_linear_in"):
+            for key in ("mill_labor_per_hr", "laser_per_linear_in",
+                        "precision_bore_allowance_per_in", "chamfer_allowance_per_in",
+                        "today_2_day_multiplier"):
                 draft[key] = st.number_input(
                     LABELS[key],
                     value=float(original[key]),

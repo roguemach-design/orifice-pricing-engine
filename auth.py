@@ -162,8 +162,12 @@ def _cookie_set(payload: dict) -> None:
 def _customer_inputs():
     values = {k: st.session_state[k] for k in list(st.session_state)
               if k.startswith("quote_field_")}
+    # The completed form snapshot is the canonical input set. A dialog rerun
+    # can post empty native-choice widget state before those widgets remount;
+    # do not let that transient state erase the customer's committed choices.
+    # Raw text editors remain above, including invalid/uncommitted text.
     for field, value in st.session_state.get("phase1g_form_snapshot", {}).items():
-        values.setdefault("quote_field_" + field, value)
+        values["quote_field_" + field] = value
     return values
 
 
