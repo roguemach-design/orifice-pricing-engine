@@ -729,7 +729,7 @@ def test_manual_chamfer_defaults_only_on_enable_and_blocks_cleared_width(
         assert quote_calls[-1]["chamfer_width"] == 0.0625
 
 
-def test_standard_chamfer_requires_explicit_selection_without_hidden_geometry_fields(monkeypatch, active_config):
+def test_standard_chamfer_is_automatic_without_extra_customer_geometry_fields(monkeypatch, active_config):
     from streamlit.testing.v1 import AppTest
 
     monkeypatch.setenv("API_BASE", "http://test")
@@ -750,9 +750,7 @@ def test_standard_chamfer_requires_explicit_selection_without_hidden_geometry_fi
         next(f for f in app.number_input if f.label == "Chamfer Width (in.)").set_value(0.02).run()
         assert not app.exception
         assert not any("Drawing HOLD" in w.value for w in app.warning)
-        assert not any(key.startswith("chamfer_") and key != "chamfer_width"
-                       for key in calls[-1])
-        app.radio(key="quote_chamfer_specification").set_value("Standard 45° Chamfer").run()
+        assert not any(f.label == "Chamfer specification" for f in app.radio)
         assert not app.exception
         assert not any("Drawing HOLD" in w.value for w in app.warning)
         assert calls[-1]["chamfer_angle_degrees"] == 45

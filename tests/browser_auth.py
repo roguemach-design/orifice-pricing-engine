@@ -28,7 +28,7 @@ def jwt(exp=None):
 
 @pytest.fixture
 def customer_app(tmp_path):
-    state = dict(sends=0, rotations=0, revoked=False, refresh="synthetic-refresh-0", protected=[])
+    state = dict(sends=0, rotations=0, revoked=False, refresh="synthetic-refresh-0", protected=[], quotes=[])
     user = dict(id="synthetic-customer", aud="authenticated", role="authenticated", email="buyer@example.test",
                 created_at="2026-01-01T00:00:00Z", app_metadata={}, user_metadata={})
 
@@ -83,6 +83,7 @@ def customer_app(tmp_path):
                 state["revoked"] = True
                 self.reply({})
             elif self.path == "/quote":
+                state["quotes"].append(data)
                 self.reply(dict(unit_price=100, total_price=100, configuration_id="fixture", pricing_config_version="fixture"))
             elif self.path == "/me/frozen-plates/inspect":
                 state["protected"].append(self.headers.get("Authorization"))
@@ -148,7 +149,8 @@ def sign_in(scope):
 
 
 @pytest.mark.parametrize("embedded", [False, True])
-def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded, tmp_path):
+@pytest.mark.parametrize("chamfer", [False, True])
+def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded, chamfer, tmp_path):
     state, api = customer_app
     with sync_playwright() as p:
         browser = p.chromium.launch()
@@ -162,16 +164,31 @@ def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded, tm
             scope.get_by_role("spinbutton", name="Plate outside diameter (in.)", exact=True).press("Tab")
             expect(scope.locator('[data-feature="od-dimension-label"]')).to_have_text("Ø4.000")
             expect(scope.get_by_test_id("stMetric")).to_have_count(2)
+            if chamfer:
+                scope.get_by_role("radio", name="CHAMFERED BORE Add a chamfer to the bore edge.", exact=True).press("Space")
+                width = scope.get_by_role("spinbutton", name="Chamfer Width (in.)", exact=True)
+                width.fill("0.04")
+                width.press("Tab")
+                expect(width).to_have_value("0.0400")
+                expect(scope.get_by_text("Chamfer specification", exact=True)).to_have_count(0)
             sign_in(scope)
             expect(scope.get_by_role("dialog")).to_have_count(0, timeout=20000)
             expect(scope.get_by_role("spinbutton", name="Plate outside diameter (in.)", exact=True)).to_have_value("4.000")
             expect(scope.get_by_test_id("stMetric")).to_have_count(2)
+            if chamfer:
+                expect(scope.get_by_role("spinbutton", name="Chamfer Width (in.)", exact=True)).to_have_value("0.0400")
+                expected = dict(chamfer_angle_degrees=45.0, chamfer_side="downstream",
+                                flow_orientation="left-to-right", chamfer_width_definition="radial-angle-from-face",
+                                chamfer=True, chamfer_width=0.04)
+                assert all(state["quotes"][-1][key] == value for key, value in expected.items())
             scope.get_by_role("button", name="Add another plate", exact=True).click()
             expect(scope.get_by_role("heading", name="Line items (1)", exact=True)).to_be_visible()
             scope.get_by_role("link", name="My Orders", exact=True).click()
             expect(scope.get_by_text("Signed in as:", exact=False)).to_be_visible()
             scope.get_by_role("link", name="Quote Cart", exact=True).click()
             expect(scope.get_by_role("heading", name="Line items (1)", exact=True)).to_be_visible()
+            if chamfer:
+                assert all(state["quotes"][-1][key] == value for key, value in expected.items())
             # New document/Streamlit websocket, matching a Stripe return.
             page.goto(state["ui"] + "/Success?session_id=cs_test_synthetic")
             expect(page.get_by_text("Signed in as:", exact=False)).to_be_visible(timeout=20000)

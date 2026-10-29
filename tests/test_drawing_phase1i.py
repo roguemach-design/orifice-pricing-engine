@@ -330,7 +330,11 @@ def _jwt():
 def test_pricing_api_failure_preserves_confirmed_form_and_hides_price(
     monkeypatch, availability, failure
 ):
-    payload = _payload()
+    from checkout_geometry import STANDARD_CHAMFER
+
+    # Seed the complete standard specification now populated by the real form.
+    # Missing fields would correctly invalidate this pre-confirmed snapshot.
+    payload = {**_payload(), **STANDARD_CHAMFER}
     session = confirm_configuration(_session(payload), availability=availability)
     monkeypatch.setenv("API_BASE", "http://test")
     monkeypatch.setenv("OPLATES_DRAWING_ASSISTED_ENABLED", "true")
