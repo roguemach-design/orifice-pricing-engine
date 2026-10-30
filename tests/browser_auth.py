@@ -37,7 +37,8 @@ def customer_app(tmp_path):
             self.send_response(status)
             self.send_header("Content-Type", content_type)
             self.end_headers()
-            self.wfile.write((json.dumps(data) if content_type == "application/json" else data).encode())
+            payload = json.dumps(data).encode() if content_type == 'application/json' else data if isinstance(data, bytes) else data.encode()
+            self.wfile.write(payload)
 
         def session(self):
             state["rotations"] += 1
@@ -59,7 +60,23 @@ def customer_app(tmp_path):
                 self.reply({"allowed": False})
             elif self.path.startswith("/me/"):
                 state["protected"].append(self.headers.get("Authorization"))
-                self.reply([], 401 if state["revoked"] or not self.headers.get("Authorization") else 200)
+                if state["revoked"] or not self.headers.get("Authorization"):
+                    self.reply({}, 401)
+                elif self.path.startswith('/me/order-history/'):
+                    self.reply(state.get('order_detail', {}))
+                elif self.path.startswith('/me/order-history'):
+                    self.reply(state.get('order_history', {'orders':[], 'total':0}))
+                elif self.path.endswith('/drawing-archive'):
+                    self.reply(state.get('drawing_archive', []))
+                elif self.path.endswith('/pdf'):
+                    content=state['drawing_pdf']
+                    self.send_response(200)
+                    self.send_header('Content-Type','application/pdf')
+                    self.send_header('X-Artifact-SHA256',state['drawing_hash'])
+                    self.send_header('X-Frozen-Revision','revision-1')
+                    self.end_headers();self.wfile.write(content)
+                else:
+                    self.reply([])
             elif self.path.startswith("/orders/by-session/"):
                 self.reply(dict(status="completed", payment_mode="OWNER TEST", order_number_display="TEST-FIXTURE",
                                 amount_total_usd=100, shipping_service="ups_ground"))

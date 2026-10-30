@@ -55,16 +55,21 @@ def test_my_orders_cannot_describe_test_approval_as_production(monkeypatch):
     monkeypatch.setattr(auth,'require_login',lambda *args:None)
     for mode in ('OWNER TEST','TEST','LIVE'):
         order={'id':'order','payment_mode':mode,'order_number_display':'OP-TEST','quote_payload':{}}
+        order.update(status='completed', lines=[{'line_id':'line-1','specifications':{'material':'304','quantity':1}}])
         def get(path,**kwargs):
-            data=([{'id':'plate','current_revision':'r1','line_id':'line-1','lifecycle':'CUSTOMER_APPROVED'}]
-                  if path.endswith('/frozen-plates') else [order] if path=='/me/orders' else order)
+            data=([{'id':'plate','current_revision':'r1','line_id':'line-1','lifecycle':'CUSTOMER_APPROVED',
+                    'revisions':[{'id':'r1','number':1,'current':True,'approved':True,'approved_at':None,
+                                  'created_at':None,'specifications':{}}]}]
+                  if path.endswith('/drawing-archive') else {'orders':[order],'total':1} if path=='/me/order-history' else order)
             return SimpleNamespace(status_code=200,json=lambda:data)
         monkeypatch.setattr(auth,'api_get',get)
+        import customer_orders_ui
+        monkeypatch.setattr(customer_orders_ui,'api_get',get)
         app=customer_page_test('pages/2_My_Orders.py').run()
         assert not app.exception
-        if mode=='LIVE':
-            assert any(s.value=='YOUR ORDER IS IN PRODUCTION' for s in app.success)
-        else:
-            assert app.dataframe[0].value['Mode'].iloc[0]=='TEST / NOT A REAL SALE'
+        next(b for b in app.button if b.label=='View order').click().run()
+        assert not app.exception
+        assert any('Current drawing R1 approved' in s.value for s in app.success)
+        assert all('YOUR ORDER IS IN PRODUCTION' not in s.value for s in app.success)
+        if mode!='LIVE':
             assert any('NOT A REAL SALE' in w.value for w in app.warning)
-            assert all('YOUR ORDER IS IN PRODUCTION' not in s.value for s in app.success)
