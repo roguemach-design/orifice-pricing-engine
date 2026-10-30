@@ -41,7 +41,7 @@ def repository():
     return configured_repository()
 
 
-def router(customer_auth, admin_auth, load_order, *, approval_committed=None):
+def router(customer_auth, admin_auth, load_order, *, approval_committed=None, customer_order=None):
     routes = APIRouter()
 
     def _records(repo, table, revision_id):
@@ -169,6 +169,31 @@ def router(customer_auth, admin_auth, load_order, *, approval_committed=None):
                     (order_id, customer_id),
                 )
             ]
+
+    def owned_archive_order(order_id, customer_id):
+        order = (customer_order or load_order)(order_id)
+        if not order.get("customer_id") or order["customer_id"] != customer_id:
+            raise HTTPException(404, "Not found")
+
+    @routes.get("/me/orders/{order_id}/drawing-archive")
+    def drawing_archive(order_id: str, customer_id=Depends(customer_auth)):
+        from .customer_archive import inventory
+        owned_archive_order(order_id, customer_id)
+        return run(lambda: inventory(repository(), order_id, customer_id))
+
+    @routes.get("/me/orders/{order_id}/drawings/{revision_id}/pdf")
+    def archived_pdf(order_id: str, revision_id: str, customer_id=Depends(customer_auth)):
+        from .customer_archive import pdf as read_pdf
+        owned_archive_order(order_id, customer_id)
+        try:
+            content, artifact, revision = run(lambda: read_pdf(repository(), order_id, revision_id, customer_id))
+        except LookupError:
+            raise HTTPException(404, "Not found") from None
+        return Response(content, media_type="application/pdf", headers={
+            "Content-Disposition": f'attachment; filename="drawing-{revision_id}.pdf"',
+            "X-Artifact-SHA256": artifact["sha256"], "X-Frozen-Revision": revision["id"],
+            "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+        })
 
     @routes.post("/me/frozen-plates/{plate_id}/confirmation")
     def confirmation(plate_id: str, customer_id=Depends(customer_auth)):
