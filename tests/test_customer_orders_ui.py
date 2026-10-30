@@ -130,3 +130,16 @@ def test_service_errors_do_not_leak_provider_details_or_show_empty_history(works
     app = customer_page_test("pages/2_My_Orders.py").run()
     assert not app.exception and app.error
     assert not any("No orders" in i.value for i in app.info)
+
+
+def test_purchased_chamfer_definition_is_shown_without_substitution():
+    from customer_orders_ui import purchased_details
+    spec = dict(chamfer=True, chamfer_width=.062, chamfer_angle_degrees=45,
+                chamfer_side='downstream', flow_orientation='left-to-right',
+                chamfer_width_definition='radial-angle-from-face', internal_notes='hidden')
+    shown = purchased_details(spec)
+    assert shown['Chamfer angle (degrees)'] == 45
+    assert shown['Chamfer face'] == 'downstream'
+    assert shown['Section flow orientation'] == 'left-to-right'
+    assert shown['Chamfer width definition'] == 'radial-angle-from-face'
+    assert 'hidden' not in str(shown)

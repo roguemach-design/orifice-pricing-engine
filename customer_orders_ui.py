@@ -27,6 +27,19 @@ def stamp(value):
         return "Date not recorded"
 
 
+def purchased_details(spec):
+    details = customer_product_details(spec)
+    for key, label in {
+        "chamfer_angle_degrees": "Chamfer angle (degrees)",
+        "chamfer_side": "Chamfer face",
+        "flow_orientation": "Section flow orientation",
+        "chamfer_width_definition": "Chamfer width definition",
+    }.items():
+        if key in spec:
+            details[label] = spec[key]
+    return details
+
+
 def get(path, **kwargs):
     try:
         result = api_get(path, **kwargs)
@@ -273,7 +286,7 @@ def render():
                 st.dataframe(
                     [
                         {"Specification": k, "Value": str(v)}
-                        for k, v in customer_product_details(spec).items()
+                        for k, v in purchased_details(spec).items()
                     ],
                     hide_index=True,
                     width="stretch",
