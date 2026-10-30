@@ -16,7 +16,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional, List, Dict, Any, Literal
 
 import stripe
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -1681,6 +1681,40 @@ def get_order_by_session(
         db.close()
 
 
+@app.get("/me/order-history")
+def customer_order_history(
+    customer_user_id: str = Depends(_require_customer_user_id),
+    search: str = Query(default="", max_length=80),
+    sort: Literal["newest", "oldest", "total_high", "total_low"] = "newest",
+    offset: int = Query(default=0, ge=0), limit: int = Query(default=20, ge=1, le=50),
+):
+    from customer_order_history import listing
+    _db_required()
+    with SessionLocal() as db:
+        return listing(db, Order, customer_user_id, _admin_payment_mode,
+                       search=search, sort=sort, offset=offset, limit=limit)
+
+
+@app.get("/me/order-history/{order_id}")
+def customer_order_history_detail(order_id: str, customer_user_id: str = Depends(_require_customer_user_id)):
+    from customer_order_history import detail
+    _db_required()
+    with SessionLocal() as db:
+        order = db.query(Order).filter(Order.id == order_id, Order.customer_id == customer_user_id).first()
+        if not order:
+            raise HTTPException(404, "Order not found")
+        return detail(order, _admin_payment_mode(order))
+
+
+def _customer_archive_order(order_id):
+    _db_required()
+    with SessionLocal() as db:
+        order = db.query(Order).filter(Order.id == order_id).first()
+        if not order:
+            raise HTTPException(404, "Order not found")
+        return {"id": order.id, "customer_id": order.customer_id}
+
+
 @app.get("/me/orders")
 def me_orders(customer_user_id: str = Depends(_require_customer_user_id), limit: int = 50):
     _db_required()
@@ -2178,7 +2212,8 @@ if frozen_plate_enabled(app_env=APP_ENV):
 
     app.include_router(frozen_plate_router(_require_customer_user_id, _rate_limit_admin,
                                           _frozen_plate_order_snapshot,
-                                          approval_committed=notify_manufacturing_approval))
+                                          approval_committed=notify_manufacturing_approval,
+                                          customer_order=_customer_archive_order))
 
 # Additive owner-only tooling. Existing customer/checkout routes remain untouched.
 if frozen_plate_enabled(app_env=APP_ENV):
