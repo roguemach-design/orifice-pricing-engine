@@ -6,23 +6,19 @@ checkout changes or staging recovery. Reorder is design-only in the separate
 
 ## Baselines and exact release dependencies
 
-Read-only Render inventory October 30, 2026:
+This is a customer-based review branch, with public source parent
+`edee47e53ee35f47f3b4c52ccec96b279c752df5`. It must **never be deployed as an
+entire API image**: that could lose separately approved backend pricing/shipping
+changes. Exact operational baselines and deployment IDs are reported privately.
 
-| Component | Running SHA | Deployment |
-|---|---|---|
-| Customer UI | `edee47e53ee35f47f3b4c52ccec96b279c752df5` | `dep-dbi8fafb9u1s73ddiikg` |
-| API | `3ccc851d7674368a9a056b1fa417a10da7983dea` | `dep-dbi83eoae00c73bg2gng` |
-
-This PR is based on the **customer UI** baseline. It must **never be deployed as
-an entire API image**: that would lose the shipping/handle-hole recovery again.
 Before an owner-approved release, integrate only these backend paths onto the
-exact API baseline (or its independently verified successor): `api_app.py`
-(the additive history endpoints and router callback), `customer_order_history.py`,
-`frozen_plate/api.py`, `frozen_plate/customer_archive.py`. Preserve the existing
-shipping and pricing model version line in the API baseline. Test that isolated
-API integration before issuing an exact release SHA. Deploy API first, then the
-customer UI. Manufacturing Control, landing and obsolete standalone `my-orders`
-need no deployment. No #52, #41/#42 or quality-document implementation is included.
+independently verified API release: `api_app.py` (the additive history endpoints
+and router callback), `customer_order_history.py`, `frozen_plate/api.py`,
+`frozen_plate/customer_archive.py`. Preserve all existing shipping and pricing
+model identifiers. Test that isolated API integration before issuing an exact
+release SHA. Deploy API first, then customer UI. Manufacturing Control, landing
+and obsolete standalone `my-orders` need no deployment. No deferred worker,
+quote PRs or quality-document implementation is included.
 
 ## Verified causes and existing infrastructure
 
@@ -99,18 +95,14 @@ approvals. Responses contain no private object keys. PDF responses are private,
 no-store, nosniff, with exact revision/hash headers; frontend verifies both and
 byte length before showing or downloading. No shared PDF/data cache is added.
 
-## Historical records — read-only inspection
+## Historical record policy
 
-| Order | Recorded order total | Persisted drawing evidence |
-|---|---:|---|
-| OP-0016 | $166.11 TEST | R1 CUSTOMER_APPROVED, PDF/spec/approval binding matches; PDF hash `e08cce607ee042404247b8d0acb27333031d00f743419198d9de7ea6163cf842` |
-| OP-0017 | $330.70 TEST | Two separate R1 drawings, both READY_FOR_CUSTOMER_CONFIRMATION; no approval rows at inspection |
-| OP-0018 | $1,179.00 TEST | No Frozen Plate row; original width-only chamfer lacks face/angle/flow/width-definition fields |
-
-These are persisted states, separate from earlier owner observations. No historical
-repair/backfill, inferred approval, repricing or regenerated artifact is attempted.
-The previously disclosed historical aggregate approval-fingerprint discrepancy is
-not reconciled or forced to match by this PR.
+Operational record findings are reported privately, rather than publishing
+production order states, totals, artifact identities or approval fingerprints.
+The tests use isolated synthetic records for approved, pending two-line and
+incomplete historical cases. The page displays persisted states and exceptions;
+no historical repair/backfill, inferred approval, repricing or regenerated
+artifact is attempted. Historical approval discrepancies are not forced to match.
 
 ## Gaps and decisions
 
