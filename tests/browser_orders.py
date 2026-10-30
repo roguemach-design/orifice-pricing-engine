@@ -79,8 +79,12 @@ def test_order_history_detail_archive_download_and_logout(
             ),
         )
         try:
-            page.goto(state["ui"] + "/My_Orders")
+            # Sign in through the existing configurator account control, then
+            # enter the authenticated canonical history route. My Orders' guest
+            # guard does not expose the configurator's "Sign in" button.
+            page.goto(state["ui"] + "/Quote")
             sign_in(page)
+            page.goto(state["ui"] + "/My_Orders")
             expect(
                 page.get_by_role("heading", name="OP-0016", exact=True)
             ).to_be_visible()
@@ -131,6 +135,9 @@ def test_order_history_detail_archive_download_and_logout(
             expect(
                 page.get_by_role("heading", name="OP-0016", exact=True)
             ).to_have_count(0)
+        except Exception:
+            page.screenshot(path=str(tmp_path / f"my-orders-{width}-failure.png"), full_page=True)
+            raise
         finally:
             context.close()
             browser.close()
