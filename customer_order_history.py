@@ -77,7 +77,7 @@ def listing(
         # Search owned order numbers only; no wildcard interpretation or other-customer lookup.
         query = query.filter(
             cast(model.order_number, String) == str(int(term))
-            if term.isdigit()
+            if term.isascii() and term.isdecimal()
             else model.id == ""
         )
     ordering = {

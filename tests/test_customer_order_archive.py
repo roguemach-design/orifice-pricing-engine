@@ -224,6 +224,28 @@ def test_missing_historical_frozen_records_remain_empty_without_backfill(archive
     assert fingerprint(repo) == before
 
 
+@pytest.mark.parametrize("search, expected", [
+    ("²", []), ("OP-²", []), ("١٦", []), ("１６", []),
+    ("16²", []), ("OP-0016", ["owned"]), (" 0016 ", ["owned"]),
+])
+def test_order_number_search_handles_non_ascii_without_crashing(client, monkeypatch, search, expected):
+    c, factory = client
+    monkeypatch.setattr(api_app, "_decode_supabase_user_id_from_bearer",
+                        lambda token: "customer1" if token == "Bearer synthetic" else None)
+    with factory() as db:
+        db.add_all([
+            api_app.Order(id="owned", customer_id="customer1", order_number=16,
+                          status="completed", quote_payload={}),
+            api_app.Order(id="other", customer_id="other", order_number=17,
+                          status="completed", quote_payload={}),
+        ])
+        db.commit()
+    response = c.get("/me/order-history", params={"search": search},
+                     headers={"authorization": "Bearer synthetic"})
+    assert response.status_code == 200
+    assert [row["id"] for row in response.json()["orders"]] == expected
+
+
 def test_history_owned_search_pagination_sort_and_safe_snapshots(client, monkeypatch):
     c, factory = client
     monkeypatch.setattr(
