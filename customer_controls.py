@@ -29,8 +29,13 @@ def lead_time_choices(label, options, *, key, help=None, committed_value=None):
     # this group remounts. Required choices cannot be deliberately deselected.
     # Recover only a still-available committed value; drawing-required blanks
     # and removed availability remain unresolved, and current edits take priority.
-    if st.session_state.get(key) is None and committed_value in options:
-        st.session_state[key] = committed_value
+    value = st.session_state.get(key)
+    if value is None and committed_value in options:
+        value = committed_value
+    if value in options:
+        # Reassert the controlled value even when unchanged. Streamlit otherwise
+        # may remount with its empty widget default without emitting set_value.
+        st.session_state[key] = value
     st.markdown(
         """<style>
         .st-key-lead_time_choices button:disabled {

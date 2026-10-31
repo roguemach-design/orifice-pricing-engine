@@ -17,6 +17,12 @@ committed snapshot. A current valid edit takes priority; drawing-required `None`
 and disabled/removed choices are never defaulted. Authentication, cookie/session
 rotation, and API availability controls are unchanged.
 
+The controlled lead-time value is also explicitly reasserted on each render.
+The pinned Streamlit control sends no `set_value` when its value is unchanged;
+on a remount its empty frontend default can otherwise disagree with the valid
+server snapshot. An AppTest wire-protocol regression checks `set_value` and the
+actual selected label on a second render, in addition to the browser assertions.
+
 Regression coverage includes Unicode searches, preserved current/default lead
 times, intentionally unresolved/removed options, and both 14/21-day real-browser
 journeys on direct/embedded routes with/without chamfer. Lead-time assertions run
