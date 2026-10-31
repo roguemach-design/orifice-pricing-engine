@@ -22,9 +22,15 @@ def choice_buttons(label, options, *, key, placeholder=None, **kwargs):
     return value
 
 
-def lead_time_choices(label, options, *, key, help=None):
+def lead_time_choices(label, options, *, key, help=None, committed_value=None):
     """Keep unavailable expedited choices visible without adding quote values."""
     options = list(options)
+    # A fast conditional-widget rerun can post an empty native choice before
+    # this group remounts. Required choices cannot be deliberately deselected.
+    # Recover only a still-available committed value; drawing-required blanks
+    # and removed availability remain unresolved, and current edits take priority.
+    if st.session_state.get(key) is None and committed_value in options:
+        st.session_state[key] = committed_value
     st.markdown(
         """<style>
         .st-key-lead_time_choices button:disabled {

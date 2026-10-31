@@ -1,5 +1,34 @@
 # OP-IMP-013 — My Orders Phase 1
 
+## Focused release corrections
+
+Order-number search accepts ASCII decimal order numbers (with optional `OP-`
+and surrounding whitespace). Unicode numeric characters such as superscript
+`²` previously passed `str.isdigit()` but failed `int()`. Unsupported forms now
+return no matches; owned-order filtering and parameterized queries are unchanged.
+
+An isolated Chromium trace of the prior UI caught a required lead time changing
+from 14 to `None` during the conditional chamfer-widget rerun, **before** the
+sign-in capture or cookie write. Its committed form snapshot still held 14.
+The later missing quote metrics therefore did not establish lost credentials or
+a database persistence regression. This is a native widget/remount state race.
+The lead-time control now recovers an empty native value only from a still-valid
+committed snapshot. A current valid edit takes priority; drawing-required `None`
+and disabled/removed choices are never defaulted. Authentication, cookie/session
+rotation, and API availability controls are unchanged.
+
+Regression coverage includes Unicode searches, preserved current/default lead
+times, intentionally unresolved/removed options, and both 14/21-day real-browser
+journeys on direct/embedded routes with/without chamfer. Lead-time assertions run
+before and after sign-in and inspect the actual quote payload; original auth,
+revocation, logout and archive assertions remain intact.
+
+PostgreSQL `permission denied` messages in CI correspond to the five prohibited
+checkout-control statements and four prohibited analytics statements inside
+`pytest.raises(DBAPIError)` in `test_checkout_control_postgres.py` and
+`test_journey_postgres.py`. These are deliberate security gates on disposable
+loopback CI databases, not uncaught production application failures.
+
 Refs #65. Development/PR only; no merge, deploy, migrations, production writes,
 checkout changes or staging recovery. Reorder is design-only in the separate
 `my-orders-phase2-design.md`.

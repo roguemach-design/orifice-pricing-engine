@@ -167,7 +167,8 @@ def sign_in(scope):
 
 @pytest.mark.parametrize("embedded", [False, True])
 @pytest.mark.parametrize("chamfer", [False, True])
-def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded, chamfer, tmp_path):
+@pytest.mark.parametrize("lead_time", [14, 21])
+def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded, chamfer, lead_time, tmp_path):
     state, api = customer_app
     with sync_playwright() as p:
         browser = p.chromium.launch()
@@ -181,6 +182,10 @@ def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded, ch
             scope.get_by_role("spinbutton", name="Plate outside diameter (in.)", exact=True).press("Tab")
             expect(scope.locator('[data-feature="od-dimension-label"]')).to_have_text("Ø4.000")
             expect(scope.get_by_test_id("stMetric")).to_have_count(2)
+            lead = scope.get_by_role("radio", name=f"{lead_time} calendar days", exact=True)
+            if lead_time != 14:
+                lead.click()
+            expect(lead).to_be_checked()
             if chamfer:
                 scope.get_by_role("radio", name="CHAMFERED BORE Add a chamfer to the bore edge.", exact=True).press("Space")
                 width = scope.get_by_role("spinbutton", name="Chamfer Width (in.)", exact=True)
@@ -188,10 +193,15 @@ def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded, ch
                 width.press("Tab")
                 expect(width).to_have_value("0.0400")
                 expect(scope.get_by_text("Chamfer specification", exact=True)).to_have_count(0)
+            # Check before authentication too: conditional form reruns must not
+            # clear a required choice and make a later sign-in look responsible.
+            expect(lead).to_be_checked()
             sign_in(scope)
             expect(scope.get_by_role("dialog")).to_have_count(0, timeout=20000)
             expect(scope.get_by_role("spinbutton", name="Plate outside diameter (in.)", exact=True)).to_have_value("4.000")
             expect(scope.get_by_test_id("stMetric")).to_have_count(2)
+            expect(lead).to_be_checked()
+            assert state["quotes"][-1]["ships_in_days"] == lead_time
             if chamfer:
                 expect(scope.get_by_role("spinbutton", name="Chamfer Width (in.)", exact=True)).to_have_value("0.0400")
                 expected = dict(chamfer_angle_degrees=45.0, chamfer_side="downstream",
