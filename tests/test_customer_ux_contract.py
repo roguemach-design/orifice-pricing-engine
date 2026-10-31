@@ -91,7 +91,8 @@ def test_quote_keeps_lean_owner_approved_controls():
     quote_source = (ROOT / "pages" / "1_Quote.py").read_text()
 
     assert '"Plate style"' not in quote_source
-    assert 'bore_edge_choice(key=_FORM_KEYS["chamfer"])' in quote_source
+    assert ('bore_edge_choice( key=_FORM_KEYS["chamfer"], '
+            'committed_value=st.session_state[_FORM_SNAPSHOT_KEY].get("chamfer"), )') in " ".join(quote_source.split())
     assert '"Chamfer", [False, True]' in " ".join(
         (ROOT / "bore_edge_control.py").read_text().split()
     )
