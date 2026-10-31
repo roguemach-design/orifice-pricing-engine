@@ -4,10 +4,21 @@ import streamlit as st
 from material_labels import MATERIAL_COPY
 
 
-def choice_buttons(label, options, *, key, placeholder=None, **kwargs):
+def choice_buttons(label, options, *, key, placeholder=None, committed_value=None, **kwargs):
     options = list(options)
-    if st.session_state.get(key) not in options:
-        st.session_state[key] = None
+    value = st.session_state.get(key)
+    # An empty native required choice can be a transient remount, not a new
+    # customer selection. Callers supply the current canonical snapshot when
+    # recovery is appropriate; an unresolved snapshot remains None. Never use
+    # truthiness here: False is the explicit No Chamfer choice.
+    if value is None and committed_value is not None and committed_value in options:
+        value = committed_value
+    if value not in options:
+        value = None
+    # Reassert even an unchanged value (including None). Otherwise Streamlit can
+    # emit no set_value while the remounted browser uses its empty default.
+    # A valid current customer edit always wins over the older snapshot.
+    st.session_state[key] = value
     value = st.segmented_control(
         label,
         options,
@@ -15,6 +26,7 @@ def choice_buttons(label, options, *, key, placeholder=None, **kwargs):
         required=True,
         wrap=True,
         selection_mode="single",
+        persist_state="session",
         **kwargs,
     )
     if value is None and placeholder:
@@ -25,17 +37,6 @@ def choice_buttons(label, options, *, key, placeholder=None, **kwargs):
 def lead_time_choices(label, options, *, key, help=None, committed_value=None):
     """Keep unavailable expedited choices visible without adding quote values."""
     options = list(options)
-    # A fast conditional-widget rerun can post an empty native choice before
-    # this group remounts. Required choices cannot be deliberately deselected.
-    # Recover only a still-available committed value; drawing-required blanks
-    # and removed availability remain unresolved, and current edits take priority.
-    value = st.session_state.get(key)
-    if value is None and committed_value in options:
-        value = committed_value
-    if value in options:
-        # Reassert the controlled value even when unchanged. Streamlit otherwise
-        # may remount with its empty widget default without emitting set_value.
-        st.session_state[key] = value
     st.markdown(
         """<style>
         .st-key-lead_time_choices button:disabled {
@@ -49,7 +50,7 @@ def lead_time_choices(label, options, *, key, help=None, committed_value=None):
         if 7 not in options:
             st.button("7 Days · Currently Unavailable", key="lead_time_7_unavailable", disabled=True)
         value = choice_buttons(
-            label, options, key=key, placeholder="Select lead time",
+            label, options, key=key, placeholder="Select lead time", committed_value=committed_value,
             format_func=lambda days: "7 Days" if days == 7 else f"{days} calendar days",
             label_visibility="collapsed", help=help,
         )

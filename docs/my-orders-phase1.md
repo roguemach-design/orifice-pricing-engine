@@ -2,6 +2,38 @@
 
 ## Focused release corrections
 
+### Shared required-control repair
+
+The later exact-release failure in the 21-day/chamfer/standalone case was
+reproduced with the original candidate. Synthetic diagnostic traces caught
+`quote_field_chamfer=True` and committed `chamfer=True`, then an empty native
+widget value while the committed snapshot was still True. The old helper returned
+None and the next form commit overwrote the snapshot with None before sign-in.
+OTP then captured/restored that already-empty value. This is editor/widget state
+loss, not revoked credentials or database persistence failure. Wire diagnostics
+also captured unchanged controls with `set_value=False` and an empty widget
+default. Both boolean wire-protocol regressions fail against the original helper.
+
+The repair belongs in `choice_buttons`, shared by bore edge, lead time and other
+required native choices. It reasserts every canonical value on the browser wire,
+recovers an empty value only from a caller-supplied available committed choice,
+and retains native widget state for the session. False remains an explicit choice;
+None stays unresolved when the canonical snapshot is unresolved. Current valid
+edits beat old snapshots; invalid/unavailable values fail closed. Lead-time
+recovery now delegates to this same helper instead of a separate workaround.
+
+On return from Cart/My Orders, missing editor keys are rehydrated from the
+canonical snapshot. Numeric widgets also use native session persistence, keeping
+conditional chamfer width and deliberately cleared numeric None values distinct.
+No auth, API, pricing, checkout or manufacturing implementation is changed.
+
+Acceptance covers all eight bore/lead-time/embedding combinations, visible native
+selections and actual quote payloads before/after OTP, dialog dismissal/reopening,
+Cart/My Orders and return to the configurator. A loopback-only native-control
+probe checks unresolved selections, conditional remounts, changing availability
+and explicit resets in standalone/embedded views. Asynchronous payload checks
+wait for the actual edited request rather than trusting an older visible price.
+
 Order-number search accepts ASCII decimal order numbers (with optional `OP-`
 and surrounding whitespace). Unicode numeric characters such as superscript
 `²` previously passed `str.isdigit()` but failed `int()`. Unsupported forms now

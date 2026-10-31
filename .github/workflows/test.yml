@@ -51,7 +51,7 @@ jobs:
           python -m pip install playwright==1.58.0
           python -m playwright install --with-deps chromium
       - name: Verify visible customer configurator SVG
-        run: python -m pytest -q tests/browser_smoke.py tests/browser_auth.py tests/browser_orders.py --basetemp=browser-results
+        run: python -m pytest -q tests/browser_smoke.py tests/browser_auth.py tests/browser_orders.py tests/browser_required.py --basetemp=browser-results
       - name: Save browser smoke evidence
         if: always()
         uses: actions/upload-artifact@v4

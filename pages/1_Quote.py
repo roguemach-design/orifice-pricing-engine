@@ -586,6 +586,13 @@ def _initialize_form_state() -> None:
         }
     if _FORM_SNAPSHOT_KEY not in st.session_state:
         st.session_state[_FORM_SNAPSHOT_KEY] = _form_values_from_state()
+    # A page switch removes widget-owned keys, but not the canonical form
+    # snapshot. Rehydrate only missing keys before rendering. Explicit None and
+    # current edits remain authoritative; reset/drawing flows update the snapshot.
+    for field, value in st.session_state[_FORM_SNAPSHOT_KEY].items():
+        key = _FORM_KEYS[field]
+        if key not in st.session_state:
+            st.session_state[key] = value
 
 
 def _install_form_integration(result) -> None:
@@ -1096,6 +1103,9 @@ def _field_error_slot(field):
 
 def _number_field(label: str, field: str, **kwargs):
     key = _FORM_KEYS[field]
+    # Keep explicit numeric values, including an intentional None, while the
+    # editor is absent on Cart/My Orders or a conditional control is hidden.
+    kwargs.setdefault("persist_state", "session")
     # Validate on the server so invalid edits cannot silently retain an old quote.
     number_bounds[field] = (kwargs.pop("min_value", None), kwargs.pop("max_value", None))
     if st.session_state.get(key) is not None:
@@ -1234,7 +1244,10 @@ with right:
         )
         _field_error_slot("handle_label")
 
-        chamfer = bore_edge_choice(key=_FORM_KEYS["chamfer"])
+        chamfer = bore_edge_choice(
+            key=_FORM_KEYS["chamfer"],
+            committed_value=st.session_state[_FORM_SNAPSHOT_KEY].get("chamfer"),
+        )
         _field_error_slot("chamfer")
         chamfer_width = None
         chamfer_details = {}

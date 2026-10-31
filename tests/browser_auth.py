@@ -155,6 +155,16 @@ def customer_app(tmp_path):
         log.close()
 
 
+def await_quote(state, expected, timeout=10):
+    """Wait for the actual server request, not an earlier still-visible metric."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if state["quotes"] and all(state["quotes"][-1].get(k) == v for k, v in expected.items()):
+            return
+        time.sleep(.05)
+    assert state["quotes"] and all(state["quotes"][-1].get(k) == v for k, v in expected.items()), state["quotes"][-1:]
+
+
 def sign_in(scope):
     scope.get_by_role("button", name="Sign in", exact=True).click()
     scope.get_by_role("textbox", name="Email", exact=True).fill("buyer@example.test")
@@ -186,6 +196,10 @@ def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded, ch
             if lead_time != 14:
                 lead.click()
             expect(lead).to_be_checked()
+            bore = scope.get_by_role("radio", name=(
+                "CHAMFERED BORE Add a chamfer to the bore edge." if chamfer
+                else "NO CHAMFER Square bore edge."
+            ), exact=True)
             if chamfer:
                 scope.get_by_role("radio", name="CHAMFERED BORE Add a chamfer to the bore edge.", exact=True).press("Space")
                 width = scope.get_by_role("spinbutton", name="Chamfer Width (in.)", exact=True)
@@ -196,11 +210,30 @@ def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded, ch
             # Check before authentication too: conditional form reruns must not
             # clear a required choice and make a later sign-in look responsible.
             expect(lead).to_be_checked()
+            expect(bore).to_be_checked()
+            expect(scope.get_by_test_id("stMetric")).to_have_count(2)
+            expected = dict(chamfer=chamfer, ships_in_days=lead_time, paddle_dia=4.0)
+            if chamfer:
+                expected.update(chamfer_angle_degrees=45.0, chamfer_side="downstream",
+                                flow_orientation="left-to-right", chamfer_width_definition="radial-angle-from-face",
+                                chamfer_width=0.04)
+            await_quote(state, expected)
+            # Dismiss once before OTP: opening/closing the dialog must not clear
+            # the native controls or replace a customer choice with a default.
+            scope.get_by_role("button", name="Sign in", exact=True).click()
+            dialog = scope.get_by_role("dialog")
+            expect(dialog).to_be_visible()
+            dialog.get_by_role("button", name="Close", exact=True).click()
+            expect(dialog).to_have_count(0)
+            expect(bore).to_be_checked()
+            expect(lead).to_be_checked()
             sign_in(scope)
             expect(scope.get_by_role("dialog")).to_have_count(0, timeout=20000)
             expect(scope.get_by_role("spinbutton", name="Plate outside diameter (in.)", exact=True)).to_have_value("4.000")
             expect(scope.get_by_test_id("stMetric")).to_have_count(2)
             expect(lead).to_be_checked()
+            expect(bore).to_be_checked()
+            await_quote(state, expected)
             assert state["quotes"][-1]["ships_in_days"] == lead_time
             if chamfer:
                 expect(scope.get_by_role("spinbutton", name="Chamfer Width (in.)", exact=True)).to_have_value("0.0400")
@@ -216,6 +249,14 @@ def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded, ch
             expect(scope.get_by_role("heading", name="Line items (1)", exact=True)).to_be_visible()
             if chamfer:
                 assert all(state["quotes"][-1][key] == value for key, value in expected.items())
+            # Return to the actual configurator in the same session after its
+            # widgets were removed on Cart and My Orders. Retain both canonical
+            # payload values and browser-visible selections, including False.
+            scope.get_by_role("link", name="Configure your plate", exact=True).click()
+            expect(bore).to_be_checked()
+            expect(lead).to_be_checked()
+            expect(scope.get_by_test_id("stMetric")).to_have_count(2)
+            await_quote(state, expected)
             # New document/Streamlit websocket, matching a Stripe return.
             page.goto(state["ui"] + "/Success?session_id=cs_test_synthetic")
             expect(page.get_by_text("Signed in as:", exact=False)).to_be_visible(timeout=20000)
@@ -248,6 +289,7 @@ def test_one_otp_survives_customer_routes_and_returns(customer_app, embedded, ch
             assert len(state["protected"]) == protected_before
             assert state["sends"] == 1
         finally:
+            (tmp_path / "quote-payloads.json").write_text(json.dumps(state["quotes"]))
             for frame in page.frames:
                 if frame.url.startswith(state["ui"] + "/"):
                     try:

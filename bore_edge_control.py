@@ -25,7 +25,7 @@ def _graphic_background():
     return tuple(graphics)
 
 
-def bore_edge_choice(*, key):
+def bore_edge_choice(*, key, committed_value=None):
     """Use two graphic cards as the single required canonical boolean selector."""
     left_graphic, right_graphic = _graphic_background()
     st.markdown(
@@ -86,6 +86,7 @@ def bore_edge_choice(*, key):
             "Chamfer",
             [False, True],
             key=key,
+            committed_value=committed_value,
             format_func=lambda value: (
                 "**CHAMFERED BORE**\n\nAdd a chamfer to the bore edge."
                 if value else "**NO CHAMFER**\n\nSquare bore edge."
