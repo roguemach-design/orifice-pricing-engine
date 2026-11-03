@@ -1,0 +1,1 @@
+{"private":true,"description":"Reproducible source for vendored browser-only PDF.js assets; no Node runtime needed","dependencies":{"pdfjs-dist":"6.5.438"}}

@@ -24,6 +24,8 @@
  .st-key-orders_layout > [data-testid="stLayoutWrapper"] > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child {width:100%;flex:1 1 100%}
 }
 .st-key-orders_workspace button[kind="primary"] {background:#4b7dff;border-color:#4b7dff;color:white}
+/* A custom iframe's HTML default is 300 px before Streamlit measures it. */
+.st-key-orders_workspace iframe[title="customer_pdf_viewer.oplates_approved_pdf"] {width:100%;max-width:100%}
 
 .st-key-orders_workspace .orders-specifications {margin:0;padding:0}
 .st-key-orders_workspace .orders-specifications > div {display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:18px;padding:12px 0;border-bottom:1px solid #263449}

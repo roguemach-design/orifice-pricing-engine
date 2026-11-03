@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; worker-src 'self' blob:; connect-src 'self' blob:; style-src 'self'; img-src data: blob:; font-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>Approved drawing viewer</title>
+    <link rel="stylesheet" href="viewer.css" />
+  </head>
+  <body>
+    <section id="viewer" aria-label="Verified approved drawing">
+      <div id="toolbar" role="toolbar" aria-label="Drawing controls">
+        <button id="previous" aria-label="Previous drawing page">←</button
+        ><span id="pages" aria-live="polite">Page —</span
+        ><button id="next" aria-label="Next drawing page">→</button>
+        <button id="out" aria-label="Zoom out">−</button
+        ><output id="zoom" aria-live="polite">100%</output
+        ><button id="in" aria-label="Zoom in">+</button>
+        <button id="fit">Fit page</button><button id="full">Full screen</button
+        ><button id="download" disabled>Download approved PDF</button>
+      </div>
+      <p id="status" role="status">Loading verified drawing…</p>
+      <div
+        id="surface"
+        tabindex="0"
+        role="region"
+        aria-label="Drawing page; drag to pan, pinch to zoom, or use arrow keys to scroll"
+      >
+        <canvas
+          id="page"
+          role="img"
+          aria-label="Stored approved engineering drawing"
+        ></canvas>
+      </div>
+      <p class="hint">
+        Drag to pan · Pinch or use + / − to zoom · Download preserves the
+        original PDF.
+      </p>
+    </section>
+    <script type="module" src="viewer.js"></script>
+  </body>
+</html>

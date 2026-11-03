@@ -8,12 +8,7 @@ from playwright.sync_api import sync_playwright, expect
 from browser_auth import customer_app, sign_in
 
 
-@pytest.mark.parametrize("embedded", [False, True])
-@pytest.mark.parametrize("width", [320, 375, 390, 768, 1080, 1920])
-def test_order_history_detail_archive_download_and_logout(
-    customer_app, width, embedded, tmp_path
-):
-    state, api = customer_app
+def seed_orders(state):
     pdf = (Path(__file__).parent / "fixtures/legacy-v3e.pdf").read_bytes()
     digest = sha256(pdf).hexdigest()
     order = dict(
@@ -67,6 +62,25 @@ def test_order_history_detail_archive_download_and_logout(
             )
         ],
     )
+    return pdf, digest
+
+
+def assert_painted(viewer):
+    viewer.locator("canvas").scroll_into_view_if_needed()
+    frame = viewer.locator("canvas").element_handle().owner_frame()
+    frame.wait_for_function(
+        "()=>{const c=document.querySelector('canvas');if(!c?.width||!c.height)return false;const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let dark=0;for(let i=0;i<d.length;i+=4)if(d[i+3]>0&&d[i]<100&&d[i+1]<100&&d[i+2]<100)dark++;return dark>100;}",
+        timeout=5000,
+    )
+
+
+@pytest.mark.parametrize("embedded", [False, True])
+@pytest.mark.parametrize("width", [320, 375, 390, 768, 1080, 1920])
+def test_order_history_detail_archive_download_and_logout(
+    customer_app, width, embedded, tmp_path
+):
+    state, api = customer_app
+    pdf, digest = seed_orders(state)
     with sync_playwright() as p:
         browser = p.chromium.launch()
         context = browser.new_context(viewport={"width": width, "height": 1000})
@@ -157,18 +171,30 @@ def test_order_history_detail_archive_download_and_logout(
             expect(
                 scope.get_by_role("heading", name="Plate 1 · 304", exact=True)
             ).to_be_visible()
-            scope.get_by_role(
-                "button", name="View approved drawing", exact=True
-            ).click()
+            viewer = scope.frame_locator(
+                'iframe[title="customer_pdf_viewer.oplates_approved_pdf"]'
+            )
+            viewer.get_by_role("button", name="Fit page", exact=True).click()
+            expect(viewer.locator("#status")).to_contain_text("Verified stored PDF")
+            expect(viewer.locator("canvas")).to_be_visible()
+            assert_painted(viewer)
+            viewer.get_by_role("button", name="Zoom in", exact=True).click()
+            expect(viewer.locator("#zoom")).to_have_text("125%")
+            viewer.get_by_role("button", name="Fit page", exact=True).click()
+            expect(viewer.locator("#zoom")).to_have_text("100%")
+            viewer.get_by_role("button", name="Full screen", exact=True).click()
             expect(
-                scope.get_by_text("Stored drawing PDF · page 1", exact=True)
-            ).to_be_attached()
-            expect(scope.get_by_test_id("stImage").locator("img")).to_be_visible()
+                viewer.get_by_role("button", name="Exit full screen", exact=True)
+            ).to_be_visible()
+            viewer.get_by_role("button", name="Exit full screen", exact=True).click()
             with page.expect_download() as result:
-                scope.get_by_role(
+                viewer.get_by_role(
                     "button", name="Download approved PDF", exact=True
                 ).click()
+            expect(viewer.locator("#status")).to_contain_text("Verified stored PDF")
+            assert_painted(viewer)
             download = result.value
+            assert download.url.startswith("blob:")
             assert sha256(Path(download.path()).read_bytes()).hexdigest() == digest
             scope.locator(".st-key-orders_workspace").screenshot(
                 path=str(tmp_path / f"my-orders-{width}-drawing.png")
@@ -208,13 +234,6 @@ def test_order_history_detail_archive_download_and_logout(
                 scope.get_by_role("heading", name="OP-0016", exact=True)
             ).to_have_count(0)
         except Exception:
-            (tmp_path / "overflow.json").write_text(
-                __import__("json").dumps(
-                    scope.locator(".st-key-orders_workspace").evaluate(
-                        "e=>{const r=e.getBoundingClientRect();return{outer:{width:e.clientWidth,scroll:e.scrollWidth},bad:[...e.querySelectorAll('*')].map(x=>({tag:x.tagName,cl:x.className,id:x.dataset.testid,w:x.getBoundingClientRect().width,right:x.getBoundingClientRect().right-r.right,style:x.getAttribute('style'),html:x.outerHTML.slice(0,700),parent:x.parentElement?.outerHTML.slice(0,1000)})).filter(x=>x.right>1)}}"
-                    )
-                )
-            )
             page.screenshot(
                 path=str(tmp_path / f"my-orders-{width}-failure.png"), full_page=True
             )

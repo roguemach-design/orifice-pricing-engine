@@ -109,10 +109,14 @@ def test_cards_search_sort_multi_line_detail_and_real_pdf_preview(workspace):
     )
     app.selectbox(key="orders_line").set_value("line-1").run()
     assert any("Current drawing R1 approved" in s.value for s in app.success)
-    app.button(key="archive-view-revision-1").click().run()
     assert not app.exception
-    assert len(app.get("image")) == 1
-    assert any(d.label == "Download approved PDF" for d in app.get("download_button"))
+    components = app.get("component_instance")
+    assert len(components) == 1
+    import json, base64
+
+    args = json.loads(components[0].proto.json_args)
+    assert base64.b64decode(args["pdf"]) == workspace["content"]
+    assert not app.get("download_button") and not app.get("image")
     assert all("YOUR ORDER IS IN PRODUCTION" not in s.value for s in app.success)
     next(b for b in app.button if b.label == "← Back to Orders").click().run()
     assert not app.exception and app.text_input(key="orders_search").value == "OP-0018"
@@ -122,7 +126,6 @@ def test_pdf_integrity_failure_never_renders_or_downloads(workspace):
     workspace["tampered"] = True
     app = customer_page_test("pages/2_My_Orders.py").run()
     app.button(key="order-open-order-1").click().run()
-    app.button(key="archive-view-revision-1").click().run()
     assert not app.exception
     assert any("Drawing verification failed" in e.value for e in app.error)
     assert not app.get("download_button") and not app.get("image")
