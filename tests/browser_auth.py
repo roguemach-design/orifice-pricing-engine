@@ -129,6 +129,20 @@ def customer_app(tmp_path):
         f"    if url.startswith({staging!r} + '/'): url = {api!r} + url[len({staging!r}):]\n"
         "    return original(self, method, url, *args, **kwargs)\n"
         "requests.sessions.Session.request = isolated\n"
+        # Synthetic server-side diagnostics only. Never loaded by the product.
+        "import json, time, streamlit as st\n"
+        "_choice = st.segmented_control\n"
+        "def traced_choice(label, options, **kwargs):\n"
+        "    key = kwargs.get('key', '')\n"
+        "    tracked = key in ('quote_field_chamfer', 'quote_field_ships_in_days')\n"
+        "    before = st.session_state.get(key) if tracked else None\n"
+        "    snapshot = dict(st.session_state.get('phase1g_form_snapshot', {})) if tracked else {}\n"
+        "    result = _choice(label, options, **kwargs)\n"
+        "    if tracked:\n"
+        f"        with open({str(tmp_path / 'server-controls.jsonl')!r}, 'a') as output:\n"
+        "            output.write(json.dumps(dict(time=time.monotonic(), key=key, before=before, after=result, snapshot={k:snapshot.get(k) for k in ('chamfer','ships_in_days')})) + '\\n')\n"
+        "    return result\n"
+        "st.segmented_control = traced_choice\n"
     )
     env["PYTHONPATH"] = str(tmp_path) + os.pathsep + env.get("PYTHONPATH", "")
     env.update(API_BASE=staging, SUPABASE_URL=api, SUPABASE_ANON_KEY="synthetic-public", API_KEY="synthetic-ui")

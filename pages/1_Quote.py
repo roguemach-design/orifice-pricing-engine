@@ -1251,24 +1251,26 @@ with right:
         _field_error_slot("chamfer")
         chamfer_width = None
         chamfer_details = {}
-        if chamfer is True:
-            if not st.session_state[_FORM_SNAPSHOT_KEY].get("chamfer") and st.session_state.get(_FORM_KEYS["chamfer_width"]) is None:
-                st.session_state[_FORM_KEYS["chamfer_width"]] = 0.062
-            chamfer_width = _number_field(
-                "Chamfer Width (in.)",
-                "chamfer_width",
-                min_value=0.001,
-                step=0.0001,
-                format="%.4f",
-                placeholder="Enter width",
-                help="Starts at 0.062 in. when enabled with an empty field. Edit to your required chamfer width.",
-            )
-            if chamfer_width is None:
-                st.caption(
-                    "Enter a chamfer width and press Enter or click outside the field to apply it."
+        # A fixed parent keeps delivery controls mounted while details change.
+        with st.container(key="chamfer_details"):
+            if chamfer is True:
+                if not st.session_state[_FORM_SNAPSHOT_KEY].get("chamfer") and st.session_state.get(_FORM_KEYS["chamfer_width"]) is None:
+                    st.session_state[_FORM_KEYS["chamfer_width"]] = 0.062
+                chamfer_width = _number_field(
+                    "Chamfer Width (in.)",
+                    "chamfer_width",
+                    min_value=0.001,
+                    step=0.0001,
+                    format="%.4f",
+                    placeholder="Enter width",
+                    help="Starts at 0.062 in. when enabled with an empty field. Edit to your required chamfer width.",
                 )
-            chamfer_details = dict(STANDARD_CHAMFER)
-            st.caption(STANDARD_DESCRIPTION)
+                if chamfer_width is None:
+                    st.caption(
+                        "Enter a chamfer width and press Enter or click outside the field to apply it."
+                    )
+                chamfer_details = dict(STANDARD_CHAMFER)
+                st.caption(STANDARD_DESCRIPTION)
         for field in STANDARD_CHAMFER:
             st.session_state[_FORM_KEYS[field]] = chamfer_details.get(field)
 

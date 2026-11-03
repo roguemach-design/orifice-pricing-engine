@@ -5,7 +5,7 @@ from streamlit.testing.v1 import AppTest
 
 
 @pytest.mark.parametrize("selected", [False, True])
-def test_required_boolean_reasserts_unchanged_selection_on_browser_wire(selected):
+def test_required_boolean_preserves_selection_without_stale_browser_overwrite(selected):
     def render(selected):
         import streamlit as st
         from customer_controls import choice_buttons
@@ -19,8 +19,8 @@ def test_required_boolean_reasserts_unchanged_selection_on_browser_wire(selected
     app.run()
     control = app.button_group(key="bore")
     assert not app.exception and control.value is selected
-    assert control.proto.set_value
-    assert list(control.proto.raw_values) == [str(selected)]
+    assert not control.proto.set_value
+    assert not control.proto.raw_values
 
 
 @pytest.mark.parametrize("current, committed, options, expected", [
