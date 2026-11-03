@@ -9,7 +9,7 @@ from browser_auth import customer_app, sign_in
 
 
 @pytest.mark.parametrize("embedded", [False, True])
-@pytest.mark.parametrize("width", [320, 375, 390, 768, 1080])
+@pytest.mark.parametrize("width", [320, 375, 390, 768, 1080, 1920])
 def test_order_history_detail_archive_download_and_logout(
     customer_app, width, embedded, tmp_path
 ):
@@ -106,6 +106,32 @@ def test_order_history_detail_archive_download_and_logout(
             expect(
                 scope.get_by_role("heading", name="Plate 1 · 304", exact=True)
             ).to_be_visible()
+            width_available = scope.locator(".st-key-orders_workspace").evaluate(
+                "e=>e.clientWidth"
+            )
+            (tmp_path / "dimensions.json").write_text(
+                __import__("json").dumps(
+                    {
+                        "viewport": width,
+                        "embedded": embedded,
+                        "content": width_available,
+                        "rail": scope.locator(".st-key-orders_rail").evaluate(
+                            "e=>e.getBoundingClientRect().width"
+                        ),
+                    }
+                )
+            )
+            if width_available < 900:
+                expect(scope.locator(".st-key-orders_rail")).to_be_hidden()
+            else:
+                expect(scope.locator(".st-key-orders_rail")).to_be_visible()
+            scope.locator(
+                ".st-key-orders_workspace"
+            ).element_handle().owner_frame().wait_for_function(
+                "()=>{const e=document.querySelector('.st-key-orders_workspace');return e&&e.scrollWidth<=e.clientWidth+1}",
+                timeout=5000,
+            )
+
             scope.get_by_role("combobox", name="Select plate", exact=True).click()
             scope.get_by_role("combobox", name="Select plate", exact=True).press(
                 "ArrowDown"
@@ -151,6 +177,29 @@ def test_order_history_detail_archive_download_and_logout(
                 "document.documentElement.scrollWidth <= window.innerWidth + 1"
             )
             expect(scope.get_by_test_id("stException")).to_have_count(0)
+            # Canonical plate/filter state must survive a real customer-route remount.
+            scope.get_by_role("combobox", name="Select plate", exact=True).click()
+            scope.get_by_role("combobox", name="Select plate", exact=True).press(
+                "ArrowDown"
+            )
+            scope.get_by_role("combobox", name="Select plate", exact=True).press(
+                "Enter"
+            )
+            expect(
+                scope.get_by_role("heading", name="Plate 2 · 316", exact=True)
+            ).to_be_visible()
+            scope.get_by_role("link", name="Quote Cart", exact=True).click()
+            expect(
+                scope.get_by_role("heading", name="Quote Cart", exact=True)
+            ).to_be_visible()
+            scope.get_by_role("link", name="My Orders", exact=True).click()
+            expect(
+                scope.get_by_role("heading", name="Plate 2 · 316", exact=True)
+            ).to_be_visible()
+            scope.get_by_role("button", name="← Back to Orders", exact=True).click()
+            expect(
+                scope.get_by_role("textbox", name="Find an order", exact=True)
+            ).to_have_value("OP-0016")
             scope.get_by_role("button", name="Log out", exact=True).click()
             expect(
                 scope.get_by_role("button", name="Download approved PDF", exact=True)
@@ -159,6 +208,13 @@ def test_order_history_detail_archive_download_and_logout(
                 scope.get_by_role("heading", name="OP-0016", exact=True)
             ).to_have_count(0)
         except Exception:
+            (tmp_path / "overflow.json").write_text(
+                __import__("json").dumps(
+                    scope.locator(".st-key-orders_workspace").evaluate(
+                        "e=>{const r=e.getBoundingClientRect();return{outer:{width:e.clientWidth,scroll:e.scrollWidth},bad:[...e.querySelectorAll('*')].map(x=>({tag:x.tagName,cl:x.className,id:x.dataset.testid,w:x.getBoundingClientRect().width,right:x.getBoundingClientRect().right-r.right,style:x.getAttribute('style'),html:x.outerHTML.slice(0,700),parent:x.parentElement?.outerHTML.slice(0,1000)})).filter(x=>x.right>1)}}"
+                    )
+                )
+            )
             page.screenshot(
                 path=str(tmp_path / f"my-orders-{width}-failure.png"), full_page=True
             )

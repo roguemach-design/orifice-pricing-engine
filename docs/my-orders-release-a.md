@@ -28,8 +28,8 @@ separate from the approved archive. No pending revision is labeled approved.
 ## Design fit and deviations
 
 The approved 918 px desktop allocation is 200 + 18 + 700. Existing Streamlit padding
-and the actual embedded document determine available width; the rail/workspace
-ratio scales above the breakpoint. A native accessible plate picker replaces the
+and the actual embedded document determine available width. My Orders is capped
+at 918 px, with a fixed 200 px rail and 18 px gap above the breakpoint. A native accessible plate picker replaces the
 mockup's plate tabs, avoiding cramped labels on narrow screens. Below the drawing,
 expanders replace eagerly evaluated tabs. No host widening, new portal, PO data,
 tracking infrastructure, certificate backend, invented line prices or reorder UI.

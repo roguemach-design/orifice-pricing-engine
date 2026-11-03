@@ -187,3 +187,23 @@ def test_forbidden_read_removes_private_ui_state(workspace):
         assert not app.session_state._state.filtered_state.get("orders_selected")
     finally:
         ui.api_get = original
+
+
+def test_readonly_specifications_escape_content_and_preserve_false_zero_none(
+    monkeypatch,
+):
+    rendered = []
+    monkeypatch.setattr(ui.st, "markdown", lambda text, **kwargs: rendered.append(text))
+    ui.render_specifications(
+        {
+            "<script>": "<img src=x onerror=alert(1)>",
+            "Chamfer": False,
+            "Quantity": 0,
+            "Missing": None,
+        }
+    )
+    html = rendered[0]
+    assert "<script>" not in html and "<img" not in html
+    assert "&lt;script&gt;" in html
+    assert "<dd>False</dd>" in html and "<dd>0</dd>" in html
+    assert "<dd>Not recorded</dd>" in html

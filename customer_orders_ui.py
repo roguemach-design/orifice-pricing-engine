@@ -43,6 +43,21 @@ def purchased_details(spec):
     return details
 
 
+def render_specifications(details):
+    # Semantic read-only data: no editable grid, minimum canvas width or resize handles.
+    rows = "".join(
+        "<div><dt>"
+        + escape(str(label))
+        + "</dt><dd>"
+        + escape("Not recorded" if value is None else str(value))
+        + "</dd></div>"
+        for label, value in details.items()
+    )
+    st.markdown(
+        '<dl class="orders-specifications">' + rows + "</dl>", unsafe_allow_html=True
+    )
+
+
 def get(path, **kwargs):
     try:
         result = api_get(path, **kwargs)
@@ -252,13 +267,11 @@ def drawings(order_id, line, plate):
     st.caption("Approved · " + stamp(revision["approved_at"]))
     archived_drawing(order_id, revision)
     with st.expander("Selected revision specifications"):
-        st.dataframe(
-            [
-                {"Specification": k.replace("_", " ").capitalize(), "Value": str(v)}
+        render_specifications(
+            {
+                k.replace("_", " ").capitalize(): v
                 for k, v in revision["specifications"].items()
-            ],
-            hide_index=True,
-            width="stretch",
+            }
         )
 
 
@@ -428,14 +441,7 @@ def order_workspace(selected):
     st.caption(
         "Quantity · " + str(line["specifications"].get("quantity", "Not recorded"))
     )
-    st.dataframe(
-        [
-            {"Specification": k, "Value": str(v)}
-            for k, v in purchased_details(line["specifications"]).items()
-        ],
-        hide_index=True,
-        width="stretch",
-    )
+    render_specifications(purchased_details(line["specifications"]))
     st.caption(
         "Line/unit price is not recorded separately. The recorded order amounts are not recalculated."
     )
