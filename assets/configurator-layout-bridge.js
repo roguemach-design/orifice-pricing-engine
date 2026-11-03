@@ -11,6 +11,10 @@
     scheduled = false;
     const block = app.document.querySelector('[data-testid="stMainBlockContainer"]');
     if (!block) return;
+    // A native PDF fullscreen promotes this nested iframe and changes the app's
+    // viewport temporarily. Keep the host's pre-fullscreen height instead of
+    // feeding the temporary dimensions back into the landing layout.
+    if (app.document.fullscreenElement?.matches('iframe[title="customer_pdf_viewer.oplates_approved_pdf"]')) return;
     const modalOpen = Boolean(app.document.querySelector('[data-testid="stDialog"] [role="dialog"]'));
     app.document.documentElement.classList.toggle('oplates-viewport-modal', modalOpen);
     const height = Math.ceil(block.getBoundingClientRect().height + 100);
@@ -64,6 +68,7 @@
   if (block) { resize.observe(block); mutations.observe(app.document.body, {childList:true, subtree:true, characterData:true, attributes:true}); }
   app.addEventListener('message', receive);
   app.addEventListener('resize', schedule);
-  app.__oplatesLayoutCleanup = () => { resize.disconnect(); mutations.disconnect(); app.removeEventListener('message', receive); app.removeEventListener('resize', schedule); };
+  app.document.addEventListener('fullscreenchange', schedule);
+  app.__oplatesLayoutCleanup = () => { resize.disconnect(); mutations.disconnect(); app.removeEventListener('message', receive); app.removeEventListener('resize', schedule); app.document.removeEventListener('fullscreenchange', schedule); };
   schedule();
 })();

@@ -50,7 +50,10 @@ Toolbar buttons are keyboard accessible with visible focus. The drawing region
 supports arrow-key scrolling, +/- zoom and 0 to fit; mouse/touch dragging pans;
 two-pointer touch gestures zoom. Fullscreen uses the browser API. A minimal
 `allow="fullscreen"` delegation on the existing landing iframe is required for
-cross-origin embedding; the UI offers an honest verified-download fallback where
+cross-origin embedding. The existing landing layout bridge freezes host height
+updates only while this PDF iframe is in native fullscreen, then resynchronizes
+on fullscreen exit; temporary fullscreen viewport sizes must not feed back into
+the normal embedded layout. The UI offers an honest verified-download fallback where
 the browser/host denies it. This does not widen or navigate the host.
 
 ## Rebuilding vendor files
