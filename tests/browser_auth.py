@@ -47,7 +47,14 @@ def customer_app(tmp_path):
                             expires_in=3600, user=user))
 
         def do_GET(self):
-            if self.path == "/landing":
+            if self.path == "/orders-landing":
+                landing = ROOT / "o-plates landing"
+                html = (landing / "index.html").read_text().replace('https://quote.o-plates.com/Quote?embed=true&amp;integrated=1', state["ui"] + '/My_Orders?embed=true&amp;integrated=1')
+                html = html.replace('<link rel="stylesheet" href="styles.css" />', '<style>' + (landing / "styles.css").read_text() + '</style>')
+                js = (landing / "configurator.js").read_text().replace('https://quote.o-plates.com', state["ui"])
+                html = html.replace('<script src="configurator.js"></script>', '<script>' + js + '</script>')
+                self.reply(html, content_type="text/html")
+            elif self.path == "/landing":
                 self.reply('<iframe id="plate-configurator" style="width:100%;height:1800px" src="'
                            + state["ui"] + '/Quote?embed=true&integrated=1"></iframe>', content_type="text/html")
             elif self.path == "/config/active":
@@ -60,6 +67,7 @@ def customer_app(tmp_path):
                 self.reply({"allowed": False})
             elif self.path.startswith("/me/"):
                 state["protected"].append(self.headers.get("Authorization"))
+                state.setdefault("protected_paths", []).append(self.path)
                 if state["revoked"] or not self.headers.get("Authorization"):
                     self.reply({}, 401)
                 elif self.path.startswith('/me/order-history/'):
@@ -69,11 +77,13 @@ def customer_app(tmp_path):
                 elif self.path.endswith('/drawing-archive'):
                     self.reply(state.get('drawing_archive', []))
                 elif self.path.endswith('/pdf'):
-                    content=state['drawing_pdf']
+                    rid = self.path.split('/')[-2]
+                    artifact = state.get('drawing_revisions', {}).get(rid, {})
+                    content=artifact.get('content', state['drawing_pdf'])
                     self.send_response(200)
                     self.send_header('Content-Type','application/pdf')
-                    self.send_header('X-Artifact-SHA256',state['drawing_hash'])
-                    self.send_header('X-Frozen-Revision','revision-1')
+                    self.send_header('X-Artifact-SHA256',artifact.get('hash', state['drawing_hash']))
+                    self.send_header('X-Frozen-Revision',artifact.get('revision', 'revision-1'))
                     self.end_headers();self.wfile.write(content)
                 else:
                     self.reply([])
@@ -129,6 +139,12 @@ def customer_app(tmp_path):
         f"    if url.startswith({staging!r} + '/'): url = {api!r} + url[len({staging!r}):]\n"
         "    return original(self, method, url, *args, **kwargs)\n"
         "requests.sessions.Session.request = isolated\n"
+        "from pathlib import Path\n"
+        "original_read_text = Path.read_text\n"
+        "def local_bridge(self, *args, **kwargs):\n"
+        "    text = original_read_text(self, *args, **kwargs)\n"
+        f"    return text.replace('https://www.o-plates.com', {api!r}).replace('https://o-plates.com', {api!r}) if self.name == 'configurator-layout-bridge.js' else text\n"
+        "Path.read_text = local_bridge\n"
     )
     env["PYTHONPATH"] = str(tmp_path) + os.pathsep + env.get("PYTHONPATH", "")
     env.update(API_BASE=staging, SUPABASE_URL=api, SUPABASE_ANON_KEY="synthetic-public", API_KEY="synthetic-ui")

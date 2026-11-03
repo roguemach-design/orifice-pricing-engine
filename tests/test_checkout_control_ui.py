@@ -53,6 +53,7 @@ def test_my_orders_cannot_describe_test_approval_as_production(monkeypatch):
     from types import SimpleNamespace
     monkeypatch.setattr(auth,'render_auth_sidebar',lambda **kwargs:None)
     monkeypatch.setattr(auth,'require_login',lambda *args:None)
+    monkeypatch.setattr(auth,'current_user_id_hint',lambda:'customer-1')
     for mode in ('OWNER TEST','TEST','LIVE'):
         order={'id':'order','payment_mode':mode,'order_number_display':'OP-TEST','quote_payload':{}}
         order.update(status='completed', lines=[{'line_id':'line-1','specifications':{'material':'304','quantity':1}}])

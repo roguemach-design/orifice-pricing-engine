@@ -1,0 +1,26 @@
+/* Scoped to My Orders. Width comes from the embedded document, not the host screen. */
+.st-key-orders_workspace {container-type:inline-size;color:#e9eef7}
+.st-key-orders_workspace h1 {letter-spacing:-.035em}
+.st-key-orders_workspace h2,.st-key-orders_workspace h3 {overflow-wrap:anywhere}
+.st-key-orders_workspace button {min-height:44px}
+.st-key-orders_workspace button:focus-visible {outline:3px solid #6ee7ff;outline-offset:3px}
+.st-key-orders_workspace [data-testid="stVerticalBlockBorderWrapper"] {border-color:#263449!important}
+.st-key-orders_workspace .orders-card {padding:2px 0;color:#aab8cb;font-size:.85rem;overflow-wrap:anywhere}
+.st-key-orders_workspace .orders-card strong {color:#e9eef7;font-size:1.08rem}
+.st-key-orders_workspace .orders-status {display:inline-block;padding:5px 10px;background:#17263b;border:1px solid #263449;border-radius:7px;color:#6ee7ff;margin:0 8px 6px 0;font-size:.85rem}
+.st-key-orders_workspace .orders-context {border-bottom:1px solid #263449;padding-bottom:10px;margin-bottom:12px}
+.st-key-orders_workspace .orders-context p {color:#aab8cb;margin:6px 0}
+.st-key-orders_workspace [data-testid="stDataFrame"] {max-width:100%}
+.st-key-orders_workspace [data-testid="stHorizontalBlock"] {min-width:0}
+.st-key-orders_workspace [data-testid="stColumn"] {min-width:0}
+@container (min-width:900px) {
+ .st-key-orders_layout > [data-testid="stHorizontalBlock"] {gap:18px;flex-wrap:nowrap}
+ .st-key-orders_layout > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {flex:200 1 0%;min-width:0}
+ .st-key-orders_layout > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child {flex:700 1 0%;min-width:0}
+}
+@container (max-width:899px) {
+ .st-key-orders_layout > [data-testid="stHorizontalBlock"] {display:block}
+ .st-key-orders_layout > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:first-child {display:none}
+ .st-key-orders_layout > [data-testid="stHorizontalBlock"] > [data-testid="stColumn"]:last-child {width:100%;flex:1 1 100%}
+}
+.st-key-orders_workspace button[kind="primary"] {background:#4b7dff;border-color:#4b7dff;color:white}

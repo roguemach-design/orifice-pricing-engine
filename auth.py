@@ -53,6 +53,9 @@ def _ensure_auth_state() -> None:
 
 
 def _clear_local_auth() -> None:
+    from customer_orders_state import clear_orders_state
+
+    clear_orders_state(st.session_state)
     st.session_state["_auth_cookie_cleared"] = True
     st.session_state.auth = {
         "access_token": None,
