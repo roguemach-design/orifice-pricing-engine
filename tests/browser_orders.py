@@ -113,6 +113,56 @@ def click_drawing_control(page, viewer, name):
     control.click()
 
 
+def select_plate(page, scope, number, material, quantity, *, search=False):
+    """Open the real picker after its ancestor scroll has finished, then choose a named option."""
+    plate = scope.get_by_role("combobox", name="Select plate", exact=True)
+    plate.evaluate("""element => new Promise((resolve, reject) => {
+          const positions = new Map();
+          for (let p = element.parentElement; p; p = p.parentElement) {
+            if (p.scrollHeight > p.clientHeight || p.scrollWidth > p.clientWidth) {
+              positions.set(p === document.scrollingElement ? document : p,
+                {element: p, top: p.scrollTop, left: p.scrollLeft});
+            }
+          }
+          const pending = new Set();
+          let timer;
+          const cleanup = () => {
+            clearTimeout(timer);
+            for (const target of positions.keys()) target.removeEventListener('scrollend', ended);
+          };
+          const ended = event => {
+            pending.delete(event.currentTarget);
+            if (!pending.size) { cleanup(); resolve(); }
+          };
+          for (const target of positions.keys()) target.addEventListener('scrollend', ended);
+          timer = setTimeout(() => {
+            cleanup(); reject(Error('Plate selector ancestor scroll did not finish'));
+          }, 5000);
+          element.scrollIntoView({block: 'center', behavior: 'instant'});
+          for (const [target, old] of positions) {
+            if (old.element.scrollTop !== old.top || old.element.scrollLeft !== old.left) pending.add(target);
+          }
+          // Even without movement, flush any scroll event queued by the prior screenshot.
+          if (!pending.size) requestAnimationFrame(() => { cleanup(); resolve(); });
+        })""")
+    plate.click()
+    expect(plate).to_have_attribute("aria-expanded", "true")
+    label = f"Plate {number} · {material} · Qty {quantity}"
+    option = scope.get_by_role("option", name=label, exact=True)
+    expect(option).to_be_visible()
+    if search:
+        # The default fuzzy matcher can match "Plate 1" against material 316;
+        # use the complete label when asserting a single filtered result.
+        plate.fill(label)
+        expect(option).to_be_visible()
+        expect(scope.get_by_role("option")).to_have_count(1)
+    option.click()
+    expect(plate).to_have_value(label)
+    expect(
+        scope.get_by_role("heading", name=f"Plate {number} · {material}", exact=True)
+    ).to_be_visible()
+
+
 @pytest.mark.parametrize("embedded", [False, True])
 @pytest.mark.parametrize("width", [320, 375, 390, 768, 1080, 1920])
 def test_order_history_detail_archive_download_and_logout(
@@ -240,23 +290,8 @@ def test_order_history_detail_archive_download_and_logout(
                 "document.documentElement.scrollWidth <= window.innerWidth + 1"
             )
             expect(scope.get_by_test_id("stException")).to_have_count(0)
-            # Choose an explicit identity for the route-persistence setup. A
-            # relative ArrowDown depends on the combobox's prior focused option.
-            plate = scope.get_by_role("combobox", name="Select plate", exact=True)
-            # The preceding workspace screenshot can leave this input above the
-            # Streamlit scroll viewport; fill() alone does not scroll it into view.
-            plate.evaluate(
-                "e => e.scrollIntoView({block: 'center', behavior: 'instant'})"
-            )
-            plate.fill("Plate 2")
-            expect(
-                scope.get_by_role("option", name="Plate 2 · 316 · Qty 2", exact=True)
-            ).to_be_visible()
-            plate.press("ArrowDown")
-            plate.press("Enter")
-            expect(
-                scope.get_by_role("heading", name="Plate 2 · 316", exact=True)
-            ).to_be_visible()
+            # Use the same scroll/open/filter/option-click sequence as a customer.
+            select_plate(page, scope, 2, "316", 2, search=True)
             scope.get_by_role("link", name="Quote Cart", exact=True).click()
             expect(
                 scope.get_by_role("heading", name="Quote Cart", exact=True)

@@ -4,12 +4,13 @@ from contextlib import contextmanager
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
+import re
 
 import pypdfium2 as pdfium
 import pytest
 from playwright.sync_api import sync_playwright, expect, Error
 from browser_auth import customer_app, sign_in
-from browser_orders import seed_orders, click_drawing_control
+from browser_orders import seed_orders, click_drawing_control, select_plate
 
 
 @contextmanager
@@ -408,3 +409,127 @@ def test_fit_receives_real_clicks_after_host_scroll(customer_app, width):
             frame.evaluate("window.receivedDrawingClicks")
             == ["in", "fit", "out", "fit"] * 6
         )
+
+
+@pytest.mark.parametrize(
+    "width,embedded,mobile",
+    [
+        (1080, False, False),
+        (1080, True, False),
+        (768, False, False),
+        (390, False, True),
+        (390, True, True),
+    ],
+)
+def test_each_plate_keeps_its_approved_pdf_after_viewing_and_download(
+    customer_app, width, embedded, mobile, tmp_path
+):
+    state, api = customer_app
+    first_pdf, first_hash = seed_orders(state)
+    state["order_detail"]["order_number_display"] = "DEMO-0042"
+    second_pdf = (Path(__file__).parent / "fixtures/legacy-v6.pdf").read_bytes()
+    second_hash = sha256(second_pdf).hexdigest()
+    second_spec = {
+        "material": "316",
+        "quantity": 2,
+        "thickness": 0.125,
+        "paddle_dia": 5,
+        "chamfer": False,
+    }
+    state["order_detail"]["lines"][1]["specifications"] = second_spec
+    first_revision = state["drawing_archive"][0]["revisions"][0]
+    second_revision = dict(
+        first_revision,
+        id="revision-2",
+        number=2,
+        specifications=second_spec,
+        pdf_sha256=second_hash,
+        pdf_size=len(second_pdf),
+    )
+    state["drawing_archive"].append(
+        dict(
+            id="plate-2",
+            line_id="line-2",
+            current_revision="revision-2",
+            lifecycle="CUSTOMER_APPROVED",
+            revisions=[second_revision],
+        )
+    )
+    state["drawing_revisions"] = {
+        "revision-2": {
+            "content": second_pdf,
+            "hash": second_hash,
+            "revision": "revision-2",
+        }
+    }
+    with workspace(state, api, width=width, embedded=embedded, mobile=mobile) as (
+        page,
+        viewer,
+        context,
+        browser,
+    ):
+        scope = page.frame_locator("#plate-configurator") if embedded else page
+
+        def verify_plate(number, material, quantity, revision, content, digest):
+            expect(
+                scope.get_by_role("combobox", name="Select plate", exact=True)
+            ).to_have_value(f"Plate {number} · {material} · Qty {quantity}")
+            expect(
+                scope.get_by_role(
+                    "heading", name=f"Plate {number} · {material}", exact=True
+                )
+            ).to_be_visible()
+            expect(
+                scope.get_by_role("combobox", name="Approved revision", exact=True)
+            ).to_have_value(f"R{revision} · Current approved")
+            expect(scope.get_by_text("SHA-256 · " + digest, exact=True)).to_be_visible()
+            purchased = scope.locator(".orders-specifications").last
+            for label, value in [("Material", material), ("Quantity", str(quantity))]:
+                expect(
+                    purchased.locator("dt")
+                    .filter(has_text=re.compile("^" + label + "$"))
+                    .locator("..")
+                    .locator("dd")
+                ).to_have_text(value)
+            click_drawing_control(page, viewer, "Fit page")
+            wait_pdf(viewer)
+            with page.expect_download() as result:
+                click_drawing_control(page, viewer, "Download approved PDF")
+            downloaded = Path(result.value.path()).read_bytes()
+            assert result.value.url.startswith("blob:")
+            assert len(downloaded) == len(content)
+            assert downloaded == content
+            assert sha256(downloaded).hexdigest() == digest
+            assert (
+                f"/me/orders/order-1/drawings/revision-{number}/pdf"
+                in state["protected_paths"]
+            )
+
+        for cycle in range(2):
+            verify_plate(1, "304", 1, 1, first_pdf, first_hash)
+            click_drawing_control(page, viewer, "Zoom in")
+            expect(viewer.locator("#zoom")).to_have_text("125%")
+            click_drawing_control(page, viewer, "Fit page")
+            expect(viewer.locator("#zoom")).to_have_text("100%")
+            click_drawing_control(page, viewer, "Full screen")
+            expect(
+                viewer.get_by_role("button", name="Exit full screen", exact=True)
+            ).to_be_visible()
+            click_drawing_control(page, viewer, "Exit full screen")
+            with page.expect_download() as result:
+                click_drawing_control(page, viewer, "Download approved PDF")
+            assert Path(result.value.path()).read_bytes() == first_pdf
+            scope.locator(".st-key-orders_workspace").screenshot(
+                path=str(tmp_path / f"before-plate-switch-{cycle}.png")
+            )
+            select_plate(page, scope, 2, "316", 2, search=not mobile)
+            verify_plate(2, "316", 2, 2, second_pdf, second_hash)
+            expect(
+                scope.get_by_text("SHA-256 · " + first_hash, exact=True)
+            ).to_have_count(0)
+            select_plate(page, scope, 1, "304", 1, search=not mobile)
+            verify_plate(1, "304", 1, 1, first_pdf, first_hash)
+            expect(
+                scope.get_by_text("SHA-256 · " + second_hash, exact=True)
+            ).to_have_count(0)
+        assert state["sends"] == 1

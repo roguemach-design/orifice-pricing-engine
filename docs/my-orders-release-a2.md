@@ -78,19 +78,50 @@ source tree. The previously reviewed 7438e023 commit completed push and PR CI wi
 1,344 passed / 5 skipped and all 46 browser cases passing in each run. Updated
 results and exact candidate SHAs are recorded in PR #75.
 
-The intermediate d9c45c37 push passed all 49 browser checks, while its PR run
-reported an off-screen SVG scroll-stability timeout and three relative-keyboard
-plate-selection setup failures. The already visible/attached SVG is now scrolled
-into the capture area using the browser DOM before screenshot stability checks;
-its visibility, dimensions, aspect ratio, black pixels and live updates retain
-their original assertions. Route-persistence setup now scrolls its input into view after the workspace
-screenshot (fill alone left it above the Streamlit viewport), then filters for
-the explicit Plate 2 option before keyboard confirmation instead of assuming
-relative focus.
-The first two keyboard plate-switch checks and all canonical selected-plate,
-route-return and logout assertions remain. No drawing-generation or configurator
-application source is changed. The latest exact-head runs are required to pass;
-intermediate green runs are not substituted for final acceptance.
+## Plate-selector blocker: verified browser-test defect
+
+The failing automated sequence scrolled the selected-plate input into view and
+immediately filled Plate 2 without opening the picker. The scroll position changes
+synchronously, but the browser dispatches its scroll/scrollend events later. The
+pinned Streamlit 1.64 React Aria overlay intentionally closes on ancestor scroll.
+
+An exact failing 390 px trace recorded:
+
+| Relative time | Event | Picker state |
+| --- | --- | --- |
+| 0 ms | input receives Plate 2 | focused; query only, canonical Plate 1 |
+| +12 ms | dropdown opens | same connected input node |
+| +19 ms | pending stMain SECTION scroll (scrollTop 325) | query/dropdown still open |
+| +32 ms | overlay closes | query discarded, displayed Plate 1 restored |
+
+No option was chosen or new Plate 2 selection submitted in that failing action.
+The widget was not replaced and no server selection was lost. In the same failed
+session, a normal pointer-open exposed both options; clicking Plate 2 committed
+its selected value and server-rendered heading. A separate controlled check with
+no PDF zoom/fullscreen/download actions reproduced scroll dismissing an uncommitted
+search, then selected Plate 2 normally. The PDF viewer is not the cause.
+
+The test-only select_plate helper waits for actual scrollend events on the moved
+ancestor scroll containers (with a failure timeout), then performs a normal
+pointer-open, verifies the expected option, optionally filters, and clicks that
+option. It asserts the visible selected value and server-rendered plate heading.
+The single-result filter check uses the complete option label: the default fuzzy
+matcher can also match the digit in Plate 1 against material 316. No sleeps,
+selection-state injection, forced clicks, fallback choices or retries are used. Existing keyboard plate-switch checks remain intact.
+
+Five additional browser cases cover standalone 1080/768, embedded 1080, standalone
+mobile 390 and embedded mobile 390. Each repeats Plate 1 PDF zoom/fit/fullscreen/
+download, chooses Plate 2 normally, verifies its original material/quantity,
+current R2, distinct stored PDF size/hash/bytes and authoritative archive request,
+then returns to Plate 1 R1 and verifies its original file again. Desktop cases also
+check picker filtering; touch cases use the actual option picker. Existing cases
+retain historical gaps, route persistence, ownership and logout assertions.
+
+Only tests/browser_orders.py, tests/browser_pdf_viewer.py and this document change
+for this investigation. Application code, secure PDF delivery, host scroll repair,
+pricing, shipping, checkout and authentication are unchanged from reviewed 2d7bc8ad.
+Final exact-head CI and all 51 protected hashes must pass before acceptance; source
+SHAs and completed results are recorded in PR #75.
 
 ## Verified production baselines and isolated release boundaries
 
