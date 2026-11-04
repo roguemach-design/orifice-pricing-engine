@@ -45,44 +45,96 @@ screenshots contain representative synthetic data. Real iOS/Safari hardware is n
 covered by Chromium emulation; browsers denying Fullscreen API get the verified-file
 fallback and require manual device acceptance before claiming that platform.
 
-## Static host dependency and later deployment order
+## Fit Page investigation and acceptance contract
 
-The existing landing iframe gains `allow="fullscreen"`, required for cross-origin
-browser fullscreen. Its existing configurator.js also saves/cancels/restores host
-scroll position for native fullscreen. The customer-side layout bridge suppresses
-height feedback while the PDF iframe is fullscreen and resynchronizes on exit.
-No host width, navigation, authentication or service configuration is changed.
+The local 1080 px failure was a test interaction error during the host's existing
+smooth scroll, not a lost accepted Fit command. Focused event capture reproduced
+125% remaining for five seconds: the attempted Fit pointerdown/up/click landed on
+a surrounding Streamlit DIV; no event reached the PDF iframe. In the same trace,
+accepted Fit clicks reached #fit, changed status to Rendering drawing page, then
+updated zoom and canvas back to the calculated fit. One recorded accepted Fit
+updated zoom from 125% to 100% in approximately 6 ms. No fullscreen was active.
+A diagnostic pre-seeded zoom state to isolate Fit; final acceptance uses real
+pointer clicks for both zoom and fit.
 
-The prior candidate passed one 43-case CI run but failed another at the immediate
-post-fullscreen download. A local event trace reproduced that same timeout: the
-outer host jumped from scrollY 1448 to 4188 on exit; the nested button remained
-enabled at the same local rectangle and received no download click. Freezing height
-feedback alone had not fixed it. The new browser regression reproduced a 2744 px
-host-position mismatch before the host scroll repair. It checks three enter/exit/
-immediate exact-byte download cycles at 390, 1080 and 1920 px. No forced clicks,
-artificial click delays, weakened assertions or drawing-generation changes are used.
-Local diagnostics used Chromium 153; exact-release CI uses pinned Playwright 1.58's
-Chromium 145. Both the original suite and the new regression must pass before
-engineering acceptance.
+The correction is test-only. click_drawing_control centers the nested control in
+the host viewport and waits for the browser's actual scrollend event at that
+position before normal Playwright click coordinates are calculated. The 5-second
+limit is a failure timeout, not a sleep. No forced clicks, reduced-motion override,
+application zoom change, or assertion weakening is used. New default-motion tests
+at 390/768/1080 px assert all 24 actual button click receipts per case, rendered
+125%/100%/80%/100% labels and corresponding canvas dimensions across six cycles.
+The existing fullscreen restoration regression remains independent and checks
+host position before its immediate verified-file download.
 
-After separate owner release authorization:
+The local diagnostic/test runtime is Chromium 153 with Playwright 1.58; GitHub CI
+uses Playwright 1.58's Chromium 145. Both complete suites must pass on the final
+source tree. The previously reviewed 7438e023 commit completed push and PR CI with
+1,344 passed / 5 skipped and all 46 browser cases passing in each run. Updated
+results and exact candidate SHAs are recorded in PR #75.
 
-1. Verify the running API is healthy at the approved isolated API SHA; no API deploy
-   or migration is required for Release A.
-2. Compare the landing iframe permission and focused fullscreen scroll handler
-   against the actual running landing commit. Prepare a landing-only commit from
-   that verified baseline and
-   deploy/verify it before enabling the final customer viewer in the embedded site.
-   Do not substitute the customer-based tree for an unverified landing baseline.
-3. Deploy the exact accepted A2 customer candidate (which includes A1). Verify
-   exact running SHA, desktop/mobile embedded navigation, one current and one
-   authorized historical approved PDF hash, logout privacy, quote/cart return and
-   TEST-only restrictions. Do not create/approve orders as part of read-only checks.
-4. Stop on failure. Do not redeploy repeatedly or change production data/config.
+## Verified production baselines and isolated release boundaries
 
-Customer rollback target: `f98dee17d610f8e89aafaee302b2fbd11af8dd1d`. API is unchanged.
-Landing rollback target must be the actually verified pre-release static deploy,
-not an assumed SHA. The harmless fullscreen delegation may remain with the old UI
-if that is the safest rollback; obtain owner authorization for any rollback.
+Read-only Render verification on 2026-11-04 (roguemachine workspace):
+
+| Service | Live commit | Live deploy / rollback target |
+| --- | --- | --- |
+| API | 6b3c5de962c87f5ef59948c658947cddb1d92a56 | dep-dbl1vqm1egvs739b1d30 |
+| Customer UI | f98dee17d610f8e89aafaee302b2fbd11af8dd1d | dep-dbl200u1egvs739b1uig |
+| Static landing | 5f7a2d1c817bddca4e27c023fcc35b44b56e275c | dep-dbi8fjgm7kps73c6ff50 |
+
+All three production services have automatic deployment disabled. No service
+settings are changed by this preparation. Static landing publish path remains
+o-plates landing; preserve its existing journey-config build command.
+
+The landing-only release must be a child of the verified static baseline above,
+changing only o-plates landing/index.html (allow=fullscreen) and configurator.js
+(the 14-line host position save/restore handler). All six other landing files are
+byte-identical between the verified static baseline and A2. The combined customer
+release descends from the verified f98 UI baseline through A1 and A2. Its Docker
+runtime serves the existing customer application, not the static landing service.
+The repository's API/pricing copies are not an API release and must not be deployed
+to the API. Final tested commit SHAs belong in the PR handoff, not guessed here.
+
+## Manual deployment runbook — separate owner authorization required
+
+No deployment is authorized by this document. After engineering acceptance and
+separate explicit owner authorization:
+
+1. Recheck all three live SHAs against this table. Stop if they have changed;
+   reassess the candidates rather than deploying from an outdated baseline.
+2. Verify the API at its existing SHA and GET /health. Do not redeploy it, run
+   migrations, change checkout mode, or touch workers/staging/manufacturing systems.
+3. Static landing service srv-d5eqjn6r433s738u2jn0: Manual Deploy > Deploy a specific
+   commit > the accepted landing-only SHA. Preserve build command, publish path,
+   domains, headers and configuration. Wait for that exact deploy to become live.
+   Verify index.html grants fullscreen only to the existing configurator iframe;
+   the served configurator.js includes host scroll restoration. Recheck normal
+   embedded navigation, consent/collector behavior and existing configurator fit.
+4. Customer UI srv-d530k8re5dus73ahqr0g: Manual Deploy > Deploy a specific commit >
+   the accepted combined UI SHA. Preserve Docker/start commands and configuration.
+   Wait for that exact deploy to become live; verify /_stcore/health returns ok.
+5. Read-only customer acceptance with existing authorized records: OTP persistence;
+   desktop 1080 and mobile 390 list/detail/plate/revision switching; visible fit,
+   zoom, pan, fullscreen exit returning to the drawing; immediate download with
+   authoritative stored byte count and SHA-256; historical gaps; quote/cart return;
+   anonymous/cross-owner denial and logout cleanup. Verify TEST-only restrictions
+   without checkout, payment attempts, purchases or approvals.
+6. Stop on any failure and report. Do not initiate repeated deploys or modify data.
+
+## Manual rollback plan — separate owner authorization required
+
+If the new UI fails, recommend reverting only the UI to f98dee17d610f8e89aafaee302b2fbd11af8dd1d
+(deploy dep-dbl200u1egvs739b1uig), then repeat health/auth/privacy checks. The new
+landing permission/scroll handler is compatible with the old UI, so leaving the
+landing release in place is acceptable when it avoids an unnecessary second change.
+If the host itself regresses, recommend reverting landing to 5f7a2d1c817bddca4e27c023fcc35b44b56e275c
+(deploy dep-dbi8fjgm7kps73c6ff50). API remains at 6b3c5de9 throughout. Use retained
+Render rollback artifacts if available; otherwise manually deploy the exact prior
+SHA with unchanged current settings. Recheck automatic deployment remains off.
+Rollback does not restore database/order state; this release changes neither and
+requires no data rollback. Do not execute any rollback without owner authorization.
+
 PR #52/staging, PR #73/configurator fixes, LIVE checkout, IMP-012, shipments and
-reordering are excluded. No deploy or merge has been performed by this preparation.
+reordering remain excluded. No merge, deploy, rollback or production mutation has
+been performed by this release preparation.

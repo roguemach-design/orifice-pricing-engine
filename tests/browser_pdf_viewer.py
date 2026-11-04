@@ -9,7 +9,7 @@ import pypdfium2 as pdfium
 import pytest
 from playwright.sync_api import sync_playwright, expect, Error
 from browser_auth import customer_app, sign_in
-from browser_orders import seed_orders
+from browser_orders import seed_orders, click_drawing_control
 
 
 @contextmanager
@@ -355,3 +355,54 @@ def test_embedded_fullscreen_exit_restores_position_and_immediate_download(
             assert sha256(Path(result.value.path()).read_bytes()).hexdigest() == digest
             wait_pdf(viewer)
         page.screenshot(path=str(tmp_path / f"fullscreen-return-{width}.png"))
+
+
+@pytest.mark.parametrize("width", [390, 768, 1080])
+def test_fit_receives_real_clicks_after_host_scroll(customer_app, width):
+    """Default smooth scrolling stays enabled; accepted commands must render their fit."""
+    state, api = customer_app
+    seed_orders(state)
+    with workspace(state, api, embedded=True, width=width, mobile=width == 390) as (
+        page,
+        viewer,
+        context,
+        browser,
+    ):
+        page.emulate_media(reduced_motion="no-preference")
+        assert (
+            page.evaluate("getComputedStyle(document.documentElement).scrollBehavior")
+            == "smooth"
+        )
+        click_drawing_control(page, viewer, "Fit page")
+        wait_pdf(viewer)
+        canvas = viewer.locator("canvas")
+        baseline = canvas.evaluate(
+            "e=>[parseFloat(e.style.width),parseFloat(e.style.height)]"
+        )
+        viewer.locator("#toolbar").evaluate("""e => {
+          window.receivedDrawingClicks = [];
+          e.addEventListener('click', event => {
+            if (event.target.tagName === 'BUTTON') window.receivedDrawingClicks.push(event.target.id);
+          });
+        }""")
+        for _ in range(6):
+            # Exercise the same canvas-to-toolbar scroll transition as the original failure.
+            canvas.scroll_into_view_if_needed()
+            for name, label, factor in [
+                ("Zoom in", "125%", 1.25),
+                ("Fit page", "100%", 1),
+                ("Zoom out", "80%", 0.8),
+                ("Fit page", "100%", 1),
+            ]:
+                click_drawing_control(page, viewer, name)
+                expect(viewer.locator("#zoom")).to_have_text(label)
+                wait_pdf(viewer)
+                size = canvas.evaluate(
+                    "e=>[parseFloat(e.style.width),parseFloat(e.style.height)]"
+                )
+                assert size == pytest.approx([n * factor for n in baseline], abs=1)
+        frame = canvas.element_handle().owner_frame()
+        assert (
+            frame.evaluate("window.receivedDrawingClicks")
+            == ["in", "fit", "out", "fit"] * 6
+        )

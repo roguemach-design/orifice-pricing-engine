@@ -74,6 +74,45 @@ def assert_painted(viewer):
     )
 
 
+def click_drawing_control(page, viewer, name):
+    """Settle the host scroll before Playwright calculates nested-frame click coordinates.
+
+    A locally stable iframe button can still move globally while its host smooth-
+    scrolls. Waiting for the actual scrollend event avoids clicking the surrounding
+    Streamlit layout. This changes test interaction only, never viewer behavior.
+    """
+    control = viewer.get_by_role("button", name=name, exact=True)
+    expect(control).to_be_visible()
+    if page.locator("#plate-configurator").count() and not page.evaluate(
+        "Boolean(document.fullscreenElement)"
+    ):
+        box = control.bounding_box()
+        assert box is not None
+        page.evaluate(
+            """center => new Promise((resolve, reject) => {
+              const top = Math.round(Math.max(0, Math.min(
+                document.documentElement.scrollHeight - innerHeight,
+                scrollY + center - innerHeight / 2)));
+              let timer;
+              const done = () => {
+                if (Math.abs(scrollY - top) > 1) return;
+                document.removeEventListener('scrollend', done);
+                clearTimeout(timer);
+                resolve();
+              };
+              document.addEventListener('scrollend', done);
+              timer = setTimeout(() => {
+                document.removeEventListener('scrollend', done);
+                reject(Error('Host scroll did not reach the drawing control'));
+              }, 5000);
+              scrollTo({top, behavior: 'smooth'});
+              done();
+            })""",
+            box["y"] + box["height"] / 2,
+        )
+    control.click()
+
+
 @pytest.mark.parametrize("embedded", [False, True])
 @pytest.mark.parametrize("width", [320, 375, 390, 768, 1080, 1920])
 def test_order_history_detail_archive_download_and_logout(
@@ -174,23 +213,21 @@ def test_order_history_detail_archive_download_and_logout(
             viewer = scope.frame_locator(
                 'iframe[title="customer_pdf_viewer.oplates_approved_pdf"]'
             )
-            viewer.get_by_role("button", name="Fit page", exact=True).click()
+            click_drawing_control(page, viewer, "Fit page")
             expect(viewer.locator("#status")).to_contain_text("Verified stored PDF")
             expect(viewer.locator("canvas")).to_be_visible()
             assert_painted(viewer)
-            viewer.get_by_role("button", name="Zoom in", exact=True).click()
+            click_drawing_control(page, viewer, "Zoom in")
             expect(viewer.locator("#zoom")).to_have_text("125%")
-            viewer.get_by_role("button", name="Fit page", exact=True).click()
+            click_drawing_control(page, viewer, "Fit page")
             expect(viewer.locator("#zoom")).to_have_text("100%")
-            viewer.get_by_role("button", name="Full screen", exact=True).click()
+            click_drawing_control(page, viewer, "Full screen")
             expect(
                 viewer.get_by_role("button", name="Exit full screen", exact=True)
             ).to_be_visible()
-            viewer.get_by_role("button", name="Exit full screen", exact=True).click()
+            click_drawing_control(page, viewer, "Exit full screen")
             with page.expect_download() as result:
-                viewer.get_by_role(
-                    "button", name="Download approved PDF", exact=True
-                ).click()
+                click_drawing_control(page, viewer, "Download approved PDF")
             expect(viewer.locator("#status")).to_contain_text("Verified stored PDF")
             assert_painted(viewer)
             download = result.value
