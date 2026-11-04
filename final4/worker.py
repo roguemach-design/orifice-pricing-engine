@@ -7,27 +7,40 @@ replicas. Failures stay pending and retry independently of customer approval.
 
 from threading import Event, Lock, Thread
 import logging
+import os
 
 wake_event = Event()
 logger = logging.getLogger(__name__)
 
 
+def automatic_enabled():
+    # Independent of FINAL4_ENABLED, which also gates manual owner engineering.
+    # Retain the existing setting name for both production and staging.
+    return os.environ.get("FINAL4_AUTOMATIC_STAGING_ENABLED") == "true"
+
+
 def request_scan():
-    wake_event.set()
+    if automatic_enabled():
+        wake_event.set()
 
 
 class StagingWorker:
     def __init__(self, stager_factory, *, interval=30):
         self.factory, self.interval = stager_factory, interval
         self.stop_event, self.lock = Event(), Lock()
+        self.lifecycle_lock = Lock()
         self.states = {}
         self.thread = None
 
     def sweep(self):
+        if not automatic_enabled() or self.stop_event.is_set():
+            return {}
         stager = self.factory()
         states = {}
         for parent in stager.parents():
             for family in ("HAAS", "PACKAGING"):
+                if not automatic_enabled() or self.stop_event.is_set():
+                    return states
                 try:
                     bid = stager.ensure(family, parent)
                     result = dict(state="STAGED", bundle_id=bid)
@@ -74,11 +87,19 @@ class StagingWorker:
         return states
 
     def status(self, revision_id):
+        if not automatic_enabled():
+            return {
+                family: dict(
+                    state="AUTOMATIC STAGING DISABLED",
+                    detail="Automatic engineering is disabled; manual owner engineering remains independently authorized.",
+                )
+                for family in ("HAAS", "PACKAGING")
+            }
         with self.lock:
             return self.states.get(revision_id, {})
 
     def run(self):
-        while not self.stop_event.is_set():
+        while not self.stop_event.is_set() and automatic_enabled():
             wake_event.clear()
             try:
                 self.sweep()
@@ -87,17 +108,25 @@ class StagingWorker:
             wake_event.wait(self.interval)
 
     def start(self):
-        if self.thread is None:
+        with self.lifecycle_lock:
+            if not automatic_enabled():
+                return
+            # Keep the handle even if a previous stop timed out on synchronous I/O.
+            # Never start a second runner while that thread is still alive.
+            if self.thread is not None and self.thread.is_alive():
+                return
+            self.stop_event.clear()
             self.thread = Thread(
                 target=self.run, name="manufacturing-stager", daemon=True
             )
             self.thread.start()
 
     def stop(self):
-        self.stop_event.set()
-        wake_event.set()
-        if self.thread:
-            self.thread.join(timeout=2)
+        with self.lifecycle_lock:
+            self.stop_event.set()
+            wake_event.set()
+            if self.thread:
+                self.thread.join(timeout=2)
 
 
 from contextlib import asynccontextmanager

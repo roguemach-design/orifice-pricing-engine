@@ -21,6 +21,12 @@ from test_final4 import system
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.fixture(autouse=True)
+def explicitly_enable_synthetic_automatic_worker(monkeypatch):
+    # These fixtures use only temporary local repositories, never live providers.
+    monkeypatch.setenv("FINAL4_AUTOMATIC_STAGING_ENABLED", "true")
+
+
 def stager(svc):
     return AutomaticStager(
         svc,
