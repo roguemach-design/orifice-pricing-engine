@@ -184,7 +184,7 @@ def test_zoom_pan_keyboard_and_touch(customer_app, mobile, tmp_path):
     seed_orders(state)
     with workspace(state, api, mobile=mobile) as (page, viewer, context, browser):
         wait_pdf(viewer)
-        viewer.get_by_role("button", name="Full screen", exact=True).click()
+        click_drawing_control(page, viewer, "Full screen")
         expect(
             viewer.get_by_role("button", name="Exit full screen", exact=True)
         ).to_be_visible()
@@ -246,7 +246,7 @@ def test_zoom_pan_keyboard_and_touch(customer_app, mobile, tmp_path):
         page.mouse.move(x - 60, y - 80, steps=5)
         page.mouse.up()
         assert surface.evaluate("e=>e.scrollLeft>0||e.scrollTop>0")
-        viewer.get_by_role("button", name="Fit page", exact=True).click()
+        click_drawing_control(page, viewer, "Fit page")
         expect(viewer.locator("#zoom")).to_have_text("100%")
         wait_pdf(viewer)
         viewer.locator("#viewer").screenshot(
@@ -286,11 +286,11 @@ def test_review_capture_in_actual_landing_shell(customer_app, width, tmp_path):
         viewer = scope.frame_locator(
             'iframe[title="customer_pdf_viewer.oplates_approved_pdf"]'
         )
-        viewer.get_by_role("button", name="Fit page", exact=True).click()
+        click_drawing_control(page, viewer, "Fit page")
         wait_pdf(viewer)
         # A tall review board captures the actual scrolling UI at its original width.
         page.set_viewport_size({"width": width, "height": 5000})
-        viewer.get_by_role("button", name="Fit page", exact=True).click()
+        click_drawing_control(page, viewer, "Fit page")
         wait_pdf(viewer)
         available = scope.locator(".st-key-orders_workspace").evaluate(
             "e=>e.clientWidth"
@@ -304,13 +304,15 @@ def test_review_capture_in_actual_landing_shell(customer_app, width, tmp_path):
         else:
             expect(scope.locator(".st-key-orders_rail")).to_be_hidden()
         name = "mobile" if width == 390 else "desktop"
+        # Frame the actual workspace below the host header, without overlaying its title.
+        page.evaluate("scrollTo({top: 0, behavior: 'instant'})")
         scope.locator(".st-key-orders_workspace").screenshot(
             path=str(tmp_path / f"implemented-{name}.png")
         )
         page.set_viewport_size(
             {"width": width, "height": 844 if width == 390 else 1000}
         )
-        viewer.get_by_role("button", name="Full screen", exact=True).click()
+        click_drawing_control(page, viewer, "Full screen")
         expect(
             viewer.get_by_role("button", name="Exit full screen", exact=True)
         ).to_be_visible()
@@ -331,7 +333,7 @@ def test_embedded_fullscreen_exit_restores_position_and_immediate_download(
         context,
         browser,
     ):
-        viewer.get_by_role("button", name="Fit page", exact=True).click()
+        click_drawing_control(page, viewer, "Fit page")
         wait_pdf(viewer)
         page.evaluate("""() => {
           document.addEventListener('fullscreenchange', () => {
@@ -340,7 +342,7 @@ def test_embedded_fullscreen_exit_restores_position_and_immediate_download(
         }""")
         for _ in range(3):
             viewer.locator("canvas").scroll_into_view_if_needed()
-            viewer.get_by_role("button", name="Full screen", exact=True).click()
+            click_drawing_control(page, viewer, "Full screen")
             expect(
                 viewer.get_by_role("button", name="Exit full screen", exact=True)
             ).to_be_visible()

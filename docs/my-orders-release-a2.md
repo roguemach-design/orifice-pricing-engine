@@ -64,14 +64,33 @@ limit is a failure timeout, not a sleep. No forced clicks, reduced-motion overri
 application zoom change, or assertion weakening is used. New default-motion tests
 at 390/768/1080 px assert all 24 actual button click receipts per case, rendered
 125%/100%/80%/100% labels and corresponding canvas dimensions across six cycles.
-The existing fullscreen restoration regression remains independent and checks
-host position before its immediate verified-file download.
+A second focused trace confirmed the same wrong-target action on fullscreen
+entry in a repeated cycle: the click reached the plate-picker area outside the
+PDF, not #full. All embedded Fit/fullscreen entry test actions now use the same
+scroll-aware helper. The existing fullscreen restoration regression remains
+independent and checks host position before its unchanged immediate direct
+verified-file download. Screenshot capture returns the host to the page top so
+its sticky header does not cover the workspace heading; no image is retouched.
 
 The local diagnostic/test runtime is Chromium 153 with Playwright 1.58; GitHub CI
 uses Playwright 1.58's Chromium 145. Both complete suites must pass on the final
 source tree. The previously reviewed 7438e023 commit completed push and PR CI with
 1,344 passed / 5 skipped and all 46 browser cases passing in each run. Updated
 results and exact candidate SHAs are recorded in PR #75.
+
+The intermediate d9c45c37 push passed all 49 browser checks, while its PR run
+reported an off-screen SVG scroll-stability timeout and three relative-keyboard
+plate-selection setup failures. The already visible/attached SVG is now scrolled
+into the capture area using the browser DOM before screenshot stability checks;
+its visibility, dimensions, aspect ratio, black pixels and live updates retain
+their original assertions. Route-persistence setup now scrolls its input into view after the workspace
+screenshot (fill alone left it above the Streamlit viewport), then filters for
+the explicit Plate 2 option before keyboard confirmation instead of assuming
+relative focus.
+The first two keyboard plate-switch checks and all canonical selected-plate,
+route-return and logout assertions remain. No drawing-generation or configurator
+application source is changed. The latest exact-head runs are required to pass;
+intermediate green runs are not substituted for final acceptance.
 
 ## Verified production baselines and isolated release boundaries
 
@@ -90,7 +109,8 @@ o-plates landing; preserve its existing journey-config build command.
 The landing-only release must be a child of the verified static baseline above,
 changing only o-plates landing/index.html (allow=fullscreen) and configurator.js
 (the 14-line host position save/restore handler). All six other landing files are
-byte-identical between the verified static baseline and A2. The combined customer
+byte-identical between the verified static baseline and A2. The isolated landing candidate is 99c04583a8a37eb378235dbc799e05c04aeb89e2
+(branch work/release-a-landing-20261104). The combined customer
 release descends from the verified f98 UI baseline through A1 and A2. Its Docker
 runtime serves the existing customer application, not the static landing service.
 The repository's API/pricing copies are not an API release and must not be deployed

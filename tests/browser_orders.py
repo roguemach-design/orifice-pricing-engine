@@ -240,14 +240,20 @@ def test_order_history_detail_archive_download_and_logout(
                 "document.documentElement.scrollWidth <= window.innerWidth + 1"
             )
             expect(scope.get_by_test_id("stException")).to_have_count(0)
-            # Canonical plate/filter state must survive a real customer-route remount.
-            scope.get_by_role("combobox", name="Select plate", exact=True).click()
-            scope.get_by_role("combobox", name="Select plate", exact=True).press(
-                "ArrowDown"
+            # Choose an explicit identity for the route-persistence setup. A
+            # relative ArrowDown depends on the combobox's prior focused option.
+            plate = scope.get_by_role("combobox", name="Select plate", exact=True)
+            # The preceding workspace screenshot can leave this input above the
+            # Streamlit scroll viewport; fill() alone does not scroll it into view.
+            plate.evaluate(
+                "e => e.scrollIntoView({block: 'center', behavior: 'instant'})"
             )
-            scope.get_by_role("combobox", name="Select plate", exact=True).press(
-                "Enter"
-            )
+            plate.fill("Plate 2")
+            expect(
+                scope.get_by_role("option", name="Plate 2 · 316 · Qty 2", exact=True)
+            ).to_be_visible()
+            plate.press("ArrowDown")
+            plate.press("Enter")
             expect(
                 scope.get_by_role("heading", name="Plate 2 · 316", exact=True)
             ).to_be_visible()
