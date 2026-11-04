@@ -4,6 +4,20 @@ const frame = document.getElementById("plate-configurator");
 const stage = document.getElementById("configurator-stage");
 const rail = document.getElementById("configurator-feedback");
 let feedback = null;
+// Native fullscreen temporarily promotes the configurator iframe out of flow.
+// Preserve the host reading position, including when a smooth anchor scroll is
+// still running; the browser's exit scroll can otherwise strand the PDF off-screen.
+let fullscreenPosition = null;
+window.addEventListener('fullscreenchange', () => {
+  if (document.fullscreenElement === frame && frame) {
+    fullscreenPosition = {left: window.scrollX, top: window.scrollY, behavior: 'instant'};
+    window.scrollTo(fullscreenPosition);
+  } else if (!document.fullscreenElement && fullscreenPosition) {
+    const position = fullscreenPosition;
+    fullscreenPosition = null;
+    window.scrollTo(position);
+  }
+});
 function textElement(tag, text, className) {
   const element = document.createElement(tag);
   element.textContent = text;

@@ -53,7 +53,11 @@ two-pointer touch gestures zoom. Fullscreen uses the browser API. A minimal
 cross-origin embedding. The existing landing layout bridge freezes host height
 updates only while this PDF iframe is in native fullscreen, then resynchronizes
 on fullscreen exit; temporary fullscreen viewport sizes must not feed back into
-the normal embedded layout. The UI offers an honest verified-download fallback where
+the normal embedded layout. The host also captures its scroll position on native
+fullscreen entry, cancels any ongoing smooth scroll, and restores that position
+synchronously on exit. Without this, Chromium can scroll the host to the page bottom
+on exit, leaving the nested PDF off-screen; an immediate browser click can then time out
+before scroll-into-view. No click delays or forced test clicks are used. The UI offers an honest verified-download fallback where
 the browser/host denies it. This does not widen or navigate the host.
 
 ## Rebuilding vendor files

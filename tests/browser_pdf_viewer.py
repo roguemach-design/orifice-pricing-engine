@@ -13,11 +13,11 @@ from browser_orders import seed_orders
 
 
 @contextmanager
-def workspace(state, api, *, mobile=False):
+def workspace(state, api, *, mobile=False, embedded=False, width=None):
     with sync_playwright() as p:
         browser = p.chromium.launch()
         context = browser.new_context(
-            viewport={"width": 390 if mobile else 1080, "height": 1000},
+            viewport={"width": width or (390 if mobile else 1080), "height": 1000},
             has_touch=mobile,
             is_mobile=mobile,
         )
@@ -34,9 +34,12 @@ def workspace(state, api, *, mobile=False):
         try:
             page.goto(state["ui"] + "/Quote")
             sign_in(page)
-            page.goto(state["ui"] + "/My_Orders")
-            page.get_by_role("button", name="View order", exact=True).click()
-            viewer = page.frame_locator(
+            page.goto(
+                api + "/orders-landing" if embedded else state["ui"] + "/My_Orders"
+            )
+            scope = page.frame_locator("#plate-configurator") if embedded else page
+            scope.get_by_role("button", name="View order", exact=True).click()
+            viewer = scope.frame_locator(
                 'iframe[title="customer_pdf_viewer.oplates_approved_pdf"]'
             )
             yield page, viewer, context, browser
@@ -313,3 +316,42 @@ def test_review_capture_in_actual_landing_shell(customer_app, width, tmp_path):
         ).to_be_visible()
         wait_pdf(viewer)
         page.screenshot(path=str(tmp_path / f"viewer-{name}-fullscreen.png"))
+
+
+@pytest.mark.parametrize("width", [390, 1080, 1920])
+def test_embedded_fullscreen_exit_restores_position_and_immediate_download(
+    customer_app, width, tmp_path
+):
+    """Native fullscreen must return to the drawing, not strand its iframe off-screen."""
+    state, api = customer_app
+    pdf, digest = seed_orders(state)
+    with workspace(state, api, embedded=True, width=width, mobile=width == 390) as (
+        page,
+        viewer,
+        context,
+        browser,
+    ):
+        viewer.get_by_role("button", name="Fit page", exact=True).click()
+        wait_pdf(viewer)
+        page.evaluate("""() => {
+          document.addEventListener('fullscreenchange', () => {
+            if (document.fullscreenElement) window.fullscreenEntryY = scrollY;
+          });
+        }""")
+        for _ in range(3):
+            viewer.locator("canvas").scroll_into_view_if_needed()
+            viewer.get_by_role("button", name="Full screen", exact=True).click()
+            expect(
+                viewer.get_by_role("button", name="Exit full screen", exact=True)
+            ).to_be_visible()
+            viewer.get_by_role("button", name="Exit full screen", exact=True).click()
+            page.wait_for_function("!document.fullscreenElement")
+            assert abs(page.evaluate("scrollY - window.fullscreenEntryY")) <= 1
+            with page.expect_download() as result:
+                viewer.get_by_role(
+                    "button", name="Download approved PDF", exact=True
+                ).click()
+            assert Path(result.value.path()).read_bytes() == pdf
+            assert sha256(Path(result.value.path()).read_bytes()).hexdigest() == digest
+            wait_pdf(viewer)
+        page.screenshot(path=str(tmp_path / f"fullscreen-return-{width}.png"))

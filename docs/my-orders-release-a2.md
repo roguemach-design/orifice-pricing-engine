@@ -47,16 +47,31 @@ fallback and require manual device acceptance before claiming that platform.
 
 ## Static host dependency and later deployment order
 
-The existing landing iframe gains ONLY `allow="fullscreen"`. No host width,
-navigation, authentication, JavaScript bridge or service configuration is changed.
-This permission delegation is required for cross-origin browser fullscreen.
+The existing landing iframe gains `allow="fullscreen"`, required for cross-origin
+browser fullscreen. Its existing configurator.js also saves/cancels/restores host
+scroll position for native fullscreen. The customer-side layout bridge suppresses
+height feedback while the PDF iframe is fullscreen and resynchronizes on exit.
+No host width, navigation, authentication or service configuration is changed.
+
+The prior candidate passed one 43-case CI run but failed another at the immediate
+post-fullscreen download. A local event trace reproduced that same timeout: the
+outer host jumped from scrollY 1448 to 4188 on exit; the nested button remained
+enabled at the same local rectangle and received no download click. Freezing height
+feedback alone had not fixed it. The new browser regression reproduced a 2744 px
+host-position mismatch before the host scroll repair. It checks three enter/exit/
+immediate exact-byte download cycles at 390, 1080 and 1920 px. No forced clicks,
+artificial click delays, weakened assertions or drawing-generation changes are used.
+Local diagnostics used Chromium 153; exact-release CI uses pinned Playwright 1.58's
+Chromium 145. Both the original suite and the new regression must pass before
+engineering acceptance.
 
 After separate owner release authorization:
 
 1. Verify the running API is healthy at the approved isolated API SHA; no API deploy
    or migration is required for Release A.
-2. Compare the one-line landing iframe permission change against the actual running
-   landing commit. Prepare a landing-only commit from that verified baseline and
+2. Compare the landing iframe permission and focused fullscreen scroll handler
+   against the actual running landing commit. Prepare a landing-only commit from
+   that verified baseline and
    deploy/verify it before enabling the final customer viewer in the embedded site.
    Do not substitute the customer-based tree for an unverified landing baseline.
 3. Deploy the exact accepted A2 customer candidate (which includes A1). Verify
