@@ -1,0 +1,115 @@
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: #111823;
+  color: #e9eef7;
+  font:
+    14px system-ui,
+    sans-serif;
+}
+#viewer {
+  border: 1px solid #263449;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #111823;
+}
+#toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 10px;
+  border-bottom: 1px solid #263449;
+}
+button {
+  min-height: 44px;
+  padding: 7px 12px;
+  background: #17263b;
+  color: #e9eef7;
+  border: 1px solid #354764;
+  border-radius: 6px;
+  font: inherit;
+  cursor: pointer;
+}
+button:hover {
+  border-color: #6ee7ff;
+}
+button:focus-visible,
+#surface:focus-visible {
+  outline: 3px solid #6ee7ff;
+  outline-offset: -3px;
+}
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+#download {
+  color: #6ee7ff;
+  margin-left: auto;
+}
+#pages {
+  min-width: 70px;
+}
+#status,
+.hint {
+  padding: 0 12px;
+  font-size: 12px;
+  color: #b2bed3;
+  overflow-wrap: anywhere;
+}
+#surface {
+  height: 830px;
+  overflow: auto;
+  background: #202b3a;
+  touch-action: none;
+  cursor: grab;
+  overscroll-behavior: contain;
+  padding: 12px;
+}
+canvas {
+  display: block;
+  background: white;
+  margin: 0 auto;
+  max-width: none;
+}
+#surface.dragging {
+  cursor: grabbing;
+}
+#viewer:fullscreen {
+  width: 100vw;
+  height: 100dvh;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+}
+#viewer:fullscreen #surface {
+  height: auto;
+  flex: 1;
+  min-height: 0;
+}
+#viewer:fullscreen .hint {
+  flex: 0 0 auto;
+}
+@media (max-width: 500px) {
+  #toolbar {
+    gap: 5px;
+    padding: 8px;
+  }
+  button {
+    padding: 7px 9px;
+    font-size: 12px;
+  }
+  #download {
+    margin-left: 0;
+    flex: 1;
+  }
+  #surface {
+    height: 580px;
+    padding: 8px;
+  }
+  .hint {
+    font-size: 11px;
+  }
+}

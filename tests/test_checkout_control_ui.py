@@ -57,10 +57,15 @@ def test_my_orders_cannot_describe_test_approval_as_production(monkeypatch):
     for mode in ('OWNER TEST','TEST','LIVE'):
         order={'id':'order','payment_mode':mode,'order_number_display':'OP-TEST','quote_payload':{}}
         order.update(status='completed', lines=[{'line_id':'line-1','specifications':{'material':'304','quantity':1}}])
+        from pathlib import Path
+        from hashlib import sha256
+        pdf = (Path(__file__).parent/'fixtures/legacy-v3e.pdf').read_bytes()
         def get(path,**kwargs):
+            if path.endswith('/pdf'):
+                return SimpleNamespace(status_code=200, content=pdf, headers={'X-Artifact-SHA256':sha256(pdf).hexdigest(), 'X-Frozen-Revision':'r1'})
             data=([{'id':'plate','current_revision':'r1','line_id':'line-1','lifecycle':'CUSTOMER_APPROVED',
                     'revisions':[{'id':'r1','number':1,'current':True,'approved':True,'approved_at':None,
-                                  'created_at':None,'specifications':{}}]}]
+                                  'created_at':None,'specifications':{},'pdf_sha256':sha256(pdf).hexdigest(),'pdf_size':len(pdf),'filename':'drawing.pdf'}]}]
                   if path.endswith('/drawing-archive') else {'orders':[order],'total':1} if path=='/me/order-history' else order)
             return SimpleNamespace(status_code=200,json=lambda:data)
         monkeypatch.setattr(auth,'api_get',get)

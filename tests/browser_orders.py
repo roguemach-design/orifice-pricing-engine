@@ -8,12 +8,7 @@ from playwright.sync_api import sync_playwright, expect
 from browser_auth import customer_app, sign_in
 
 
-@pytest.mark.parametrize("embedded", [False, True])
-@pytest.mark.parametrize("width", [320, 375, 390, 768, 1080, 1920])
-def test_order_history_detail_archive_download_and_logout(
-    customer_app, width, embedded, tmp_path
-):
-    state, api = customer_app
+def seed_orders(state):
     pdf = (Path(__file__).parent / "fixtures/legacy-v3e.pdf").read_bytes()
     digest = sha256(pdf).hexdigest()
     order = dict(
@@ -67,6 +62,114 @@ def test_order_history_detail_archive_download_and_logout(
             )
         ],
     )
+    return pdf, digest
+
+
+def assert_painted(viewer):
+    viewer.locator("canvas").scroll_into_view_if_needed()
+    frame = viewer.locator("canvas").element_handle().owner_frame()
+    frame.wait_for_function(
+        "()=>{const c=document.querySelector('canvas');if(!c?.width||!c.height)return false;const d=c.getContext('2d').getImageData(0,0,c.width,c.height).data;let dark=0;for(let i=0;i<d.length;i+=4)if(d[i+3]>0&&d[i]<100&&d[i+1]<100&&d[i+2]<100)dark++;return dark>100;}",
+        timeout=5000,
+    )
+
+
+def click_drawing_control(page, viewer, name):
+    """Settle the host scroll before Playwright calculates nested-frame click coordinates.
+
+    A locally stable iframe button can still move globally while its host smooth-
+    scrolls. Waiting for the actual scrollend event avoids clicking the surrounding
+    Streamlit layout. This changes test interaction only, never viewer behavior.
+    """
+    control = viewer.get_by_role("button", name=name, exact=True)
+    expect(control).to_be_visible()
+    if page.locator("#plate-configurator").count() and not page.evaluate(
+        "Boolean(document.fullscreenElement)"
+    ):
+        box = control.bounding_box()
+        assert box is not None
+        page.evaluate(
+            """center => new Promise((resolve, reject) => {
+              const top = Math.round(Math.max(0, Math.min(
+                document.documentElement.scrollHeight - innerHeight,
+                scrollY + center - innerHeight / 2)));
+              let timer;
+              const done = () => {
+                if (Math.abs(scrollY - top) > 1) return;
+                document.removeEventListener('scrollend', done);
+                clearTimeout(timer);
+                resolve();
+              };
+              document.addEventListener('scrollend', done);
+              timer = setTimeout(() => {
+                document.removeEventListener('scrollend', done);
+                reject(Error('Host scroll did not reach the drawing control'));
+              }, 5000);
+              scrollTo({top, behavior: 'smooth'});
+              done();
+            })""",
+            box["y"] + box["height"] / 2,
+        )
+    control.click()
+
+
+def select_plate(page, scope, number, material, quantity, *, search=False):
+    """Open the real picker after its ancestor scroll has finished, then choose a named option."""
+    plate = scope.get_by_role("combobox", name="Select plate", exact=True)
+    plate.evaluate("""element => new Promise((resolve, reject) => {
+          const positions = new Map();
+          for (let p = element.parentElement; p; p = p.parentElement) {
+            if (p.scrollHeight > p.clientHeight || p.scrollWidth > p.clientWidth) {
+              positions.set(p === document.scrollingElement ? document : p,
+                {element: p, top: p.scrollTop, left: p.scrollLeft});
+            }
+          }
+          const pending = new Set();
+          let timer;
+          const cleanup = () => {
+            clearTimeout(timer);
+            for (const target of positions.keys()) target.removeEventListener('scrollend', ended);
+          };
+          const ended = event => {
+            pending.delete(event.currentTarget);
+            if (!pending.size) { cleanup(); resolve(); }
+          };
+          for (const target of positions.keys()) target.addEventListener('scrollend', ended);
+          timer = setTimeout(() => {
+            cleanup(); reject(Error('Plate selector ancestor scroll did not finish'));
+          }, 5000);
+          element.scrollIntoView({block: 'center', behavior: 'instant'});
+          for (const [target, old] of positions) {
+            if (old.element.scrollTop !== old.top || old.element.scrollLeft !== old.left) pending.add(target);
+          }
+          // Even without movement, flush any scroll event queued by the prior screenshot.
+          if (!pending.size) requestAnimationFrame(() => { cleanup(); resolve(); });
+        })""")
+    plate.click()
+    expect(plate).to_have_attribute("aria-expanded", "true")
+    label = f"Plate {number} · {material} · Qty {quantity}"
+    option = scope.get_by_role("option", name=label, exact=True)
+    expect(option).to_be_visible()
+    if search:
+        # The default fuzzy matcher can match "Plate 1" against material 316;
+        # use the complete label when asserting a single filtered result.
+        plate.fill(label)
+        expect(option).to_be_visible()
+        expect(scope.get_by_role("option")).to_have_count(1)
+    option.click()
+    expect(plate).to_have_value(label)
+    expect(
+        scope.get_by_role("heading", name=f"Plate {number} · {material}", exact=True)
+    ).to_be_visible()
+
+
+@pytest.mark.parametrize("embedded", [False, True])
+@pytest.mark.parametrize("width", [320, 375, 390, 768, 1080, 1920])
+def test_order_history_detail_archive_download_and_logout(
+    customer_app, width, embedded, tmp_path
+):
+    state, api = customer_app
+    pdf, digest = seed_orders(state)
     with sync_playwright() as p:
         browser = p.chromium.launch()
         context = browser.new_context(viewport={"width": width, "height": 1000})
@@ -157,18 +260,28 @@ def test_order_history_detail_archive_download_and_logout(
             expect(
                 scope.get_by_role("heading", name="Plate 1 · 304", exact=True)
             ).to_be_visible()
-            scope.get_by_role(
-                "button", name="View approved drawing", exact=True
-            ).click()
+            viewer = scope.frame_locator(
+                'iframe[title="customer_pdf_viewer.oplates_approved_pdf"]'
+            )
+            click_drawing_control(page, viewer, "Fit page")
+            expect(viewer.locator("#status")).to_contain_text("Verified stored PDF")
+            expect(viewer.locator("canvas")).to_be_visible()
+            assert_painted(viewer)
+            click_drawing_control(page, viewer, "Zoom in")
+            expect(viewer.locator("#zoom")).to_have_text("125%")
+            click_drawing_control(page, viewer, "Fit page")
+            expect(viewer.locator("#zoom")).to_have_text("100%")
+            click_drawing_control(page, viewer, "Full screen")
             expect(
-                scope.get_by_text("Stored drawing PDF · page 1", exact=True)
-            ).to_be_attached()
-            expect(scope.get_by_test_id("stImage").locator("img")).to_be_visible()
+                viewer.get_by_role("button", name="Exit full screen", exact=True)
+            ).to_be_visible()
+            click_drawing_control(page, viewer, "Exit full screen")
             with page.expect_download() as result:
-                scope.get_by_role(
-                    "button", name="Download approved PDF", exact=True
-                ).click()
+                click_drawing_control(page, viewer, "Download approved PDF")
+            expect(viewer.locator("#status")).to_contain_text("Verified stored PDF")
+            assert_painted(viewer)
             download = result.value
+            assert download.url.startswith("blob:")
             assert sha256(Path(download.path()).read_bytes()).hexdigest() == digest
             scope.locator(".st-key-orders_workspace").screenshot(
                 path=str(tmp_path / f"my-orders-{width}-drawing.png")
@@ -177,17 +290,8 @@ def test_order_history_detail_archive_download_and_logout(
                 "document.documentElement.scrollWidth <= window.innerWidth + 1"
             )
             expect(scope.get_by_test_id("stException")).to_have_count(0)
-            # Canonical plate/filter state must survive a real customer-route remount.
-            scope.get_by_role("combobox", name="Select plate", exact=True).click()
-            scope.get_by_role("combobox", name="Select plate", exact=True).press(
-                "ArrowDown"
-            )
-            scope.get_by_role("combobox", name="Select plate", exact=True).press(
-                "Enter"
-            )
-            expect(
-                scope.get_by_role("heading", name="Plate 2 · 316", exact=True)
-            ).to_be_visible()
+            # Use the same scroll/open/filter/option-click sequence as a customer.
+            select_plate(page, scope, 2, "316", 2, search=True)
             scope.get_by_role("link", name="Quote Cart", exact=True).click()
             expect(
                 scope.get_by_role("heading", name="Quote Cart", exact=True)
@@ -208,13 +312,6 @@ def test_order_history_detail_archive_download_and_logout(
                 scope.get_by_role("heading", name="OP-0016", exact=True)
             ).to_have_count(0)
         except Exception:
-            (tmp_path / "overflow.json").write_text(
-                __import__("json").dumps(
-                    scope.locator(".st-key-orders_workspace").evaluate(
-                        "e=>{const r=e.getBoundingClientRect();return{outer:{width:e.clientWidth,scroll:e.scrollWidth},bad:[...e.querySelectorAll('*')].map(x=>({tag:x.tagName,cl:x.className,id:x.dataset.testid,w:x.getBoundingClientRect().width,right:x.getBoundingClientRect().right-r.right,style:x.getAttribute('style'),html:x.outerHTML.slice(0,700),parent:x.parentElement?.outerHTML.slice(0,1000)})).filter(x=>x.right>1)}}"
-                    )
-                )
-            )
             page.screenshot(
                 path=str(tmp_path / f"my-orders-{width}-failure.png"), full_page=True
             )

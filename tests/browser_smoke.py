@@ -261,7 +261,9 @@ def test_actual_landing_host_renders_one_visible_drawing(configurator, width, tm
                 expect(source).to_be_visible(timeout=15000)
                 expect(source).to_have_css("visibility", "visible")
                 visible = source
-            visible.scroll_into_view_if_needed()
+            # Scroll the off-screen nested SVG before asking Playwright to wait
+            # for screenshot stability; its frame can be throttled off-screen.
+            visible.evaluate("el => el.scrollIntoView({block: 'center', behavior: 'instant'})")
             box = visible.bounding_box()
             assert box and box["width"] > 200 and box["height"] > 100
             assert visible.evaluate("el => Math.abs(el.clientWidth / el.clientHeight - el.viewBox.baseVal.width / el.viewBox.baseVal.height) < .02")

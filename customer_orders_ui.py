@@ -1,7 +1,6 @@
 """Customer order history and the exact stored approved PDF; no owner permissions."""
 
 from datetime import datetime
-from hashlib import sha256
 from io import BytesIO
 from html import escape
 from pathlib import Path
@@ -13,6 +12,7 @@ import streamlit as st
 
 from auth import api_get, api_post
 from customer_orders_state import clear_orders_state
+from customer_pdf_viewer import approved_pdf, verified_content
 from customer_safety import customer_product_details, service_message
 from frozen_plate.presentation import APPROVAL_COPY, BUTTON
 
@@ -122,32 +122,20 @@ def preview(content):
 
 
 def archived_drawing(order_id, revision):
+    if not revision.get("pdf_available", True):
+        st.info("The approved PDF is not available in this archive.")
+        return
     rid = quote(revision["id"], safe="")
     path = f'/me/orders/{quote(order_id, safe="")}/drawings/{rid}/pdf'
-    if st.button("View approved drawing", key="archive-view-" + revision["id"]):
-        st.session_state["orders_pdf_selection"] = (order_id, revision["id"])
-    if st.session_state.get("orders_pdf_selection") != (order_id, revision["id"]):
-        return
     response = get(path)
     if response is None:
         return
-    content = response.content
-    if (
-        response.headers.get("X-Artifact-SHA256") != revision["pdf_sha256"]
-        or response.headers.get("X-Frozen-Revision") != revision["id"]
-        or sha256(content).hexdigest() != revision["pdf_sha256"]
-        or len(content) != revision["pdf_size"]
-    ):
+    try:
+        content = verified_content(response, revision)
+    except ValueError:
         st.error("Drawing verification failed. No file was displayed or downloaded.")
         return
-    preview(content)
-    st.download_button(
-        "Download approved PDF",
-        content,
-        file_name=revision["filename"],
-        mime="application/pdf",
-        key="archive-download-" + revision["id"],
-    )
+    approved_pdf(content, revision, st.session_state.get("orders_owner"))
     st.caption("SHA-256 · " + revision["pdf_sha256"])
 
 
