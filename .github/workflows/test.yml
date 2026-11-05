@@ -40,22 +40,26 @@ jobs:
         run: |
           tesseract --version
           tesseract --list-langs | grep -Fx eng
+      - name: Install browser smoke test dependencies
+        run: |
+          python -m pip install playwright==1.58.0
+          python -m playwright install --with-deps chromium
+      - name: Focused lead-time and chamfer acceptance
+        run: python -m pytest -q tests/browser_rapid.py tests/browser_required.py tests/browser_smoke.py::test_actual_landing_host_renders_one_visible_drawing --basetemp=focused-browser-results
       - name: Run tests
         env:
           JOURNEY_CI_POSTGRES_URL: postgresql://postgres:synthetic-ci-only-password@localhost:5432/journey_ci
         run: python -m pytest -q
       - name: Compile Python sources
         run: python -m compileall -q .
-      - name: Install browser smoke test dependencies
-        run: |
-          python -m pip install playwright==1.58.0
-          python -m playwright install --with-deps chromium
       - name: Verify visible customer configurator SVG
-        run: python -m pytest -q tests/browser_smoke.py tests/browser_auth.py tests/browser_orders.py tests/browser_pdf_viewer.py tests/browser_required.py --basetemp=browser-results
+        run: python -m pytest -q tests/browser_smoke.py tests/browser_auth.py tests/browser_orders.py tests/browser_pdf_viewer.py tests/browser_required.py tests/browser_rapid.py --basetemp=browser-results
       - name: Save browser smoke evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: configurator-browser-${{ github.sha }}
-          path: browser-results/
+          path: |
+            browser-results/
+            focused-browser-results/
           if-no-files-found: ignore

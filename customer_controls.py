@@ -6,7 +6,8 @@ from material_labels import MATERIAL_COPY
 
 def choice_buttons(label, options, *, key, placeholder=None, committed_value=None, **kwargs):
     options = list(options)
-    value = st.session_state.get(key)
+    current = st.session_state.get(key)
+    value = current
     # An empty native required choice can be a transient remount, not a new
     # customer selection. Callers supply the current canonical snapshot when
     # recovery is appropriate; an unresolved snapshot remains None. Never use
@@ -15,10 +16,12 @@ def choice_buttons(label, options, *, key, placeholder=None, committed_value=Non
         value = committed_value
     if value not in options:
         value = None
-    # Reassert even an unchanged value (including None). Otherwise Streamlit can
-    # emit no set_value while the remounted browser uses its empty default.
+    # Writing an unchanged widget value forces set_value onto the browser wire.
+    # An older run can then overwrite an edit made while that run was rendering.
+    # Initialize/recover/reset only; native session persistence restores remounts.
     # A valid current customer edit always wins over the older snapshot.
-    st.session_state[key] = value
+    if key not in st.session_state or value != current:
+        st.session_state[key] = value
     value = st.segmented_control(
         label,
         options,

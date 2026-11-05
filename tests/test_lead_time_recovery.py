@@ -37,11 +37,13 @@ def test_remount_reasserts_the_selected_lead_time_on_the_browser_wire():
 
         if "quote_field_ships_in_days" not in st.session_state:
             st.session_state["quote_field_ships_in_days"] = 21
-        lead_time_choices("Lead time", [14, 21], key="quote_field_ships_in_days",
-                          committed_value=21)
+        if not st.checkbox("Hide lead time"):
+            lead_time_choices("Lead time", [14, 21], key="quote_field_ships_in_days",
+                              committed_value=21)
 
     app = AppTest.from_function(render).run()
-    app.run()
+    app.checkbox[0].check().run()
+    app.checkbox[0].uncheck().run()
     control = app.button_group(key="quote_field_ships_in_days")
     assert not app.exception and control.value == 21
     assert control.proto.set_value
